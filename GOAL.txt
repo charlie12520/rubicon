@@ -1,0 +1,23 @@
+/goal Ship the first validated local MVP loop for Rubicon, a local-first morning intelligence, trade tracker, and replay cockpit for an SPX 0DTE spread trader.
+
+Core MVP loop:
+Trader opens Rubicon -> Morning shows the macro/live/model premarket brief -> Replay imports AI STUFF/SPX tracker data -> trader reviews today's or a selected range's P/L and position metrics -> trader selects a session/trade -> replay charts advance through the day with scrub/autoplay -> optional wallet size persists locally.
+
+Required active docs:
+- AGENTS.md
+- WORKLOG.md
+- ACCEPTANCE_CRITERIA.md
+- VALIDATION.md
+
+Reference docs, read only when needed:
+- DECISIONS.md
+
+Implementation rules:
+- Read the root AI STUFF data inventory before changing importer behavior.
+- Keep the MVP local-first unless live broker/Google credentials are explicitly provided.
+- Do not leave fake wallet data in `data/wallet.json` after validation.
+- Build in small patches and map meaningful changes to acceptance criteria.
+- Any external integration behavior must have deterministic local fallback behavior.
+
+Stopping condition:
+Stop when the local app imports the available session data, renders the trade dashboard and replay cockpit, passes validation, and records browser/manual proof.

@@ -1,0 +1,198 @@
+.rrg {
+  --rrg-leading: #22c55e;
+  --rrg-weakening: #f59e0b;
+  --rrg-lagging: #ef4444;
+  --rrg-improving: #38bdf8;
+  position: relative;
+  width: 100%;
+  /* keep the plot a reasonable square in the wide cockpit panel */
+  max-width: 620px;
+}
+
+.rrg-svg {
+  max-width: 620px;
+}
+
+.rrg-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  touch-action: none;
+}
+
+.rrg-quadrant-fill {
+  opacity: 0.07;
+}
+
+.rrg-quadrant-label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.rrg-grid-line {
+  stroke: rgba(132, 150, 170, 0.1);
+  stroke-width: 1;
+}
+
+.rrg-origin-line {
+  stroke: rgba(132, 150, 170, 0.4);
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+}
+
+.rrg-axis-text {
+  fill: #8f9bad;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.rrg-axis-title {
+  fill: #aeb9c9;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.rrg-tail-seg {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* hollow observation ring — fill (bg) and stroke (series colour) set inline */
+.rrg-node {
+  transition: opacity 0.15s ease;
+}
+
+.rrg-head {
+  stroke: #05070a;
+  stroke-width: 1.5;
+  cursor: pointer;
+}
+
+.rrg-head-label {
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  paint-order: stroke;
+  stroke: #05070a;
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+
+.rrg-series {
+  transition: opacity 0.15s ease;
+}
+
+.rrg-series.dimmed {
+  opacity: 0.09;
+}
+
+.rrg-tooltip {
+  position: absolute;
+  z-index: 5;
+  min-width: 150px;
+  padding: 8px 10px;
+  background: rgba(10, 16, 28, 0.96);
+  border: 1px solid #243042;
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  color: #e5e7eb;
+  font-size: 12px;
+  pointer-events: none;
+  transform: translate(-50%, calc(-100% - 12px));
+}
+
+.rrg-tooltip-symbol {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.rrg-tooltip-swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.rrg-tooltip-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  color: #9ca3af;
+  font-variant-numeric: tabular-nums;
+}
+
+.rrg-tooltip-row b {
+  color: #e5e7eb;
+}
+
+.rrg-tooltip-quadrant {
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.rrg-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.rrg-legend-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  background: #0b1220;
+  border: 1px solid #1f2937;
+  border-radius: 999px;
+  color: #cbd5e1;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: border-color 0.12s ease, opacity 0.12s ease;
+}
+
+.rrg-legend-chip:hover,
+.rrg-legend-chip.active {
+  border-color: #3b4a61;
+}
+
+.rrg-legend-chip.dimmed {
+  opacity: 0.4;
+}
+
+.rrg-legend-swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+.rrg-legend-quadrant {
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.75;
+}
+
+.rrg-empty {
+  display: grid;
+  place-items: center;
+  min-height: 240px;
+  color: #6b7280;
+  font-size: 13px;
+  text-align: center;
+}

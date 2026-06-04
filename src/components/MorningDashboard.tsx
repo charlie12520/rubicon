@@ -41,10 +41,10 @@ import {
   fetchMorningLiveUpdates,
   refreshIbkrHoldings,
   triggerCalendarDesktopAlert,
+  triggerLiveUpdateDesktopAlert,
 } from "../api";
 import {
   calendarAlertTargets,
-  calendarEventStartAt,
   formatCalendarAlertStatus,
   nextCalendarAlertTarget,
   type CalendarAlertTarget,
@@ -61,9 +61,13 @@ import { formatLiveUpdateDisplayText } from "../liveUpdateDisplay";
 import { countNewLiveUpdates, mergeLiveUpdateList, preserveMorningBriefLiveUpdates } from "../morningLiveState";
 import { formatCurrency, formatNumber, formatSignedCurrency } from "../format";
 import { morningAutoArmDecision, morningAutoRefreshDecision } from "../morningAutoArm";
+import { estimatorLiveState, type EstimatorLiveState } from "../estimatorLiveState";
+import { easternDateKey } from "../easternDate";
 import { triggerLiveUpdateDesktopAlertBatch } from "../liveUpdateAlerts";
 import { FplIndicatorPanel } from "./FplIndicatorPanel";
+import { LiveSpreadEstimatorPanel } from "./LiveSpreadEstimatorPanel";
 import { SpreadResponsePanel } from "./SpreadResponsePanel";
+import { SpxHeatmapPanel } from "./SpxHeatmapPanel";
 
 type Props = {
   onOpenReplay: () => void;
@@ -72,7 +76,7 @@ type Props = {
   spreadSpeed: SpreadSpeedPayload | null;
 };
 
-type MorningScreen = "brief" | "signal" | "estimator";
+type MorningScreen = "brief" | "signal" | "estimator" | "heatmap";
 
 type CalendarAlertPopup = {
   event: MorningCalendarEvent;
@@ -83,8 +87,6 @@ type CalendarAlertPopup = {
 const LIVE_UPDATE_FILTER_STORAGE_KEY = "rubicon-live-update-word-filter";
 
 export function MorningDashboard({
-  onOpenReplay,
-  onSelectDate,
   selectedDate,
   spreadSpeed,
 }: Props) {
@@ -99,6 +101,7 @@ export function MorningDashboard({
   const [calendarClockTick, setCalendarClockTick] = useState(() => Date.now());
   const [holdings, setHoldings] = useState<IbkrHoldingsSnapshot | null>(null);
   const [holdingsLoading, setHoldingsLoading] = useState(false);
+  const [estimatorNowTick, setEstimatorNowTick] = useState(() => Date.now());
   const [holdingsMessage, setHoldingsMessage] = useState("");
   const [liveUpdateFilterText, setLiveUpdateFilterText] = useState(() => readStoredLiveUpdateFilter());
   const [liveUpdatesRefreshing, setLiveUpdatesRefreshing] = useState(false);
@@ -117,6 +120,8 @@ export function MorningDashboard({
   const notifiedCalendarEventIds = useRef<Set<string>>(new Set());
   const audioContext = useRef<AudioContext | null>(null);
   const selectedDateRef = useRef(selectedDate);
+  const holdingsRef = useRef<IbkrHoldingsSnapshot | null>(null);
+  const estimatorPollInFlight = useRef(false);
   const liveUpdateFilters = useMemo(() => parseLiveUpdateFilterText(liveUpdateFilterText), [liveUpdateFilterText]);
   const compiledLiveUpdateFilters = useMemo(() => compileLiveUpdateFilters(liveUpdateFilters), [liveUpdateFilters]);
 
@@ -287,6 +292,57 @@ export function MorningDashboard({
   }, [loadHoldings]);
 
   useEffect(() => {
+    holdingsRef.current = holdings;
+  }, [holdings]);
+
+  // 30s heartbeat so the live pill flips phases (LIVE -> STALE/CLOSED) at the
+  // boundaries even when holdings aren't changing. Self-contained — not coupled to
+  // the calendar-alert clock, which the user can disable.
+  useEffect(() => {
+    const id = window.setInterval(() => setEstimatorNowTick(Date.now()), 30_000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  // Auto-refresh the live Estimator: while viewing today inside the weekday market
+  // window, re-read the IBKR snapshot every 60s so the estimator reflects the
+  // server's 5-min pull without a manual click. Read-only — it never POSTs
+  // /refresh, so it can't open a competing IBKR connection (the server owns the
+  // unique-client-id TWS pull).
+  useEffect(() => {
+    const maybeRefreshEstimatorHoldings = () => {
+      if (document.visibilityState !== "visible" || estimatorPollInFlight.current) {
+        return;
+      }
+      const state = estimatorLiveState({
+        fetchedAt: holdingsRef.current?.fetchedAt ?? null,
+        autoRefreshConfigured: holdingsRef.current?.autoRefreshEt != null,
+        tracksToday: selectedDate === easternDateKey(),
+      });
+      if (!state.shouldPoll) {
+        return;
+      }
+      estimatorPollInFlight.current = true;
+      void loadHoldings().finally(() => {
+        estimatorPollInFlight.current = false;
+      });
+    };
+    maybeRefreshEstimatorHoldings();
+    const interval = window.setInterval(maybeRefreshEstimatorHoldings, 60_000);
+    return () => window.clearInterval(interval);
+  }, [loadHoldings, selectedDate]);
+
+  const estimatorLive = useMemo<EstimatorLiveState>(
+    () =>
+      estimatorLiveState({
+        now: new Date(estimatorNowTick),
+        fetchedAt: holdings?.fetchedAt ?? null,
+        autoRefreshConfigured: holdings?.autoRefreshEt != null,
+        tracksToday: selectedDate === easternDateKey(new Date(estimatorNowTick)),
+      }),
+    [holdings, selectedDate, estimatorNowTick],
+  );
+
+  useEffect(() => {
     const controller = new AbortController();
     void loadAiNotes(controller.signal);
     return () => controller.abort();
@@ -372,7 +428,7 @@ export function MorningDashboard({
     const matchingNewUpdates = alertableNewLiveUpdatesCompiled(updates, knownUpdateIds.current, compiledLiveUpdateFilters);
     if (alertArmed && hadBaseline && matchingNewUpdates.length) {
       playLiveUpdateAlerts(audioContext, matchingNewUpdates.length);
-      void triggerLiveUpdateDesktopAlertBatch(matchingNewUpdates, compiledLiveUpdateFilters, triggerCalendarDesktopAlert);
+      void triggerLiveUpdateDesktopAlertBatch(matchingNewUpdates, compiledLiveUpdateFilters, triggerLiveUpdateDesktopAlert);
     }
     knownUpdateIds.current = ids;
   }, [alertArmed, brief?.liveUpdates, compiledLiveUpdateFilters]);
@@ -451,54 +507,25 @@ export function MorningDashboard({
     }
   }, [calendarAlertsArmed]);
 
-  const testCalendarAlert = useCallback(() => {
-    const event =
-      calendarEvents.find((calendarEvent) => calendarEvent.sortMinute != null) ??
-      ({
-        id: "calendar-alert-test",
-        source: "RollCall",
-        date: selectedDate,
-        timeLabel: "Test",
-        sortMinute: 0,
-        title: "Rubicon calendar alert test",
-        impact: "political",
-      } satisfies MorningCalendarEvent);
-    const eventAt = calendarEventStartAt(event) ?? new Date(Date.now() + 60_000);
-    fireCalendarAlert({
-      alertAt: new Date(),
-      event,
-      eventAt,
-      millisUntilAlert: 0,
-    });
-  }, [calendarEvents, fireCalendarAlert, selectedDate]);
-
   const signalFrame = useMemo(() => latestSpreadFrame(spreadSpeed), [spreadSpeed]);
   const estimatorPick = signalFrame?.recommendCcs ?? signalFrame?.recommendPcs ?? null;
   const liveSourceCounts = useMemo(() => countLiveUpdateSources(brief?.liveUpdates ?? []), [brief?.liveUpdates]);
 
   return (
     <section className="morning-shell" aria-label="Morning cockpit">
-      <div className="morning-hero">
-        <div>
-          <h2>{selectedDate}</h2>
+      {screen !== "heatmap" && (
+        <div className="morning-hero">
+          <div>
+            <h2>{selectedDate}</h2>
+          </div>
+          <div className="morning-actions">
+            <button className="version-refresh-button" disabled={loading} onClick={() => void loadBrief(undefined, { refresh: true })} type="button">
+              <RefreshCcw size={14} />
+              {loading ? "Refreshing" : "Refresh Morning"}
+            </button>
+          </div>
         </div>
-        <div className="morning-actions">
-          <input
-            aria-label="Morning brief date"
-            className="date-input morning-date-input"
-            onChange={(event) => onSelectDate(event.target.value)}
-            type="date"
-            value={selectedDate}
-          />
-          <button className="version-refresh-button" disabled={loading} onClick={() => void loadBrief(undefined, { refresh: true })} type="button">
-            <RefreshCcw size={14} />
-            {loading ? "Refreshing" : "Refresh Morning"}
-          </button>
-          <button className="review-action-button" onClick={onOpenReplay} type="button">
-            Open Replay
-          </button>
-        </div>
-      </div>
+      )}
 
       <div className="morning-screen-tabs" role="tablist" aria-label="Morning screen">
         <button
@@ -528,6 +555,15 @@ export function MorningDashboard({
         >
           Estimator
         </button>
+        <button
+          className={screen === "heatmap" ? "active" : ""}
+          type="button"
+          role="tab"
+          aria-selected={screen === "heatmap"}
+          onClick={() => setScreen("heatmap")}
+        >
+          Heatmap
+        </button>
       </div>
 
       {screen === "brief" && <MorningSourceStrip sources={dateSources} error={error} loading={loading} />}
@@ -537,11 +573,10 @@ export function MorningDashboard({
           <MorningAgendaSection
             alertsArmed={calendarAlertsArmed}
             alertStatus={calendarAlertStatus}
-            dailyFxSource={sourceByLabel(dateSources, "DailyFX")}
             events={dateBrief?.combinedEvents ?? []}
+            macroSource={sourceByLabel(dateSources, "US macro")}
             majorEvents={dateBrief?.majorEvents ?? []}
             majorEventsSource={sourceByLabel(dateSources, "Major events")}
-            onTestAlert={testCalendarAlert}
             onToggleAlerts={toggleCalendarAlerts}
             rollcallSource={sourceByLabel(dateSources, "RollCall")}
           />
@@ -626,10 +661,10 @@ export function MorningDashboard({
               </button>
             </div>
             {holdingsMessage && <div className="morning-holdings-message">{holdingsMessage}</div>}
-            <HoldingsList snapshot={holdings} />
+            <HoldingsList snapshot={holdings} todayYmd={selectedDate.replace(/-/g, "")} />
           </section>
 
-          <section className="morning-panel">
+          <section className="morning-panel morning-ainotes-panel">
             <MorningPanelHeading icon={<Sparkles size={16} />} label="AI Notes" title="Codex automation diary notes" />
             <AiNotesPanel error={aiNotesError} notes={dateAiNotes} />
           </section>
@@ -645,20 +680,32 @@ export function MorningDashboard({
           signalFrame={signalFrame}
           targetNetDelta={spreadSpeed?.targetNetDelta ?? 0.05}
         />
+      ) : screen === "heatmap" ? (
+        <SpxHeatmapPanel />
       ) : (
         <section className="morning-panel morning-estimator-panel">
-          <MorningPanelHeading icon={<Sparkles size={16} />} label="Estimator" title="Spread response — credit vs level" />
-          <p className="morning-muted">
-            How much a 5-wide 0DTE credit spread's price moves as SPX travels toward a level — self-calibrated from the current credit, prefilled from the recommended spread when a session frame is available.
-          </p>
-          <SpreadResponsePanel
-            defaultSpot={signalFrame?.spot ?? null}
-            currentLabel={signalFrame?.label}
-            seedSide={signalFrame?.recommendCcs ? "call_credit" : signalFrame?.recommendPcs ? "put_credit" : undefined}
-            seedShortStrike={estimatorPick?.shortStrike}
-            seedWidth={estimatorPick ? Math.abs(estimatorPick.longStrike - estimatorPick.shortStrike) : undefined}
-            seedCredit={estimatorPick?.value ?? undefined}
+          <MorningPanelHeading icon={<Sparkles size={16} />} label="Estimator" title="0DTE SPX spread estimator" />
+          <LiveSpreadEstimatorPanel
+            holdings={holdings}
+            todayEt={selectedDate}
+            refreshing={holdingsLoading}
+            onRefresh={() => void refreshHoldings()}
+            live={estimatorLive}
           />
+          <details className="morning-estimator-custom" style={{ marginTop: 14 }}>
+            <summary style={{ cursor: "pointer", fontSize: 12, color: "#9ca3af" }}>Custom spread (what-if)</summary>
+            <p className="morning-muted" style={{ marginTop: 8 }}>
+              How a 5-wide 0DTE credit spread's price moves as SPX travels toward a level — self-calibrated from the current credit, prefilled from the recommended spread when a session frame is available.
+            </p>
+            <SpreadResponsePanel
+              defaultSpot={signalFrame?.spot ?? null}
+              currentLabel={signalFrame?.label}
+              seedSide={signalFrame?.recommendCcs ? "call_credit" : signalFrame?.recommendPcs ? "put_credit" : undefined}
+              seedShortStrike={estimatorPick?.shortStrike}
+              seedWidth={estimatorPick ? Math.abs(estimatorPick.longStrike - estimatorPick.shortStrike) : undefined}
+              seedCredit={estimatorPick?.value ?? undefined}
+            />
+          </details>
         </section>
       )}
 
@@ -787,28 +834,26 @@ function MorningSourceStrip({ sources, error, loading }: { sources: MorningBrief
 export function MorningAgendaSection({
   alertsArmed,
   alertStatus,
-  dailyFxSource,
   events,
+  macroSource,
   majorEvents,
   majorEventsSource,
-  onTestAlert,
   onToggleAlerts,
   rollcallSource,
 }: {
   alertsArmed: boolean;
   alertStatus: string;
-  dailyFxSource?: MorningBriefSource;
   events: MorningCalendarEvent[];
+  macroSource?: MorningBriefSource;
   majorEvents: MorningMajorEvent[];
   majorEventsSource?: MorningBriefSource;
-  onTestAlert: () => void;
   onToggleAlerts: () => void;
   rollcallSource?: MorningBriefSource;
 }) {
   return (
     <section className="morning-panel morning-calendar-panel">
       <div className="morning-calendar-topline">
-        <MorningPanelHeading icon={<CalendarDays size={16} />} label="Calendar" title="Today + major dates" />
+        <MorningPanelHeading icon={<CalendarDays size={16} />} label="Calendar" title="" />
         <button
           className={`morning-alert-button calendar ${alertsArmed ? "active" : ""}`}
           onClick={onToggleAlerts}
@@ -817,13 +862,10 @@ export function MorningAgendaSection({
           {alertsArmed ? <BellRing size={15} /> : <Bell size={15} />}
           {alertsArmed ? "Calendar Alerts Armed" : "Arm Calendar Alerts"}
         </button>
-        <button className="morning-alert-test-button" onClick={onTestAlert} type="button">
-          Test
-        </button>
       </div>
       <div className={`morning-calendar-alert-status ${alertsArmed ? "active" : ""}`}>{alertStatus}</div>
       <div className="morning-calendar-sources">
-        <SourceDot source={dailyFxSource} />
+        <SourceDot source={macroSource} />
         <SourceDot source={majorEventsSource} />
         <SourceDot source={rollcallSource} />
       </div>
@@ -1025,17 +1067,32 @@ function liveUpdateMetaLabel(update: MorningLiveUpdate): string | null {
   return update.author && update.author !== `@${update.trackedAccount}` ? update.author : null;
 }
 
-function HoldingsList({ snapshot }: { snapshot: IbkrHoldingsSnapshot | null }) {
+function isSpxZeroDte(position: IbkrHoldingPosition, todayYmd: string): boolean {
+  if (position.securityType !== "OPT") {
+    return false;
+  }
+  const isSpx = position.symbol === "SPX" || position.tradingClass === "SPXW" || position.tradingClass === "SPX";
+  if (!isSpx) {
+    return false;
+  }
+  const expiration = (position.expiration ?? "").replace(/-/g, "");
+  return expiration.length === 8 && expiration === todayYmd;
+}
+
+function HoldingsList({ snapshot, todayYmd }: { snapshot: IbkrHoldingsSnapshot | null; todayYmd: string }) {
   if (!snapshot || snapshot.status !== "ok") {
     return <div className="review-empty">Live holdings will appear after the next IBKR pull.</div>;
   }
-  if (!snapshot.positions.length) {
+  // Exclude SPX 0DTE option legs (e.g. SPXW spreads expiring today) from the
+  // holdings panel — they are tracked separately and otherwise flood this list.
+  const positions = snapshot.positions.filter((position) => !isSpxZeroDte(position, todayYmd));
+  if (!positions.length) {
     return <div className="review-empty">No open IBKR positions were reported.</div>;
   }
 
   return (
     <div className="morning-holdings-list">
-      {snapshot.positions.slice(0, 12).map((position) => (
+      {positions.slice(0, 12).map((position) => (
         <HoldingRow key={`${position.account}-${position.localSymbol}-${position.position}`} position={position} />
       ))}
     </div>
@@ -1152,8 +1209,11 @@ function RecommendedSpreadCard({
   side: "PCS" | "CCS";
 }) {
   return (
-    <div className={`morning-rec-card ${side.toLowerCase()}`}>
-      <span>{side === "PCS" ? "Put credit spread" : "Call credit spread"}</span>
+    <div className={`morning-rec-card ${side.toLowerCase()} ${pick ? "recommended" : ""}`}>
+      <div className="morning-rec-card-top">
+        <span>{side === "PCS" ? "Put credit spread" : "Call credit spread"}</span>
+        {pick && <b>Recommended</b>}
+      </div>
       {pick ? (
         <>
           <strong>{pick.shortStrike}/{pick.longStrike}</strong>
@@ -1161,6 +1221,7 @@ function RecommendedSpreadCard({
             ${pick.dollarPerPoint}/pt - delta {pick.netDelta.toFixed(3)} - {pick.regime}
           </small>
           {pick.value != null && <em>Mark ${pick.value.toFixed(2)}</em>}
+          {frame && <small>{frame.label} - SPX {formatNumber(frame.spot)} - EM {formatNumber(frame.em)}pt</small>}
         </>
       ) : (
         <>

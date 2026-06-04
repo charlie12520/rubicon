@@ -2,9 +2,9 @@
 
 ```yaml
 core_loop_status: GREEN
-active_acceptance_id: A144
-green_count: 142
-green_id_summary: "A01-A12, A14-A19, A21-A144"
+active_acceptance_id: A146
+green_count: 144
+green_id_summary: "A01-A12, A14-A19, A21-A146"
 yellow_count: 0
 red_count: 0
 deferred_count: 2
@@ -22,12 +22,14 @@ blocked_count: 0
 
 | ID | Requirement | Status | Proof |
 |---|---|---:|---|
-| A144 | Morning SPX Heatmap nests sector → industry → stock on the Finviz taxonomy, with dual-class holdings merged into one tile | GREEN | New `data/finviz-classification.json` (500 S&P 500 names, 11 Finviz sectors, transcribed from Finviz's map and reconciled vs the live SPY-holdings universe). `server/spxHeatmap.ts` folds GOOG→GOOGL / FOX→FOXA / NWS→NWSA into one weight-summed, %-blended tile (503→500) via `mergeDualClassTiles`, overlays Finviz sector+industry per tile via `applyClassification`, and re-derives sector aggregates via `computeSectors`; `SpxHeatmapTile` gains `industry`; `src/components/SpxHeatmapPanel.tsx` renders a 3-level squarified treemap (sector → industry sub-block/caption → stock). `npm run typecheck` clean, Vitest 377/377 (incl. 2 new loader tests), `npm run build` passed; served `:5183` → `/api/spx-heatmap` returns 500 Finviz-sectored tiles and the treemap renders sector→industry→stock with GOOGL as one merged tile. |
+| A146 | SPX Heatmap hover shows a Finviz-style sub-industry panel — every stock in the hovered tile's sector+industry with its daily % change | GREEN | New pure `src/heatmapPeers.ts#industryPeers(tiles, sector, industry)` (filter by sector+industry, sort by weight; +3 tests) feeds a rebuilt hover tooltip in `src/components/SpxHeatmapPanel.tsx`: the hovered stock on top, then every sub-industry peer as a colour-swatch + ticker + last + signed % row (heaviest first), with edge-aware positioning + max-height clamp; styles in `src/components/SpxHeatmap.css`. `npm run typecheck` clean; focused Vitest 10/10; `npm run build` OK; served `:5185`, hovered NVDA → "SEMICONDUCTORS · 13" with all 13 names + % changes (2× screenshot verified). 1 unrelated `dateIssueBadges` red (concurrent daily-pull WIP). |
 
 ## Recent Deltas
 
 | ID | Requirement | Status | Proof |
 |---|---|---:|---|
+| A145 | Estimator auto-refreshes live 0DTE SPX spreads every 5 min on weekdays from 09:30 ET, with a LIVE / Stale / Pre-market / Closed indicator | GREEN | Server already pulls holdings every 5 min on weekdays 09:30–16:15 ET (`armIbkrHoldingsAutoRefresh`); added the missing client side. New pure `src/estimatorLiveState.ts` — LIVE only when in the weekday window, viewing today, and `fetchedAt` is fresh (≤ ~2× the 5 min interval); STALE / PRE_MARKET / CLOSED otherwise; badge greys at 16:00 even though pulls run to 16:15 (+9 unit tests). `MorningDashboard` adds a visibility-gated 60 s read-only poll of `/api/ibkr-holdings` (never POSTs /refresh → no competing TWS connection) that runs only while viewing today inside the window, plus a 30 s heartbeat. `LiveSpreadEstimatorPanel` shows a pulsing green "LIVE · auto every 5m · updated HH:MM:SS" pill (amber Stale / grey Closed) via `.estimator-live-dot` CSS. `npm run typecheck` clean; new Vitest 9/9 and 397 prior pass (1 unrelated `dateIssueBadges` red from concurrent daily-pull WIP); `vite build` OK. |
+| A144 | Morning SPX Heatmap nests sector → industry → stock on the Finviz taxonomy, with dual-class holdings merged into one tile | GREEN | New `data/finviz-classification.json` (500 S&P 500 names, 11 Finviz sectors, transcribed from Finviz's map and reconciled vs the live SPY-holdings universe). `server/spxHeatmap.ts` folds GOOG→GOOGL / FOX→FOXA / NWS→NWSA into one weight-summed, %-blended tile (503→500) via `mergeDualClassTiles`, overlays Finviz sector+industry per tile via `applyClassification`, and re-derives sector aggregates via `computeSectors`; `SpxHeatmapTile` gains `industry`; `src/components/SpxHeatmapPanel.tsx` renders a 3-level squarified treemap (sector → industry sub-block/caption → stock). `npm run typecheck` clean, Vitest 377/377 (incl. 2 new loader tests), `npm run build` passed; served `:5183` → `/api/spx-heatmap` returns 500 Finviz-sectored tiles and the treemap renders sector→industry→stock with GOOGL as one merged tile. |
 | A143 | Morning > Estimator centers on live IBKR 0DTE SPX spreads with a per-spread move and an aggregate portfolio response | GREEN | New `src/spreadEstimator.ts` selects 0DTE SPXW verticals from the live holdings pull; `src/portfolioResponse.ts` runs each through the existing Bachelier model on a shared SPX ladder and sums an aggregate P/L curve; `src/components/LiveSpreadEstimatorPanel.tsx` shows live spreads + aggregate as primary with the custom what-if demoted to a collapsed disclosure; `server/ibkrHoldings.ts` adds a 5-minute market-hours live pull. Full Vitest 375/375 and `vite build` passed; typecheck clean for new code. |
 | A142 | Morning macro calendar pulls/generates public-source timing for previously rated rows | GREEN | US macro calendar now emits MBA, ADP weekly/monthly, API crude, NAR existing-home sales, UMich preliminary sentiment, NY Empire State, and NAHB HMI timing events. Macro/Morning focused tests, typecheck, and build passed. |
 | A141 | FirstSquawk word-filter notifications use native Windows toast notifications | GREEN | Live update alert payloads now call `/api/desktop-alert/live-update`, which launches `scripts/show-windows-toast.ps1` through the existing `Rubicon.RubiconApp` AppUserModelID. Focused tests, PowerShell parser/script smoke, typecheck, build, browser smoke, and API smoke passed. |

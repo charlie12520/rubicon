@@ -18,6 +18,8 @@ import type {
   SpreadSpeedPayload,
   SpxHeatmapLiveStatus,
   SpxHeatmapPayload,
+  SpxLiveBarsLiveStatus,
+  SpxLiveBarsPayload,
   TrackerSnapshot,
   TradeJournalSnapshotSaveResult,
   TradeReviewFlag,
@@ -96,6 +98,10 @@ export function fetchRrgBars(signal?: AbortSignal): Promise<RrgBarsPayload> {
   return readJson<RrgBarsPayload>("/api/rrg/bars", { signal });
 }
 
+export function fetchSectorRrgBars(signal?: AbortSignal): Promise<RrgBarsPayload> {
+  return readJson<RrgBarsPayload>("/api/rrg/sectors", { signal });
+}
+
 export function fetchSpxHeatmap(signal?: AbortSignal): Promise<SpxHeatmapPayload> {
   return readJson<SpxHeatmapPayload>("/api/spx-heatmap", { signal });
 }
@@ -114,6 +120,26 @@ export function startSpxHeatmapLive(): Promise<SpxHeatmapLiveStatus> {
 
 export function stopSpxHeatmapLive(): Promise<SpxHeatmapLiveStatus> {
   return readJson<SpxHeatmapLiveStatus>("/api/spx-heatmap/live/stop", { method: "POST" });
+}
+
+export function fetchSpxLiveBars(signal?: AbortSignal): Promise<SpxLiveBarsPayload> {
+  return readJson<SpxLiveBarsPayload>("/api/spx-live-bars", { signal });
+}
+
+export function fetchSpxLiveBarsStatus(signal?: AbortSignal): Promise<SpxLiveBarsLiveStatus> {
+  return readJson<SpxLiveBarsLiveStatus>("/api/spx-live-bars/live/status", { signal });
+}
+
+export function startSpxLiveBars(): Promise<SpxLiveBarsLiveStatus> {
+  return readJson<SpxLiveBarsLiveStatus>("/api/spx-live-bars/live/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+}
+
+export function stopSpxLiveBars(): Promise<SpxLiveBarsLiveStatus> {
+  return readJson<SpxLiveBarsLiveStatus>("/api/spx-live-bars/live/stop", { method: "POST" });
 }
 
 export function fetchMorningBrief(date: string, signal?: AbortSignal, options: { refresh?: boolean } = {}): Promise<MorningBriefPayload> {
@@ -152,6 +178,18 @@ export function triggerCalendarDesktopAlert(payload: {
   title?: string;
 }): Promise<DesktopAlertResult> {
   return readJson<DesktopAlertResult>("/api/desktop-alert/calendar", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function triggerLiveUpdateDesktopAlert(payload: {
+  body: string;
+  detail?: string;
+  title?: string;
+}): Promise<DesktopAlertResult> {
+  return readJson<DesktopAlertResult>("/api/desktop-alert/live-update", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),

@@ -454,6 +454,36 @@ export type ReplayPayload = {
   quickTrades: TradeRecord[];
 };
 
+// Live SPX intraday bars written by scripts/refresh-spx-live-bars.py during the
+// session (a dedicated IBKR sidecar). The Estimator's 2-minute chart prefers
+// these over the post-close replay bars so the target-level line has a live SPX
+// backdrop mid-session.
+export type SpxLiveBarsPayload = {
+  generatedAt: string;
+  session: string; // YYYY-MM-DD ET the bars cover
+  source: string; // "ibkr-live" | "none"
+  live: boolean;
+  barSize: string; // e.g. "1 min"
+  asOf: string | null; // ET label ("HH:MM") of the latest bar, or null when empty
+  bars: SpxBar[];
+  note?: string;
+};
+
+// Status of the per-interval SPX live-bar sidecar process. Mirrors SpxHeatmapLiveStatus.
+export type SpxLiveBarsLiveStatus = {
+  running: boolean;
+  pid: number | null;
+  startedAt: string | null;
+  lastExit: { code: number | null; at: string } | null;
+  logTail: string[];
+  script: string;
+  python: string;
+  available: boolean;
+  autoStartEt: string | null;
+  autoStartLastFiredDate: string | null;
+  marketOpen: boolean; // true only during the RTH pull window (≈09:25–16:00 ET, Mon–Fri)
+};
+
 export type SpreadSpeedRegime = "FAST" | "MED" | "DEAD";
 
 export type SpreadSpeedRow = {
@@ -799,6 +829,9 @@ export type SpxHeatmapTile = {
   prevClose: number | null;
   pct: number | null; // % change at the latest available bucket (whole-session view)
   pctByTime: (number | null)[]; // % change aligned to `times`; null = no print yet that minute
+  iv: number | null; // annualized ATM implied vol (IBKR ~30-day, fraction e.g. 0.27); null when no live IV — drives the σ (IV-normalized) view
+  earningsDate: string | null; // next earnings report date YYYY-MM-DD (Nasdaq calendar), or null
+  earningsTime: "before-open" | "after-close" | "not-supplied" | null; // report timing; drives the earnings overlay
 };
 
 export type SpxHeatmapSector = {

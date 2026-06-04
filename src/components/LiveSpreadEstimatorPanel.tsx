@@ -1,9 +1,15 @@
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
-import type { IbkrHoldingsSnapshot } from "../../shared/types";
+import type { IbkrHoldingsSnapshot, SpxBar, SpxLiveBarsLiveStatus, TradeRecord } from "../../shared/types";
 import { buildPortfolioResponse } from "../portfolioResponse";
-import { selectOpenZeroDteSpxSpreads } from "../spreadEstimator";
+import {
+  activeSpreadsForResponse,
+  type EstimatorSpreadOption,
+  selectOpenZeroDteSpxSpreads,
+  todayClosedSpxSpreads,
+} from "../spreadEstimator";
 import { minutesToCloseFromLabel } from "../spreadResponse";
 import type { EstimatorLiveState } from "../estimatorLiveState";
+import { EstimatorSpxChart } from "./EstimatorSpxChart";
 
 type Props = {
   holdings: IbkrHoldingsSnapshot | null;
@@ -11,6 +17,23 @@ type Props = {
   refreshing?: boolean;
   onRefresh?: () => void;
   live?: EstimatorLiveState; // auto-refresh / freshness state for the LIVE pill
+  // Today's tracker trades — source for the closed-spread chips. Closed trades
+  // are study material only and never enter the portfolio aggregate.
+  trades?: TradeRecord[];
+  // SPX intraday bars for the 2-min chart (live feed preferred, replay fallback).
+  // May be empty before either source has data; the chart shows an empty-state.
+  spxBars?: SpxBar[];
+  // True when `spxBars` came from the live SPX feed (vs the post-close replay).
+  spxBarsLive?: boolean;
+  // Start/stop + status for the dedicated live SPX bar sidecar.
+  spxFeed?: SpxFeedControl;
+};
+
+type SpxFeedControl = {
+  status: SpxLiveBarsLiveStatus | null;
+  busy: boolean;
+  onStart: () => void;
+  onStop: () => void;
 };
 
 const muted: CSSProperties = { fontSize: 11, color: "#9ca3af" };
@@ -49,20 +72,62 @@ const timeOnly = (iso: string | null | undefined): string => {
   return Number.isNaN(d.getTime()) ? String(iso) : d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
 };
 
-export function LiveSpreadEstimatorPanel({ holdings, todayEt, refreshing, onRefresh, live }: Props) {
+export function LiveSpreadEstimatorPanel({ holdings, todayEt, refreshing, onRefresh, live, trades, spxBars, spxBarsLive, spxFeed }: Props) {
   const selection = useMemo(
     () => selectOpenZeroDteSpxSpreads(holdings?.positions ?? [], todayEt),
     [holdings, todayEt],
   );
+  // When there are no open SPX positions to read spot from (e.g. studying a
+  // closed trade after flatting), fall back to the latest SPX bar so the chart
+  // and curve still have a price reference.
+  const bars = spxBars ?? [];
+  const spot = useMemo(() => {
+    if (selection.spot != null) return selection.spot;
+    if (bars.length > 0) return bars[bars.length - 1].close;
+    return null;
+  }, [selection.spot, bars]);
+
   const minutesToClose = useMemo(() => currentMinutesToClose(), [holdings]);
+
+  const openOptions = useMemo<EstimatorSpreadOption[]>(
+    () => selection.spreads.map((spread) => ({ spread, status: "open" as const })),
+    [selection.spreads],
+  );
+  const closedOptions = useMemo<EstimatorSpreadOption[]>(
+    () => (spot != null && trades ? todayClosedSpxSpreads(trades, todayEt, spot) : []),
+    [trades, todayEt, spot],
+  );
+  const allOptions = useMemo<EstimatorSpreadOption[]>(
+    () => [...openOptions, ...closedOptions],
+    [openOptions, closedOptions],
+  );
+
+  const [focusedSpreadId, setFocusedSpreadId] = useState<string | null>(null);
+  // Auto-clear focus if the focused spread leaves the available set (e.g. a live
+  // pull removes the open spread, or the user changes the selected date).
+  useEffect(() => {
+    if (focusedSpreadId && !allOptions.some((option) => option.spread.id === focusedSpreadId)) {
+      setFocusedSpreadId(null);
+    }
+  }, [focusedSpreadId, allOptions]);
+  const focusedOption = useMemo(
+    () => (focusedSpreadId ? allOptions.find((option) => option.spread.id === focusedSpreadId) ?? null : null),
+    [focusedSpreadId, allOptions],
+  );
+
+  const activeSpreads = useMemo(
+    () => activeSpreadsForResponse(openOptions, allOptions, focusedSpreadId),
+    [openOptions, allOptions, focusedSpreadId],
+  );
+
   const response = useMemo(() => {
-    if (selection.spot == null || selection.spreads.length === 0) return null;
-    return buildPortfolioResponse(selection.spreads, { spot: selection.spot, minutesToClose });
-  }, [selection, minutesToClose]);
+    if (spot == null || activeSpreads.length === 0) return null;
+    return buildPortfolioResponse(activeSpreads, { spot, minutesToClose });
+  }, [activeSpreads, spot, minutesToClose]);
 
   const [level, setLevel] = useState<number | null>(null);
-  useEffect(() => setLevel(selection.spot), [selection.spot]);
-  const activeLevel = level ?? selection.spot ?? 0;
+  useEffect(() => setLevel(spot), [spot]);
+  const activeLevel = level ?? spot ?? 0;
 
   const refreshBtn = (
     <button
@@ -76,15 +141,37 @@ export function LiveSpreadEstimatorPanel({ holdings, todayEt, refreshing, onRefr
   );
 
   if (!response) {
+    // No active curve to plot — but if there are any chips to show (open OR
+    // closed) we still render the rail so the user can click into a closed
+    // trade for study.
+    if (allOptions.length === 0) {
+      return (
+        <section style={wrap}>
+          <Header asOf={holdings?.fetchedAt} openCount={0} totalContracts={0} spot={spot} refreshBtn={refreshBtn} live={live} focusedOption={null} onClearFocus={() => setFocusedSpreadId(null)} />
+          <p style={{ ...muted, marginTop: 10 }}>
+            {holdings == null
+              ? "Waiting for the IBKR positions pull…"
+              : spot == null
+                ? "No open 0DTE SPX option positions found in the live IBKR pull."
+                : "No 0DTE SPX vertical spreads could be formed from the current legs."}
+          </p>
+          {selection.unpaired.length > 0 && <UnpairedNote count={selection.unpaired.length} />}
+        </section>
+      );
+    }
     return (
       <section style={wrap}>
-        <Header asOf={holdings?.fetchedAt} count={0} totalContracts={0} spot={selection.spot} refreshBtn={refreshBtn} live={live} />
+        <Header asOf={holdings?.fetchedAt} openCount={openOptions.length} totalContracts={0} spot={spot} refreshBtn={refreshBtn} live={live} focusedOption={focusedOption} onClearFocus={() => setFocusedSpreadId(null)} />
+        <ChipRail
+          openOptions={openOptions}
+          closedOptions={closedOptions}
+          focusedSpreadId={focusedSpreadId}
+          onPick={setFocusedSpreadId}
+        />
         <p style={{ ...muted, marginTop: 10 }}>
-          {holdings == null
-            ? "Waiting for the IBKR positions pull…"
-            : selection.spot == null
-              ? "No open 0DTE SPX option positions found in the live IBKR pull."
-              : "No 0DTE SPX vertical spreads could be formed from the current legs."}
+          {spot == null
+            ? "Spot unknown — waiting for SPX intraday bars or an open SPX position."
+            : "Click a closed spread above to study it."}
         </p>
         {selection.unpaired.length > 0 && <UnpairedNote count={selection.unpaired.length} />}
       </section>
@@ -95,15 +182,26 @@ export function LiveSpreadEstimatorPanel({ holdings, todayEt, refreshing, onRefr
   const pnls = response.aggregate.map((p) => p.pnl);
   const worst = Math.min(...pnls);
   const best = Math.max(...pnls);
+  const pnlSign: 1 | -1 | 0 = pnlAtLevel > 0 ? 1 : pnlAtLevel < 0 ? -1 : 0;
+  const sliderMin = Math.min(response.levelMin, activeLevel);
+  const sliderMax = Math.max(response.levelMax, activeLevel);
+  const portfolioMode = focusedOption == null;
 
   return (
     <section style={wrap}>
-      <Header asOf={holdings?.fetchedAt} count={response.rows.length} totalContracts={response.totalContracts} spot={selection.spot} refreshBtn={refreshBtn} live={live} />
+      <Header asOf={holdings?.fetchedAt} openCount={openOptions.length} totalContracts={portfolioMode ? response.totalContracts : openOptions.reduce((sum, option) => sum + option.spread.contracts, 0)} spot={spot} refreshBtn={refreshBtn} live={live} focusedOption={focusedOption} onClearFocus={() => setFocusedSpreadId(null)} />
 
-      {/* Aggregate portfolio P/L vs SPX */}
+      <ChipRail
+        openOptions={openOptions}
+        closedOptions={closedOptions}
+        focusedSpreadId={focusedSpreadId}
+        onPick={setFocusedSpreadId}
+      />
+
+      {/* Aggregate / focused-spread P/L vs SPX */}
       <div style={{ marginTop: 10, display: "flex", gap: 20, flexWrap: "wrap", alignItems: "baseline" }}>
         <div>
-          <div style={muted}>portfolio P/L if SPX → {activeLevel.toFixed(0)} (move {activeLevel - response.spot >= 0 ? "+" : ""}{(activeLevel - response.spot).toFixed(0)}pt)</div>
+          <div style={muted}>{portfolioMode ? "portfolio" : "spread"} P/L if SPX → {activeLevel.toFixed(0)} (move {activeLevel - response.spot >= 0 ? "+" : ""}{(activeLevel - response.spot).toFixed(0)}pt)</div>
           <div style={{ fontSize: 22, fontWeight: 700, fontVariantNumeric: "tabular-nums", color: pnlAtLevel >= 0 ? "#22c55e" : "#ef4444" }}>{fmtUsd(pnlAtLevel)}</div>
         </div>
         <div>
@@ -120,10 +218,10 @@ export function LiveSpreadEstimatorPanel({ holdings, todayEt, refreshing, onRefr
         <span style={muted}>target level</span>
         <input
           type="range"
-          min={response.levelMin}
-          max={response.levelMax}
+          min={sliderMin}
+          max={sliderMax}
           step={1}
-          value={Math.min(Math.max(activeLevel, response.levelMin), response.levelMax)}
+          value={Math.min(Math.max(activeLevel, sliderMin), sliderMax)}
           onChange={(e) => setLevel(Number(e.target.value))}
           style={{ flex: 1, minWidth: 160 }}
         />
@@ -134,9 +232,21 @@ export function LiveSpreadEstimatorPanel({ holdings, todayEt, refreshing, onRefr
         </div>
       </div>
 
-      {/* Per-spread list */}
+      {/* SPX 2-min chart with a horizontal price line at the slider's target. */}
+      <div style={{ marginTop: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
+          <span style={{ ...muted, fontWeight: 600 }}>SPX intraday · 2m</span>
+          {bars.length > 0 && (
+            <span style={sourceBadge(spxBarsLive ? "#22c55e" : "#9ca3af")}>{spxBarsLive ? "LIVE" : "replay"}</span>
+          )}
+          <SpxFeedButton feed={spxFeed} />
+        </div>
+        <EstimatorSpxChart bars={bars} targetLevel={activeLevel} spot={spot} pnlSign={pnlSign} emptyNote={spxBarsEmptyNote(spxFeed)} />
+      </div>
+
+      {/* Per-spread list — shows all openOptions in portfolio mode, or just the focused row in focus mode. */}
       <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
-        <div style={{ ...muted, fontWeight: 600 }}>spreads</div>
+        <div style={{ ...muted, fontWeight: 600 }}>{portfolioMode ? "spreads" : "focused spread"}</div>
         {response.rows.map((row) => {
           const pnl = interpPnl(row.curve, activeLevel);
           const s = row.spread;
@@ -173,20 +283,133 @@ export function LiveSpreadEstimatorPanel({ holdings, todayEt, refreshing, onRefr
 
 const wrap: CSSProperties = { marginTop: 4, padding: "12px 14px", background: "#0b1220", border: "1px solid #1f2937", borderRadius: 10, color: "#e5e7eb" };
 
-function Header({ asOf, count, totalContracts, spot, refreshBtn, live }: { asOf?: string | null; count: number; totalContracts: number; spot: number | null; refreshBtn: ReactNode; live?: EstimatorLiveState }) {
+function Header({
+  asOf,
+  openCount,
+  totalContracts,
+  spot,
+  refreshBtn,
+  live,
+  focusedOption,
+  onClearFocus,
+}: {
+  asOf?: string | null;
+  openCount: number;
+  totalContracts: number;
+  spot: number | null;
+  refreshBtn: ReactNode;
+  live?: EstimatorLiveState;
+  focusedOption: EstimatorSpreadOption | null;
+  onClearFocus: () => void;
+}) {
+  const focusedSubtitle = (() => {
+    if (!focusedOption) return null;
+    const s = focusedOption.spread;
+    const tag = s.side === "call_credit" ? "CCS" : "PCS";
+    const head = `Focused: ${tag} ${s.shortStrike}/${s.longStrike} ×${s.contracts}`;
+    if (focusedOption.status === "open") return `${head} · open`;
+    const pieces = [head, "closed"];
+    if (focusedOption.exitTimeLabel) pieces.push(focusedOption.exitTimeLabel);
+    if (focusedOption.realisedPnl != null) {
+      pieces.push(`realised ${fmtUsd(focusedOption.realisedPnl)}`);
+    }
+    return `${pieces.join(" · ")} (study only — not in portfolio)`;
+  })();
   return (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
       <div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <h3 style={{ margin: 0, fontSize: 14 }}>Your live 0DTE SPX spreads</h3>
           <LivePill live={live} />
+          {focusedOption && (
+            <button
+              type="button"
+              onClick={onClearFocus}
+              title="Return to the live portfolio aggregate"
+              style={{ background: "#0f172a", border: "1px solid #38bdf8", color: "#38bdf8", borderRadius: 999, padding: "2px 9px", fontSize: 10.5, fontWeight: 700, letterSpacing: "0.02em", cursor: "pointer" }}
+            >
+              ← View Portfolio
+            </button>
+          )}
         </div>
         <div style={muted}>
-          {count} spread{count === 1 ? "" : "s"} · {totalContracts} contracts · SPX {spot != null ? spot.toFixed(2) : "—"} · positions as of {timeOnly(asOf)}
+          {focusedSubtitle ?? `${openCount} open spread${openCount === 1 ? "" : "s"} · ${totalContracts} contracts · SPX ${spot != null ? spot.toFixed(2) : "—"} · positions as of ${timeOnly(asOf)}`}
         </div>
       </div>
       {refreshBtn}
     </div>
+  );
+}
+
+// Horizontal chip rail of today's spreads. Open chips first (live colors), then
+// closed chips (muted, dashed). Clicking focuses the estimator on that single
+// spread; the View Portfolio button in the header restores the aggregate.
+function ChipRail({
+  openOptions,
+  closedOptions,
+  focusedSpreadId,
+  onPick,
+}: {
+  openOptions: EstimatorSpreadOption[];
+  closedOptions: EstimatorSpreadOption[];
+  focusedSpreadId: string | null;
+  onPick: (id: string) => void;
+}) {
+  if (openOptions.length === 0 && closedOptions.length === 0) return null;
+  return (
+    <div role="group" aria-label="Today's spreads" style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
+      {openOptions.map((option) => (
+        <SpreadChip key={option.spread.id} option={option} active={option.spread.id === focusedSpreadId} onClick={() => onPick(option.spread.id)} />
+      ))}
+      {openOptions.length > 0 && closedOptions.length > 0 && (
+        <span aria-hidden="true" style={{ width: 1, alignSelf: "stretch", background: "#1f2937", margin: "0 2px" }} />
+      )}
+      {closedOptions.map((option) => (
+        <SpreadChip key={option.spread.id} option={option} active={option.spread.id === focusedSpreadId} onClick={() => onPick(option.spread.id)} />
+      ))}
+    </div>
+  );
+}
+
+function SpreadChip({ option, active, onClick }: { option: EstimatorSpreadOption; active: boolean; onClick: () => void }) {
+  const s = option.spread;
+  const isCcs = s.side === "call_credit";
+  const tag = isCcs ? "CCS" : "PCS";
+  const sideColor = isCcs ? "#fca5a5" : "#93c5fd";
+  const open = option.status === "open";
+  const pnlColor = option.realisedPnl != null ? (option.realisedPnl >= 0 ? "#22c55e" : "#ef4444") : "#9ca3af";
+  const baseStyle: CSSProperties = {
+    display: "inline-flex",
+    flexDirection: "column",
+    alignItems: "flex-start",
+    gap: 1,
+    padding: "4px 8px",
+    background: open ? "#0a0f1a" : "rgba(10, 15, 26, 0.55)",
+    color: "#e5e7eb",
+    border: open ? "1px solid #1f2937" : "1px dashed #334155",
+    borderRadius: 8,
+    cursor: "pointer",
+    fontFamily: "inherit",
+    textAlign: "left",
+  };
+  const activeStyle: CSSProperties = active
+    ? { outline: "2px solid #38bdf8", outlineOffset: 0, borderColor: "#38bdf8", background: open ? "#0f172a" : "rgba(15, 23, 42, 0.7)" }
+    : {};
+  return (
+    <button type="button" aria-pressed={active} onClick={onClick} style={{ ...baseStyle, ...activeStyle }}>
+      <span style={{ fontSize: 12, fontWeight: 700, color: sideColor }}>{tag} {s.shortStrike}/{s.longStrike}</span>
+      <span style={{ fontSize: 10.5, color: open ? "#9ca3af" : "#6b7280", display: "flex", gap: 6, alignItems: "baseline" }}>
+        <span>×{s.contracts}</span>
+        {open ? (
+          <span>· credit {s.creditNow != null ? `$${s.creditNow.toFixed(2)}` : "—"}</span>
+        ) : (
+          <>
+            {option.exitTimeLabel && <span>· exited {option.exitTimeLabel}</span>}
+            {option.realisedPnl != null && <span style={{ color: pnlColor, fontWeight: 700 }}>· {fmtUsd(option.realisedPnl)}</span>}
+          </>
+        )}
+      </span>
+    </button>
   );
 }
 
@@ -217,6 +440,65 @@ function LivePill({ live }: { live?: EstimatorLiveState }) {
       <span className={`estimator-live-dot${live.pulsing ? " on" : ""}`} aria-hidden="true" />
       {live.label}
     </span>
+  );
+}
+
+function sourceBadge(color: string): CSSProperties {
+  return {
+    padding: "0px 6px",
+    borderRadius: 999,
+    border: `1px solid ${color}66`,
+    background: `${color}1a`,
+    color,
+    fontSize: 9.5,
+    fontWeight: 700,
+    letterSpacing: "0.04em",
+  };
+}
+
+function spxBarsEmptyNote(feed?: SpxFeedControl): string {
+  const status = feed?.status;
+  if (!status) return "Waiting for SPX intraday bars";
+  if (status.running) return "SPX feed running — first bars land within ~15s";
+  if (status.marketOpen === false) return "SPX feed runs 09:30–16:00 ET on weekdays";
+  if (status.available === false) return "SPX live-bar script not found on the server";
+  return "Start the SPX feed to see live intraday bars";
+}
+
+// Start/Stop control for the dedicated live SPX bar sidecar (mirrors the heatmap
+// feed button). Refuses to start outside the RTH window.
+function SpxFeedButton({ feed }: { feed?: SpxFeedControl }) {
+  if (!feed) return null;
+  const status = feed.status;
+  const running = Boolean(status?.running);
+  const btnStyle: CSSProperties = {
+    background: "#111827",
+    border: "1px solid #334155",
+    color: "#cbd5e1",
+    borderRadius: 6,
+    padding: "2px 8px",
+    fontSize: 10,
+    cursor: feed.busy ? "default" : "pointer",
+    whiteSpace: "nowrap",
+  };
+  if (running) {
+    return (
+      <button type="button" onClick={feed.onStop} disabled={feed.busy} style={btnStyle} title="Stop the live SPX bar feed">
+        ■ Stop SPX feed
+      </button>
+    );
+  }
+  const blocked = status?.marketOpen === false || status?.available === false;
+  return (
+    <button
+      type="button"
+      onClick={feed.onStart}
+      disabled={feed.busy || blocked}
+      style={{ ...btnStyle, opacity: blocked ? 0.5 : 1 }}
+      title={status?.marketOpen === false ? "Market closed — the SPX feed only runs 09:30–16:00 ET, Mon–Fri" : "Start the live SPX bar feed"}
+    >
+      {feed.busy ? "Starting…" : "▶ Start SPX feed"}
+    </button>
   );
 }
 

@@ -1,6 +1,7 @@
 // New to this codebase? Read codebase.md at the repo root first — it maps the whole project.
 import fs from "node:fs";
 import path from "node:path";
+import net from "node:net";
 import { fileURLToPath } from "node:url";
 import express from "express";
 import { invalidateTrackerSnapshotCache, loadReplayPayload, loadTrackerSnapshot, readWallet, writeReviewNote, writeWallet } from "./dataImporter.ts";
@@ -10,15 +11,17 @@ import { refreshGoogleDriveSnapshot } from "../scripts/refresh-google-drive-snap
 import { refreshIbkrWalletSnapshot } from "./ibkrWalletRefresh.ts";
 import { armIbkrHoldingsAutoRefresh, readIbkrHoldingsSnapshot, refreshIbkrHoldingsSnapshot } from "./ibkrHoldings.ts";
 import { getDailySyncStatus, startDailySync } from "./dailySync.ts";
+import { getDailySyncCatchupStatus, maybeRunDailySyncCatchup } from "./dailySyncCatchup.ts";
 import { maybeAutoRefreshGoogleDriveSnapshot } from "./googleSnapshotAutoRefresh.ts";
 import { loadSpreadSpeed } from "./spreadSpeed.ts";
 import { loadRrgBars } from "./rrgBars.ts";
 import { loadSpxHeatmap } from "./spxHeatmap.ts";
 import { armSpxHeatmapLiveAutoStart, getSpxHeatmapLiveStatus, startSpxHeatmapLive, stopSpxHeatmapLive } from "./spxHeatmapLive.ts";
+import { armSpxLiveBarsAutoStart, getSpxLiveBarsStatus, loadSpxLiveBars, startSpxLiveBars, stopSpxLiveBars } from "./spxLiveBars.ts";
 import { loadMorningBrief, loadMorningLiveUpdates, resolveTc2000Artifact } from "./morningBrief.ts";
 import { loadMorningAiNotes } from "./morningAiNotes.ts";
 import { writeTradeJournalSnapshot } from "./tradeJournalSnapshot.ts";
-import { showCalendarDesktopAlert } from "./desktopAlert.ts";
+import { showCalendarDesktopAlert, showLiveUpdateDesktopToast } from "./desktopAlert.ts";
 import {
   getGodelAlertBridgeStatus,
   godelBridgeBookmarklet,
@@ -66,6 +69,10 @@ app.get("/api/health", (_request, response) => {
 
 app.get("/api/tracker", async (_request, response, next) => {
   try {
+    const catchupStatus = await maybeRunDailySyncCatchup();
+    if (catchupStatus.refreshedDates.length) {
+      invalidateTrackerSnapshotCache();
+    }
     const googleAutoRefreshStatus = await maybeAutoRefreshGoogleDriveSnapshot();
     response.json(await loadTrackerSnapshot({ googleAutoRefreshStatus }));
   } catch (error) {
@@ -146,7 +153,11 @@ app.post("/api/ibkr-holdings/refresh", async (_request, response) => {
 
 app.get("/api/daily-sync/status", async (_request, response, next) => {
   try {
-    response.json(await getDailySyncStatus());
+    const status = await getDailySyncStatus();
+    response.json({
+      ...status,
+      catchup: getDailySyncCatchupStatus(),
+    });
   } catch (error) {
     next(error);
   }
@@ -220,6 +231,14 @@ app.get("/api/rrg/bars", async (_request, response, next) => {
   }
 });
 
+app.get("/api/rrg/sectors", async (_request, response, next) => {
+  try {
+    response.json(await loadRrgBars(appRoot, "sector-rrg-bars.json"));
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get("/api/spx-heatmap", async (_request, response, next) => {
   try {
     response.json(await loadSpxHeatmap(appRoot));
@@ -250,6 +269,42 @@ app.post("/api/spx-heatmap/live/start", async (request, response, next) => {
 app.post("/api/spx-heatmap/live/stop", async (_request, response, next) => {
   try {
     response.json(await stopSpxHeatmapLive());
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/spx-live-bars", async (_request, response, next) => {
+  try {
+    response.setHeader("Cache-Control", "no-store, max-age=0");
+    response.json(await loadSpxLiveBars(appRoot));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/spx-live-bars/live/status", async (_request, response, next) => {
+  try {
+    response.setHeader("Cache-Control", "no-store, max-age=0");
+    response.json(await getSpxLiveBarsStatus());
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/spx-live-bars/live/start", async (request, response, next) => {
+  try {
+    const clientId = request.body?.clientId ? Number(request.body.clientId) : undefined;
+    const ports = request.body?.ports ? String(request.body.ports) : undefined;
+    response.json(await startSpxLiveBars({ clientId, ports }));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/spx-live-bars/live/stop", async (_request, response, next) => {
+  try {
+    response.json(await stopSpxLiveBars());
   } catch (error) {
     next(error);
   }
@@ -353,6 +408,27 @@ app.post("/api/desktop-alert/calendar", (request, response) => {
   try {
     response.json(
       showCalendarDesktopAlert(
+        {
+          body: request.body?.body,
+          detail: request.body?.detail,
+          title: request.body?.title,
+        },
+        appRoot,
+      ),
+    );
+  } catch (error) {
+    response.status(400).json({
+      generatedAt: new Date().toISOString(),
+      message: error instanceof Error ? error.message : String(error),
+      ok: false,
+    });
+  }
+});
+
+app.post("/api/desktop-alert/live-update", (request, response) => {
+  try {
+    response.json(
+      showLiveUpdateDesktopToast(
         {
           body: request.body?.body,
           detail: request.body?.detail,
@@ -477,12 +553,35 @@ app.use((error: unknown, _request: express.Request, response: express.Response, 
 
 export function startRubiconServer(): ReturnType<typeof app.listen> {
   const listenHost = resolveRubiconListenHost();
-  return app.listen(port, listenHost, () => {
+  const server = app.listen(port, listenHost, () => {
     console.log(`Rubicon API listening on ${formatListenUrl(listenHost, port)}`);
     armFplLiveAutoStart();
     armIbkrHoldingsAutoRefresh();
     armSpxHeatmapLiveAutoStart();
+    armSpxLiveBarsAutoStart();
+    void maybeRunDailySyncCatchup().then((status) => {
+      if (status.refreshedDates.length) {
+        invalidateTrackerSnapshotCache();
+      }
+    });
   });
+  // Single-instance guard (backstop): if another Rubicon grabs the port in the
+  // race between the pre-bind probe (see entry point below) and this listen,
+  // bow out cleanly (exit 0) instead of crashing or drifting to another port.
+  // NOTE: Express 5 fires the listen() success callback even on a failed bind,
+  // so the PRIMARY protection is the probe — not this handler. See the
+  // launch-conflicts notes.
+  server.on("error", (error: NodeJS.ErrnoException) => {
+    if (error.code === "EADDRINUSE") {
+      console.warn(
+        `Rubicon already running on ${formatListenUrl(listenHost, port)}; this instance is exiting (single-instance guard).`,
+      );
+      process.exit(0);
+    }
+    console.error("Rubicon server failed to start:", error);
+    process.exit(1);
+  });
+  return server;
 }
 
 function isDirectRun(): boolean {
@@ -505,6 +604,36 @@ function firstQueryValue(value: unknown): string | undefined {
   return text || undefined;
 }
 
+function isPortInUse(host: string, candidatePort: number, timeoutMs = 1500): Promise<boolean> {
+  // Pre-bind probe: resolves true if something is already listening on the
+  // port. We must check BEFORE app.listen(), because Express 5 invokes the
+  // listen success callback (which arms the live-data schedulers) even when the
+  // bind ultimately fails with EADDRINUSE. Probing first means a duplicate
+  // launch exits without ever arming IBKR feeds or touching data/*.json.
+  const probeHost = host === "0.0.0.0" || host === "::" ? "127.0.0.1" : host;
+  return new Promise((resolve) => {
+    const socket = new net.Socket();
+    const settle = (inUse: boolean) => {
+      socket.destroy();
+      resolve(inUse);
+    };
+    socket.setTimeout(timeoutMs);
+    socket.once("connect", () => settle(true));
+    socket.once("timeout", () => settle(false));
+    socket.once("error", () => settle(false));
+    socket.connect(candidatePort, probeHost);
+  });
+}
+
 if (isDirectRun()) {
-  startRubiconServer();
+  const listenHost = resolveRubiconListenHost();
+  void isPortInUse(listenHost, port).then((inUse) => {
+    if (inUse) {
+      console.warn(
+        `Rubicon already running on ${formatListenUrl(listenHost, port)}; not starting a second instance (single-instance guard).`,
+      );
+      process.exit(0);
+    }
+    startRubiconServer();
+  });
 }

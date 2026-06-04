@@ -29,9 +29,13 @@ import type {
   MorningLiveUpdatesPayload,
   MorningMajorEvent,
   MorningTc2000Screener,
+  ReplayPayload,
   SpreadSpeedFrame,
   SpreadSpeedPayload,
   SpreadSpeedPick,
+  SpxLiveBarsLiveStatus,
+  SpxLiveBarsPayload,
+  TradeRecord,
 } from "../../shared/types";
 import {
   fetchIbkrHoldings,
@@ -39,7 +43,12 @@ import {
   fetchMorningAiNotes,
   fetchMorningBrief,
   fetchMorningLiveUpdates,
+  fetchReplay,
+  fetchSpxLiveBars,
+  fetchSpxLiveBarsStatus,
   refreshIbkrHoldings,
+  startSpxLiveBars,
+  stopSpxLiveBars,
   triggerCalendarDesktopAlert,
   triggerLiveUpdateDesktopAlert,
 } from "../api";
@@ -74,6 +83,10 @@ type Props = {
   onSelectDate: (date: string) => void;
   selectedDate: string;
   spreadSpeed: SpreadSpeedPayload | null;
+  // Today's tracker trades (passed down from App.tsx — TrackerSnapshot.trades is
+  // the source for closed-spread chips in the Estimator). May be empty before
+  // the tracker fetch lands.
+  trades?: TradeRecord[];
 };
 
 type MorningScreen = "brief" | "signal" | "estimator" | "heatmap";
@@ -89,6 +102,7 @@ const LIVE_UPDATE_FILTER_STORAGE_KEY = "rubicon-live-update-word-filter";
 export function MorningDashboard({
   selectedDate,
   spreadSpeed,
+  trades,
 }: Props) {
   const [brief, setBrief] = useState<MorningBriefPayload | null>(null);
   const [aiNotes, setAiNotes] = useState<MorningAiNotesPayload | null>(null);
@@ -103,6 +117,15 @@ export function MorningDashboard({
   const [holdingsLoading, setHoldingsLoading] = useState(false);
   const [estimatorNowTick, setEstimatorNowTick] = useState(() => Date.now());
   const [holdingsMessage, setHoldingsMessage] = useState("");
+  // Replay payload (today's SPX bars + quickTrades) for the Estimator's SPX 2m
+  // chart. During a live mid-session `data/spx_intraday` may be empty until the
+  // post-close pull runs — the live SPX bar feed below fills that gap.
+  const [replay, setReplay] = useState<ReplayPayload | null>(null);
+  // Live SPX intraday bars (dedicated IBKR sidecar) — preferred over the replay
+  // bars during the session so the Estimator chart is live, not post-close.
+  const [spxLiveBars, setSpxLiveBars] = useState<SpxLiveBarsPayload | null>(null);
+  const [spxBarsStatus, setSpxBarsStatus] = useState<SpxLiveBarsLiveStatus | null>(null);
+  const [spxFeedBusy, setSpxFeedBusy] = useState(false);
   const [liveUpdateFilterText, setLiveUpdateFilterText] = useState(() => readStoredLiveUpdateFilter());
   const [liveUpdatesRefreshing, setLiveUpdatesRefreshing] = useState(false);
   const [liveUpdatesCheckedAt, setLiveUpdatesCheckedAt] = useState<string | null>(null);
@@ -231,6 +254,60 @@ export function MorningDashboard({
     }
   }, []);
 
+  // Load today's replay payload (SPX bars) for the Estimator's SPX 2m chart.
+  // The replay endpoint is the only existing source for SPX intraday bars; it
+  // returns whatever the daily pull has written so far. If nothing is on disk
+  // we just keep `replay = null` and let the panel render its empty-state.
+  const loadReplay = useCallback(
+    async (signal?: AbortSignal) => {
+      if (!selectedDate) return;
+      try {
+        const next = await fetchReplay(selectedDate, undefined, signal);
+        setReplay(next);
+      } catch (nextError) {
+        if (!isAbortLike(nextError)) {
+          // Soft-fail: the chart will just show its waiting-state. The Estimator
+          // P/L curve, chip rail, and slider all continue to work without bars.
+          setReplay(null);
+        }
+      }
+    },
+    [selectedDate],
+  );
+
+  // Live SPX bars + feed status (the dedicated sidecar). Read-only; the feed is
+  // a separate process that the server auto-starts ~09:28 ET (or the user starts
+  // from the chart control).
+  const loadSpxBars = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const next = await fetchSpxLiveBars(signal);
+      setSpxLiveBars(next);
+    } catch (nextError) {
+      if (!isAbortLike(nextError)) setSpxLiveBars(null);
+    }
+  }, []);
+  const loadSpxBarsStatus = useCallback(async (signal?: AbortSignal) => {
+    try {
+      setSpxBarsStatus(await fetchSpxLiveBarsStatus(signal));
+    } catch {
+      // status is optional chrome; ignore failures
+    }
+  }, []);
+  const runSpxFeedAction = useCallback(
+    (action: () => Promise<SpxLiveBarsLiveStatus>) => {
+      setSpxFeedBusy(true);
+      action()
+        .then((status) => setSpxBarsStatus(status))
+        .catch(() => undefined)
+        .finally(() => {
+          setSpxFeedBusy(false);
+          // The first bars land within ~15s of starting — pull a couple of times.
+          [3000, 9000, 18000].forEach((ms) => window.setTimeout(() => void loadSpxBars(), ms));
+        });
+    },
+    [loadSpxBars],
+  );
+
   const loadAiNotes = useCallback(
     async (signal?: AbortSignal) => {
       if (!selectedDate) {
@@ -290,6 +367,31 @@ export function MorningDashboard({
     void loadHoldings(controller.signal);
     return () => controller.abort();
   }, [loadHoldings]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadReplay(controller.signal);
+    return () => controller.abort();
+  }, [loadReplay]);
+
+  // Live SPX bars + feed status — poll only while the Estimator screen is open
+  // and the tab is visible (the feed file refreshes ~every 15s).
+  useEffect(() => {
+    if (screen !== "estimator") return;
+    const controller = new AbortController();
+    void loadSpxBars(controller.signal);
+    void loadSpxBarsStatus(controller.signal);
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void loadSpxBars();
+        void loadSpxBarsStatus();
+      }
+    }, 20_000);
+    return () => {
+      controller.abort();
+      window.clearInterval(interval);
+    };
+  }, [screen, loadSpxBars, loadSpxBarsStatus]);
 
   useEffect(() => {
     holdingsRef.current = holdings;
@@ -691,6 +793,15 @@ export function MorningDashboard({
             refreshing={holdingsLoading}
             onRefresh={() => void refreshHoldings()}
             live={estimatorLive}
+            trades={trades ?? []}
+            spxBars={spxLiveBars && spxLiveBars.bars.length > 0 ? spxLiveBars.bars : replay?.spxBars ?? []}
+            spxBarsLive={Boolean(spxLiveBars && spxLiveBars.bars.length > 0)}
+            spxFeed={{
+              status: spxBarsStatus,
+              busy: spxFeedBusy,
+              onStart: () => runSpxFeedAction(startSpxLiveBars),
+              onStop: () => runSpxFeedAction(stopSpxLiveBars),
+            }}
           />
           <details className="morning-estimator-custom" style={{ marginTop: 14 }}>
             <summary style={{ cursor: "pointer", fontSize: 12, color: "#9ca3af" }}>Custom spread (what-if)</summary>

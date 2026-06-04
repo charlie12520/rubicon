@@ -2,9 +2,9 @@
 
 ```yaml
 core_loop_status: GREEN
-active_acceptance_id: A139
-green_count: 137
-green_id_summary: "A01-A12, A14-A19, A21-A139"
+active_acceptance_id: A144
+green_count: 142
+green_id_summary: "A01-A12, A14-A19, A21-A144"
 yellow_count: 0
 red_count: 0
 deferred_count: 2
@@ -22,12 +22,17 @@ blocked_count: 0
 
 | ID | Requirement | Status | Proof |
 |---|---|---:|---|
-| A139 | Morning hides event subheaders and routine Godel, AI Notes, and TC2000 status text | GREEN | Calendar event rows no longer render metadata subheaders, the old Godel setup paragraph is filtered/shortened, AI Notes hides generated empty-state message text, and TC2000 hides the latest-pulls subtitle plus scanner-list count. Focused tests, typecheck, build, and browser smoke passed. |
+| A144 | Morning SPX Heatmap nests sector → industry → stock on the Finviz taxonomy, with dual-class holdings merged into one tile | GREEN | New `data/finviz-classification.json` (500 S&P 500 names, 11 Finviz sectors, transcribed from Finviz's map and reconciled vs the live SPY-holdings universe). `server/spxHeatmap.ts` folds GOOG→GOOGL / FOX→FOXA / NWS→NWSA into one weight-summed, %-blended tile (503→500) via `mergeDualClassTiles`, overlays Finviz sector+industry per tile via `applyClassification`, and re-derives sector aggregates via `computeSectors`; `SpxHeatmapTile` gains `industry`; `src/components/SpxHeatmapPanel.tsx` renders a 3-level squarified treemap (sector → industry sub-block/caption → stock). `npm run typecheck` clean, Vitest 377/377 (incl. 2 new loader tests), `npm run build` passed; served `:5183` → `/api/spx-heatmap` returns 500 Finviz-sectored tiles and the treemap renders sector→industry→stock with GOOGL as one merged tile. |
 
 ## Recent Deltas
 
 | ID | Requirement | Status | Proof |
 |---|---|---:|---|
+| A143 | Morning > Estimator centers on live IBKR 0DTE SPX spreads with a per-spread move and an aggregate portfolio response | GREEN | New `src/spreadEstimator.ts` selects 0DTE SPXW verticals from the live holdings pull; `src/portfolioResponse.ts` runs each through the existing Bachelier model on a shared SPX ladder and sums an aggregate P/L curve; `src/components/LiveSpreadEstimatorPanel.tsx` shows live spreads + aggregate as primary with the custom what-if demoted to a collapsed disclosure; `server/ibkrHoldings.ts` adds a 5-minute market-hours live pull. Full Vitest 375/375 and `vite build` passed; typecheck clean for new code. |
+| A142 | Morning macro calendar pulls/generates public-source timing for previously rated rows | GREEN | US macro calendar now emits MBA, ADP weekly/monthly, API crude, NAR existing-home sales, UMich preliminary sentiment, NY Empire State, and NAHB HMI timing events. Macro/Morning focused tests, typecheck, and build passed. |
+| A141 | FirstSquawk word-filter notifications use native Windows toast notifications | GREEN | Live update alert payloads now call `/api/desktop-alert/live-update`, which launches `scripts/show-windows-toast.ps1` through the existing `Rubicon.RubiconApp` AppUserModelID. Focused tests, PowerShell parser/script smoke, typecheck, build, browser smoke, and API smoke passed. |
+| A140 | Daily Pull separates Data Collection, Rubicon Ingest, and Google Upload pipeline stages | GREEN | Status now carries run id, target date, stage rows, review-ready and Google-uploaded verdicts, cross-process lock state, and catch-up state. The wrapper runs Data Collection -> Rubicon Ingest -> Google Upload, with Google failures non-blocking for local review. Focused/full tests, typecheck, build, IBKR pytest, and syntax checks passed. |
+| A139 | Morning hides event subheaders and routine Godel, AI Notes, and TC2000 status text | GREEN | Calendar event rows no longer render metadata subheaders, the old Godel setup paragraph is filtered/shortened, AI Notes hides generated empty-state message text, and TC2000 hides the latest-pulls subtitle plus scanner-list count. Focused tests, typecheck, build, and browser smoke passed. |
 | A138 | Rubicon shortcuts and app metadata keep the Rubicon icon instead of Edge | GREEN | Desktop and Start Menu shortcuts now use generated `public\favicon.ico`, the launcher/build path ensures the ICO exists, and the app advertises `/favicon.ico` for Edge app-mode. Focused icon tests, shortcut reinstall/inspection, typecheck, and build passed. |
 | A137 | Replay and Daily Pull hide routine count/status narration while preserving actionable failure state | GREEN | Replay now avoids pending-today explanation, "full day" wording, trade-count-in-view copy, and chart raw counts; Daily Pull uses terse date/status copy and hides successful source/readiness chatter. Focused tests, typecheck, build, and browser smoke passed. |
 | A136 | Calendar notifications work at the computer level, not only inside the app | GREEN | Backend calendar alerts now launch `wscript.exe` with an auto-closing Windows Script Host popup. Focused desktop-alert tests, typecheck, build, live API trigger, and screenshot proof passed. |

@@ -2,12 +2,12 @@
 
 ```yaml
 current_phase: "Local MVP delivered"
-current_acceptance_id: "A139"
+current_acceptance_id: "A144"
 core_loop_status: "GREEN"
 last_validation_result: "GREEN"
 same_blocker_count: 0
 blocked: false
-last_green_ids: ["A01","A02","A03","A04","A05","A06","A07","A08","A09","A10","A11","A12","A14","A15","A16","A17","A18","A19","A21","A22","A23","A24","A25","A26","A27","A28","A29","A30","A31","A32","A33","A34","A35","A36","A37","A38","A39","A40","A41","A42","A43","A44","A45","A46","A47","A48","A49","A50","A51","A52","A53","A54","A55","A56","A57","A58","A59","A60","A61","A62","A63","A64","A65","A66","A67","A68","A69","A70","A71","A72","A73","A74","A75","A76","A77","A78","A79","A80","A81","A82","A83","A84","A85","A86","A87","A88","A89","A90","A91","A92","A93","A94","A95","A96","A97","A98","A99","A100","A101","A102","A103","A104","A105","A106","A107","A108","A109","A110","A111","A112","A113","A114","A115","A116","A117","A118","A119","A120","A121","A122","A123","A124","A125","A126","A127","A128","A129","A130","A131","A132","A133","A134","A135","A136","A137","A138","A139"]
+last_green_ids: ["A01","A02","A03","A04","A05","A06","A07","A08","A09","A10","A11","A12","A14","A15","A16","A17","A18","A19","A21","A22","A23","A24","A25","A26","A27","A28","A29","A30","A31","A32","A33","A34","A35","A36","A37","A38","A39","A40","A41","A42","A43","A44","A45","A46","A47","A48","A49","A50","A51","A52","A53","A54","A55","A56","A57","A58","A59","A60","A61","A62","A63","A64","A65","A66","A67","A68","A69","A70","A71","A72","A73","A74","A75","A76","A77","A78","A79","A80","A81","A82","A83","A84","A85","A86","A87","A88","A89","A90","A91","A92","A93","A94","A95","A96","A97","A98","A99","A100","A101","A102","A103","A104","A105","A106","A107","A108","A109","A110","A111","A112","A113","A114","A115","A116","A117","A118","A119","A120","A121","A122","A123","A124","A125","A126","A127","A128","A129","A130","A131","A132","A133","A134","A135","A136","A137","A138","A139","A140","A141","A142","A143","A144"]
 last_yellow_ids: []
 last_red_ids: []
 last_deferred_ids: ["A13","A20"]
@@ -38,7 +38,7 @@ Trader opens Rubicon -> Morning shows the macro/live/model premarket brief -> Re
 
 ## Acceptance Progress Summary
 
-- Green: A01-A12, A14-A19, A21-A139
+- Green: A01-A12, A14-A19, A21-A144
 - Yellow: none
 - Red: none
 - Deferred: A13 separate admin view, A20 AI feature fallback
@@ -46,7 +46,165 @@ Trader opens Rubicon -> Morning shows the macro/live/model premarket brief -> Re
 
 ## Last Completed Change
 
-- Duplicate-code cleanup centralized Rubicon server utilities, compact tracker summaries, trade/date selectors, trade time labels, chart timestamp/event helpers, and shared lightweight-chart options/data mapping.
+- Daily Sync's Rubicon ingest now conditionally backfills `data/spx-heatmap.json` from Yahoo when the heatmap is missing, sample-only, or otherwise lacks usable real intraday values. Added `spxHeatmapPayloadIsFilled()` and `maybeBackfillSpxHeatmapFromYahoo()` to `server/dailySync.ts`; `refreshDailySyncDerivedState()` now reports `spxHeatmapBackfilled` / `spxHeatmapBackfillSkipped`, while background daily-sync catch-up opts out so server startup does not unexpectedly hit Yahoo. Validation: `npm run test -- server/dailySync.test.ts` passed 13/13, `npm run typecheck` passed, `npm run build` passed with existing Vite warnings, and a fake-script smoke proved the first missing-heatmap call backfills and the second call skips an already-filled `yahoo-1m` payload.
+
+- Daily Pull now opens with a simplified Important Checks panel for the three review-critical outputs (IBKR trade files, SPX bars, traded spread replay marks) and keeps Review Details, Diagnostics, and Pipeline / Upload Details collapsed by default. Removed the coverage percentage column/meter from Daily Pull output tables. Process and Source State now live under a nested Run audit disclosure inside Pipeline / Upload Details, preserving the debugging/audit detail without making it part of the daily glance. Validation: `npm run test -- App` passed 19/19, `npm run typecheck` passed, `npm run build` passed with the existing large-chunk warning, and Playwright-core smoke on `http://127.0.0.1:5174` found 3 glance checks, 0 visible `Coverage` labels, collapsed details, Run audit revealing Source State, and zero console errors/warnings. Screenshot: `output/playwright/daily-pull-simplified.png`.
+
+- Manual tracker-only Google upload for 2026-06-03 completed after fixing the upload precheck that rejected the default service-account credential path before the auth layer could use it. `npm run google:upload -- --date 2026-06-03 --payload ... --run-id daily-2026-06-03-20260603202523` updated Google `Daily Sync Runs` row 7 and `Trade Log` starting at row 41 (`updatedCells: 446`, `uploadMode: tracker_only`). Widened the Google snapshot range from `A1:AA1000` to `A1:AZ1000` so the uploaded status columns are visible, refreshed the Google snapshot, reran Rubicon ingest for 2026-06-03, and reconciled the live daily-sync status file to `googleUploaded: true` with the retired raw-workbook step removed. Validation: focused Google/daily-sync tests passed 21/21, `npm run typecheck` passed, `npm run build` passed with the existing chunk warning, `/api/tracker` reports today `uploadStatus: uploaded`, and `/api/daily-sync/status` reports `googleUploaded: true`.
+
+- Daily Pull no longer duplicates the pipeline run/preflight controls when `Pipeline / Upload Details` is expanded. The top Daily Pull pipeline bar remains the single launch/progress surface, while `Source State` keeps Google refresh, diagnostics, readiness, and log detail. Added a focused App regression test for one visible Run/Preflight control pair after expanding details. Validation: `npm run test -- App`, `npm run typecheck`, `npm run build`, and Browser smoke on `http://127.0.0.1:5174` passed (`Run Daily Pipeline` count 1, `Preflight Pipeline` count 1, `Refresh Google` count 1, zero console warnings/errors); screenshot proof saved at `output/playwright/daily-pull-no-duplicate-pipeline.png`.
+
+- Replay cockpit layout is now durable at the requested 1920x1080 target: Replay-specific CSS bounds the four-chart grid inside the cockpit flex budget, keeps the scrubber below the grid, keeps the visible Spread Speed panel inside the viewport, and prevents horizontal overflow in the replay console. `SpreadSpeedPanel` now has a stable `.spread-speed-panel` root class and shrinkable two-column body. Validation: `npm run test -- App ReplayCharts`, `npm run typecheck`, `npm run build`, and a mocked 1920x1080 Playwright smoke passed; screenshot proof saved at `output/playwright/rubicon-replay-1920x1080-durable.png`.
+
+- A144 — SPX Heatmap (Morning → Heatmap) now nests **sector → industry → stock** on the Finviz/Morningstar taxonomy instead of flat GICS sectors. New `data/finviz-classification.json` holds all 500 S&P 500 names across 11 Finviz sectors / ~120 industries, transcribed from Finviz's market map and reconciled against the live SPY-holdings universe (`scripts/_reconcile.py`). The TS loader `server/spxHeatmap.ts` now (a) folds dual-class siblings GOOG→GOOGL / FOX→FOXA / NWS→NWSA into one weight-summed, %-blended tile via `mergeDualClassTiles` (universe 503→500, matching Finviz's single Alphabet/Fox/News box), (b) overlays the Finviz sector+industry onto each tile via `applyClassification`, and (c) re-derives the sector summary from the merged+classified tiles via `computeSectors` (the on-disk GICS sectors are ignored); the Python feed is untouched. `SpxHeatmapTile` gains an `industry` field. `src/components/SpxHeatmapPanel.tsx` lays a 3-level squarified treemap (sector header → industry sub-block + caption → stock tiles) and shows the industry in the tooltip. Reconciliation caught a 1-day-old index change: EPAM left the S&P 500 and FedEx Freight (FDXF) joined, effective 2026-06-02 (S&P Dow Jones Indices) — our SPY-holdings universe already reflected it, so EPAM was dropped and FDXF placed under Trucking. Validation: `npm run typecheck` clean; full Vitest 377/377 (added 2 loader tests for the dual-class merge + Finviz join in `server/spxHeatmap.test.ts`); `npm run build` passed; served the built app on `:5183` and screenshotted the rendered map — `/api/spx-heatmap` returns 500 tiles with Finviz sector names, and the treemap renders sector→industry→stock (e.g. Technology → Semiconductors / Software-Infrastructure / Consumer Electronics) with GOOGL as a single merged tile.
+- A143 — Morning > Estimator now centers on the trader's live IBKR 0DTE SPX spreads. `src/spreadEstimator.ts` selects 0DTE SPXW verticals from the holdings pull; `src/portfolioResponse.ts` runs each through the existing self-calibrated Bachelier model on a shared SPX ladder and sums an aggregate portfolio P/L curve; `src/components/LiveSpreadEstimatorPanel.tsx` renders the live spreads + aggregate as primary and demotes the manual what-if spread to a collapsed disclosure; `server/ibkrHoldings.ts` adds a 5-minute market-hours live pull alongside the 08:30 window. Validation: full Vitest 375/375 and `vite build` passed; typecheck clean for the new code (only a pre-existing unrelated `MarketChart.tsx` unused-import remains). Plan in `GOAL-spread-estimator.md`.
+- Daily Pull now has a visible Daily Sync progress bar above the date rail, driven by a frontend-only `dailySyncProgress` helper over `/api/daily-sync/status` steps. The bar shows current step detail, count, progressbar ARIA values, warning/failed/complete tones, and running status now polls every 5 seconds. Added focused unit and React coverage for idle, running, warning, failed, and completed progress states. Validation: `npm run test -- dailySyncProgress App dailySyncDiagnostics`, `npm run typecheck`, and `npm run build` passed; build retained only the existing Vite large-chunk warning.
+- Daily Pipeline Google upload is now tracker-only: the sync no longer rebuilds or uploads the raw archive workbook, no longer requires `SPX_GOOGLE_RAW_UPLOAD_FOLDER_ID`, and generates the daily Google payload with `--tracker-only` so it contains only `Daily Sync Runs` plus compact `Trade Log` blocks. Daily Pull/Source State copy now reports "Google tracker upload" instead of raw workbook receipt. Verified tracker-only payload sanity for 2026-06-03: ~20 KB, 1 tab, 19 Trade Log rows. Validation: targeted Vitest suite 14/14 files and 92/92 tests passed, `npm run typecheck` passed, `npm run build` passed, Python compile and PowerShell parse checks passed.
+- SPX Heatmap feed now refuses to start (and therefore to pull) outside regular trading hours. `isMarketPullWindow()` in `server/spxHeatmapLive.ts` allows starting only on weekdays 09:25-16:00 ET; after 16:00 / pre-open / weekends, `startSpxHeatmapLive` returns without spawning (no IBKR connect, no Yahoo backfill pull) and `getSpxHeatmapLiveStatus` reports `marketOpen:false`, which disables the `Start feed` button and shows a "market closed" note. Verified after-hours (16:29 ET): status `marketOpen:false`, POST start refused (`running:false`, log "start refused: market closed"), button disabled. Added `server/spxHeatmapLive.test.ts`; `npx vitest run` heatmap suite 7/7 pass, `npm run typecheck`/`build` clean. Holidays aren't detected (same weekday-only limitation as fplLive).
+- Documentation drift cleanup: refreshed `README.md`, `codebase.md`, and `detailedcodebase.md` for the current Daily Pipeline, 07:00 ET cutoff, SPX Heatmap live feed, native live-update toast endpoint, current Vite proxy target, current route/module/script map, and `/api/tracker` cache/coalescing note. Updated `HEARTBEAT.md` to use the compact `naive_*` docs and marked `ACCEPTANCE_CRITERIA.md`, `VALIDATION.md`, `COMPLETION_AUDIT.md`, `RUBICON_CODE_LOOP_SANITY.md`, and `RUBICON_CODEBASE_REVIEW_2026-06-03.md` as historical/reference artifacts where appropriate. Verification used targeted `rg` drift checks plus `git diff --check`; app tests were intentionally not run because this was docs-only.
+- SPX Heatmap (Morning -> Heatmap subsection) live-feed UX: disambiguated the two "live" controls — the backend feed is now `Start feed`/`Stop feed` (the per-minute IBKR snapshot poller) and the view-follow is `Jump to now` / muted `● now` (scrubber-at-latest), removing the old `Start live`/`Go live`/`following` collision. `Start feed` now triggers an immediate one-shot Yahoo backfill of the full session before the IBKR loop (`refresh-spx-heatmap.py --source ibkr-live` runs the backfill, writes it, then seeds the loop from it), so the map fills in ~15s instead of ~50s and is never blank when IBKR can't connect or it's after hours (verified after-hours: backfill writes `yahoo-1m` 503/503, loop then exits cleanly). The ~1-min Yahoo-frontier-to-first-IBKR-sweep seam is accepted by design. UI also burst-reloads the payload for ~40s after Start so the backfill/first sweep appear promptly. Added `server/spxHeatmap.test.ts` (loader sanitisation) and `src/spxTreemap.test.ts` (squarify + colour); `npx vitest run` 5/5 pass, `npm run typecheck` clean.
+- Daily Pipeline now runs the TC2000 Qullamaggie sidecar after Google Upload and before TC2000 daily bars: it attempts the visible `Three Bar Rule Spike` export, validates a fresh non-empty `qullamaggie_latest.csv`, runs the Qullamaggie report/email from that fresh CSV with its own bars pull skipped, and keeps all TC2000/Qullamaggie failures as warning-only diagnostics.
+- Morning's US macro calendar now auto-emits the previously rated-but-uncovered public-source rows for MBA, ADP weekly/monthly, API crude, NAR existing-home sales, UMich preliminary sentiment, NY Empire State, and NAHB HMI. These are timing/presence events only; actual/forecast/prior values remain out of scope for v1.
+- FirstSquawk word-filter hits now route through a native Windows toast helper instead of the calendar popup path. Rubicon added `/api/desktop-alert/live-update`, a Windows toast PowerShell script using the existing `Rubicon.RubiconApp` AppUserModelID, and the Morning Live Updates alert call now targets that endpoint.
+- Morning's economic calendar now uses a Rubicon-owned SPX macro calendar instead of the dead DailyFX/IG endpoint. The new source reads official/free schedule surfaces, applies code-owned DailyFX-style importance ratings, hides unrated rows as diagnostics, preserves RollCall/OPEX, and feeds the existing today/major-events Morning payload.
+- Latest manual DailyFX rating batch added medium aliases for MBA 30-year mortgage rate, ADP employment change, Factory Orders MoM, EIA crude oil stocks change, EIA gasoline stocks change, and Fed speeches; ISM Services remains high.
+- Second manual DailyFX rating batch added Initial Claims, Jobs Friday subrows, ADP weekly, trade/import/export rows, existing home sales, API crude, CPI subrows, and Monthly Budget Statement ratings.
+- Third manual DailyFX rating batch added Core/PPI MoM split, Michigan Sentiment, NY Empire State, Industrial Production, NAHB, import/export prices, and high-vs-medium housing starts/building permits distinctions.
+- Official aggregate releases now expand into DailyFX-style child rows for CPI, payrolls, PPI, trade/import/export, EIA crude/gasoline, import/export prices, and housing starts/building permits while preserving the official source title as coverage.
+
+## Validation Run - 2026-06-03 Daily Pull Pipeline Button
+
+Commands:
+- `npm run test -- App`
+- `npm run typecheck`
+- `npm run build`
+- Browser verification at `http://localhost:5173`
+
+Result:
+GREEN for the Daily Pull pipeline button placement on 2026-06-03.
+
+Proof:
+- Focused App Vitest passed 2 files / 13 tests, including the visible Daily Pull pipeline action region.
+- Typecheck passed.
+- Build passed with only the existing Vite large-chunk warning.
+- Browser verification showed `Preflight Pipeline` and `Run Daily Pipeline` visible above Pull Dates in the first Daily Pull viewport; the Run button was enabled.
+
+## Validation Run - 2026-06-03 TC2000 Qullamaggie Sidecar
+
+Commands:
+- PowerShell parser check for `..\scripts\run_tc2000_qullamaggie_export.ps1`
+- PowerShell parser check for `..\IBKR Equity History Pull\run_daily_spx_ibkr_sync_with_sheet_payload.ps1`
+- `python -m py_compile ..\spx-spread-replay-tracker\scripts\refresh-tc2000-daily-bars.py "..\IBKR Equity History Pull\qullamaggie_daily_email.py"`
+- `npm run test -- dailySync dailySyncDiagnostics App`
+- `npm run typecheck`
+- `npm run build`
+
+Result:
+GREEN for the TC2000 Qullamaggie sidecar integration on 2026-06-03.
+
+Proof:
+- Both PowerShell scripts parsed successfully.
+- Python compile check passed for the TC2000 bars refresh script and Qullamaggie email module.
+- Focused Vitest slice passed 7 files / 41 tests, including sidecar step ordering and warning-only status behavior.
+- Typecheck passed.
+- Build passed with only the existing Vite large-chunk warning.
+
+## Validation Run - 2026-06-03 A142
+
+Commands:
+- `npm run test -- server/morningMacroCalendar.test.ts`
+- `npm run test -- server/morningBrief.test.ts src/components/MorningDashboard.test.tsx`
+- `npm run typecheck`
+- `npm run build`
+
+Result:
+GREEN for A142 on 2026-06-03.
+
+Proof:
+- Macro calendar Vitest passed 1 file / 15 tests, including generated ADP/MBA/API markers, API Monday-holiday behavior, public NAR/NAHB/NYFed parsing, and UMich 2026 schedule warning behavior.
+- Morning payload/dashboard Vitest passed 2 files / 21 tests.
+- Typecheck passed.
+- Build passed with only the existing Vite large-chunk warning.
+
+## Validation Run - 2026-06-03 A141
+
+Commands:
+- `npm run test -- liveUpdateAlerts desktopAlert MorningDashboard`
+- PowerShell parser check for `scripts/show-windows-toast.ps1`
+- `npm run typecheck`
+- `npm run build`
+- Browser smoke on `http://127.0.0.1:5180`
+- Direct toast script smoke and `/api/desktop-alert/live-update` API smoke
+
+Result:
+GREEN for A141 on 2026-06-03.
+
+Proof:
+- Focused Vitest passed 3 files / 16 tests.
+- Typecheck passed.
+- Build passed with only the existing large-chunk warning.
+- Browser smoke showed Rubicon title/page identity, nonblank Morning UI, Live Updates alert controls, no framework overlay, zero console warnings/errors, and successful word-filter interaction.
+- `show-windows-toast.ps1` parsed and executed cleanly; the live-update desktop-alert API returned `ok` and launched the Windows notification helper.
+
+Follow-up debug:
+- The first native-toast implementation used the custom `Rubicon.RubiconApp` shortcut AppID and returned `ok` after spawning PowerShell, which could hide child-script failures. The toast script now auto-resolves the Edge-installed Rubicon AppID when present, the API waits for the script to finish, and the live `5174` route returned `ok` via `127.0.0.1-9BBB1E10_tz517vvf8m8yt!App`.
+- Focused `desktopAlert liveUpdateAlerts` tests passed after the fix. `npm run typecheck` and `npm run build` are currently blocked by unrelated concurrent edits in `src/components/SpreadSpeedPanel.tsx` (`RecommendedPick` unused and missing `Ladder`).
+
+## Validation Run - 2026-06-03 SPX Macro Aggregate Titles
+
+Commands:
+- `npm run test -- server/morningMacroCalendar.test.ts`
+- `npm run test -- server/morningBrief.test.ts src/components/MorningDashboard.test.tsx`
+- `npm run typecheck`
+- `npm run build`
+- `npm test`
+
+Result:
+GREEN for DailyFX-style official aggregate expansion on 2026-06-03.
+
+Proof:
+- Macro calendar Vitest passed 1 file / 11 tests.
+- Morning payload/dashboard Vitest passed 2 files / 21 tests.
+- Typecheck passed.
+- Build passed with the existing large-chunk warning.
+- Full Vitest passed 62 files / 333 tests.
+
+## Validation Run - 2026-06-03 SPX Macro Calendar
+
+Commands:
+- `npm run test -- morningMacroCalendar morningBrief MorningDashboard calendarAlerts`
+- `npm run typecheck`
+- `npm run build`
+- Live smoke: `readUsMacroCalendar(..., "2026-06-01", "2026-06-15")`
+
+Result:
+GREEN for SPX macro calendar replacement on 2026-06-03.
+
+Proof:
+- Focused Vitest passed 4 files / 35 tests.
+- Typecheck passed.
+- Build passed with only the existing large-chunk warning.
+- Live smoke returned 17 rated SPX macro events across Census, ISM, BLS, Fed, EIA, DOL, and BEA, and hid 11 unrated official rows as diagnostics.
+
+## Validation Run - 2026-06-03 A140
+
+Commands:
+- `npm run test -- dailySync dailySyncDiagnostics dailyPullReviewModel refreshLogic googleSheetsSnapshot App googleSheetsUpload`
+- `npm run typecheck`
+- `npm run build`
+- `npm run test`
+- From `IBKR Equity History Pull`: `python -m pytest tests/test_daily_spx_ibkr_sync.py`
+- Python syntax: `python -m py_compile daily_spx_ibkr_sync.py`
+- PowerShell parser: `[scriptblock]::Create(...)` on `run_daily_spx_ibkr_sync_with_sheet_payload.ps1`
+
+Result:
+GREEN for A140 on 2026-06-03.
+
+Proof:
+- Shared daily sync status now carries run id, target date, three stage rows, review-ready and Google-uploaded verdicts, latest-pipeline evidence, lock status, and catch-up status.
+- The wrapper acquires a cross-process lock, writes atomic stage-aware status, runs Data Collection, calls Rubicon Ingest through npm/tsx, then builds payload/workbook and runs Google Upload as a non-review-blocking stage.
+- Google Upload requires write-capable credentials plus `SPX_GOOGLE_RAW_UPLOAD_FOLDER_ID`, uploads the raw workbook through Drive conversion, updates Daily Sync Runs and Trade Log idempotently, writes compact raw-tab link rows, updates local summary receipt fields, and refreshes the Google snapshot.
+- Full Vitest passed 61 files / 326 tests; focused pipeline tests passed 11 files / 57 tests; typecheck passed; build passed with only the existing large-chunk warning; IBKR Python pytest passed 5/5; Python and PowerShell syntax checks passed.
 
 ## Validation Run - 2026-06-03 Duplicate Cleanup
 
@@ -1749,3 +1907,34 @@ Artifacts:
 - `src\liveUpdateAlerts.test.ts`
 - `dist\index.html`
 - `dist\assets\index-CGKBsaC5.js`
+
+## 2026-06-03 19:07 ET - Replay Spread Speed Trim
+
+- Trimmed the Replay Spread Speed panel to show only the recommended put-credit and call-credit spreads when spread-speed data is available. Removed the per-strike ladder, threshold warning, long net-delta explanation, and header metadata so the bottom Replay cockpit area fits more reliably.
+- Added compact recommendation styling and a narrow-screen single-column fallback in `src\App.css`; changed the delta display to ASCII (`d0.01 / $0.00`) so the recommendation text renders cleanly in the local app.
+- Validation: `npm run typecheck` passed; `npm run build` passed with the existing Vite large-chunk warning; Playwright-core smoke at 1920x1080 showed no horizontal overflow, 2 recommendation rows, `.replay-grid` bottom 910 below scrubber top 920, and Spread Speed panel bottom 1053 inside the 1080px viewport. Screenshot: `output\playwright\rubicon-replay-spread-speed-recommended-only.png`.
+
+## 2026-06-03 19:16 ET - Replay Spread-Level Selection
+
+- Added spread-level Replay selection above the existing entry chips. Spread chips group same-date trades by side and strike pair; selecting one feeds all matching entries into the SPX intraday and selected credit-spread charts while entry chips remain available for single-entry focus.
+- Updated Replay chart selection to dedupe same-spread marks by timestamp and label each grouped entry/exit as `E1`, `X1`, etc. Softened chart marker lines/labels and split the selector into `Spreads` and `Entries` lanes for easier scanning.
+- Validation: `npm run test -- quickTrades ReplayCharts App` passed 4 files / 31 tests; `npm run typecheck` passed; `npm run build` passed with the existing Vite large-chunk warning. Playwright-core smoke at 1920x1080 selected `Put 7540/7535 - 5 entries`, showed 5 included entry chips, rendered 20 entry/exit labels across SPX + spread charts, and had no horizontal overflow. Screenshot: `output\playwright\rubicon-replay-spread-selection.png`.
+
+## 2026-06-03 19:34 ET - Replay Spread Selector Only
+
+- Removed the individual entry-chip lane from the Replay cockpit header; the top selector now shows only spread groups.
+- Made the selected trade's spread group the default active chart selection, so the charts stay spread-first even before the user clicks a spread chip.
+- Validation: `npm run test -- App ReplayCharts quickTrades` passed 4 files / 31 tests; `npm run typecheck` passed; `npm run build` passed with the existing Vite large-chunk warning. Playwright-core smoke at 1920x1080 showed 10 spread buttons, 0 entry buttons, no `Entries` heading, no horizontal overflow, and screenshot `output\playwright\rubicon-replay-spreads-only.png`.
+
+## 2026-06-03 19:40 ET - Replay Control And Header Tightening
+
+- Moved the spread recommendation indicator out of Replay and into Morning > Signal Stack by making the recommendation cards explicit `Recommended` indicators with frame context; Replay no longer fetches or renders the bottom spread-speed panel.
+- Moved SPX chart controls into the SPX chart header as `2m`, `5m`, and `CC` buttons, matching the spread chart's `HL/Line` toolbar pattern.
+- Updated Trade History to show `In` and `Out` times and removed the `Status` column. Compacted the KPI strip to six equal columns with smaller card height/padding so it fits horizontally without the empty extra slot.
+- Validation: `npm run test -- App ReplayCharts MorningDashboard quickTrades` passed 5 files / 39 tests; `npm run typecheck` passed; `npm run build` passed with the existing Vite large-chunk warning. Browser smoke at 1920x1080 showed no standalone chart-control row, no Replay spread-speed panel, SPX chart buttons `2m/5m/CC`, Trade History headers `In/Out/Side/Strikes/Qty/Entry/Exit/P/L`, six KPI columns, and Morning Signal Stack `Recommended` badges. Screenshots: `output\playwright\rubicon-replay-ui-tightened.png`, `output\playwright\rubicon-morning-signal-stack-spreads.png`.
+
+## 2026-06-03 20:01 ET - Replay Collapsed Session Rails
+
+- Collapsed the Replay session/date rail to a 30px left-edge hover target across Replay, Daily Pull, Daily Review, and Journal. The rail expands over the content on hover/focus instead of consuming permanent horizontal space; Daily Pull opens to 260px, the other Replay rails open to 190px.
+- Tightened the Replay Trade History table to `table-layout: fixed`, removed its desktop `min-width`, and hid horizontal overflow inside the table wrapper so the trade table does not create a horizontal scrollbar when the session rail is hidden.
+- Validation: `npm run test -- App ReplayCharts` passed 3 files / 28 tests; `npm run typecheck` passed; `npm run build` passed with the existing Vite large-chunk warning. Browser smoke at 1920x1080 and 1100x900 showed body/document `scrollWidth === clientWidth`, Trade History `scrollWidth === clientWidth`, the rail expanding from 30px to 190px on Replay hover, Daily Pull expanding 30px -> 260px, Daily Review and Journal expanding 30px -> 190px, and no console warnings/errors. Screenshots: `output\playwright\rubicon-replay-rail-hover-1920.png`, `output\playwright\rubicon-replay-rail-collapsed-1100.png`, `output\playwright\rubicon-replay-rail-hover-1100.png`, `output\playwright\rubicon-replay-journal-rail-hover-1100.png`.

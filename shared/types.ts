@@ -131,15 +131,38 @@ export type DailySyncStep = {
   updatedAt?: string;
 };
 
+export type DailyPipelineStageId = "dataCollection" | "rubiconIngest" | "googleUpload";
+
+export type DailyPipelineStageStatus = "pending" | "running" | "complete" | "warning" | "failed" | "skipped";
+
+export type DailyPipelineStage = {
+  id: DailyPipelineStageId;
+  label: string;
+  status: DailyPipelineStageStatus;
+  detail?: string;
+  startedAt?: string;
+  updatedAt?: string;
+  finishedAt?: string;
+  warnings?: string[];
+  blockers?: string[];
+};
+
+export type DailyPipelineStages = Record<DailyPipelineStageId, DailyPipelineStage>;
+
 export type DailySyncLatestSummary = {
   date: string;
   path: string;
+  runId?: string;
   status?: string;
   spxStatus?: string;
   tradeStatus?: string;
   fillCount?: number;
   spreadCount?: number;
   entryCount?: number;
+  googleUploadMode?: string;
+  googleUploadStatus?: string;
+  googleUploaded?: boolean;
+  googleUploadedAt?: string;
 };
 
 export type DailySyncTargetPlan = {
@@ -152,22 +175,54 @@ export type DailySyncTargetPlan = {
   note: string;
 };
 
+export type DailySyncLockInfo = {
+  active: boolean;
+  path: string;
+  pid?: number;
+  runId?: string;
+  stale?: boolean;
+  startedAt?: string;
+  targetDate?: string;
+  command?: string[];
+  message?: string;
+};
+
+export type DailySyncCatchupStatus = {
+  attempted: boolean;
+  refreshedDates: string[];
+  generatedAt: string;
+  message: string;
+  ok: boolean;
+  warnings?: string[];
+};
+
+export type DailySyncPipelineState = "idle" | "running" | "completed" | "failed-with-stage-errors" | "failed" | "missing";
+
 export type DailySyncStatusResult = {
   ok: boolean;
   state: DailySyncState;
   message: string;
   command?: string[];
   cwd?: string;
+  catchup?: DailySyncCatchupStatus;
   dryRun?: boolean;
   exitCode?: number | null;
   finishedAt?: string;
   generatedAt: string;
+  googleUploaded?: boolean;
   latestLogPath?: string;
   latestLogTail?: string;
+  latestPipelineRun?: DailySyncLatestSummary;
   latestSummary?: DailySyncLatestSummary;
+  lock?: DailySyncLockInfo;
   logPath?: string;
   pid?: number;
+  pipelineState?: DailySyncPipelineState;
+  reviewReady?: boolean;
+  runId?: string;
   startedAt?: string;
+  stages?: DailyPipelineStages;
+  targetDate?: string;
   steps?: DailySyncStep[];
   targetPlan?: DailySyncTargetPlan;
   warnings?: string[];
@@ -461,7 +516,23 @@ export type MorningBriefSource = {
   url?: string;
 };
 
-export type MorningCalendarSource = "DailyFX" | "RollCall";
+export type MorningCalendarSource =
+  | "BLS"
+  | "BEA"
+  | "Census"
+  | "DOL"
+  | "Fed"
+  | "ISM"
+  | "Treasury"
+  | "EIA"
+  | "MBA"
+  | "ADP"
+  | "API"
+  | "NAR"
+  | "UMich"
+  | "NYFed"
+  | "NAHB"
+  | "RollCall";
 
 export type MorningCalendarEvent = {
   id: string;
@@ -485,7 +556,7 @@ export type MorningMajorEvent = {
   id: string;
   impact: "high" | "market";
   kind: "macro" | "fomc" | "inflation" | "jobs" | "opex";
-  source: "DailyFX" | "OPEX";
+  source: Exclude<MorningCalendarSource, "RollCall"> | "OPEX";
   sortMinute: number | null;
   timeLabel: string;
   title: string;
@@ -721,7 +792,8 @@ export type RrgBarsPayload = {
 export type SpxHeatmapTile = {
   symbol: string;
   name: string;
-  sector: string;
+  sector: string; // Finviz/Morningstar sector (re-keyed from GICS at load time)
+  industry: string; // Finviz industry within the sector (sector → industry → stock)
   weight: number; // index weight in %, drives tile area
   last: number | null; // latest trade price at asOf
   prevClose: number | null;
@@ -771,4 +843,5 @@ export type SpxHeatmapLiveStatus = {
   available: boolean;
   autoStartEt: string | null; // ET HH:MM the daily auto-start fires, or null if disabled
   autoStartLastFiredDate: string | null;
+  marketOpen: boolean; // true only during the RTH pull window (≈09:25–16:00 ET, Mon–Fri); Start is refused otherwise
 };

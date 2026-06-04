@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ChevronLeft, ChevronRight, Pause, Play, Radio } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, Pause, Play } from "lucide-react";
 import type { SpxHeatmapLiveStatus, SpxHeatmapPayload, SpxHeatmapTile } from "../../shared/types";
 import { fetchSpxHeatmap, fetchSpxHeatmapLiveStatus, startSpxHeatmapLive, stopSpxHeatmapLive } from "../api";
 import { heatmapColor, squarifyTreemap, type Rect } from "../spxTreemap";
@@ -8,10 +8,12 @@ import "./SpxHeatmap.css";
 const VIEW_W = 1000;
 const VIEW_H = 620;
 const SECTOR_HEADER_H = 17; // viewBox units reserved for a sector's name band
+const INDUSTRY_HEADER_H = 12; // smaller band for an industry caption nested inside a sector
 const PLAYBACK_MS = 320;
 
 type PlacedTile = { tile: SpxHeatmapTile; rect: Rect };
 type SectorBlock = { name: string; rect: Rect; showHeader: boolean };
+type IndustryBlock = { sector: string; name: string; rect: Rect; showHeader: boolean };
 
 function tilePctAt(tile: SpxHeatmapTile, index: number, lastIndex: number): number | null {
   if (lastIndex < 0) return tile.pct;
@@ -38,9 +40,43 @@ function formatPct(pct: number | null | undefined): string {
   return `${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%`;
 }
 
-// Approx glyph advance / font-size for the bold uppercase tickers, used to fit
-// the ticker to the tile width.
-const CHAR_WIDTH = 0.62;
+// Per-character advance (font-size units) for the bold tickers, measured from the
+// actual render: most caps ≈0.75, M/W ≈0.95, I/J/'.' narrow. Summing per ticker
+// (vs one average) keeps wide names like MMM / WMT from overflowing their tile.
+const WIDE_CHARS = new Set(["M", "W"]);
+const NARROW_CHARS = new Set(["I", "J", "."]);
+function tickerUnits(symbol: string): number {
+  let units = 0;
+  for (const ch of symbol) units += WIDE_CHARS.has(ch) ? 0.95 : NARROW_CHARS.has(ch) ? 0.42 : 0.75;
+  return Math.max(1.6, units);
+}
+
+// Group a sector's tiles into its Finviz industries, ordered by summed weight so
+// the heaviest industry anchors the top-left of the sector block.
+function groupIndustries(tiles: SpxHeatmapTile[]): { name: string; weight: number; tiles: SpxHeatmapTile[] }[] {
+  const groups = new Map<string, { name: string; weight: number; tiles: SpxHeatmapTile[] }>();
+  for (const tile of tiles) {
+    // Fall back to the sector when a tile has no industry (e.g. an older API
+    // process still running, or an unclassified name) so the panel degrades to a
+    // sector-grouped map instead of crashing the render.
+    const key = tile.industry || tile.sector || "Other";
+    const group = groups.get(key) ?? { name: key, weight: 0, tiles: [] };
+    group.weight += tile.weight;
+    group.tiles.push(tile);
+    groups.set(key, group);
+  }
+  return [...groups.values()].sort((a, b) => b.weight - a.weight);
+}
+
+// Trim an industry caption to roughly what fits its block width (a per-char
+// estimate is plenty for these small labels).
+function fitCaption(text: string, widthPx: number, fontSize: number): string {
+  if (!text) return "";
+  const maxChars = Math.floor((widthPx - 5) / (fontSize * 0.6));
+  if (maxChars >= text.length) return text;
+  if (maxChars <= 1) return "";
+  return `${text.slice(0, maxChars - 1)}…`;
+}
 
 type TileLabel = {
   tf: number; // ticker font size (viewBox units)
@@ -55,11 +91,14 @@ type TileLabel = {
 // 4-char ticker spans most of the box) and by height (leaving room for the % line
 // on tiles tall enough). Big tiles get big text; tiny tiles get small text or none.
 function tileLabel(rect: Rect, symbol: string): TileLabel {
-  const fitWidth = (rect.w * 0.9) / Math.max(2.2, symbol.length * CHAR_WIDTH);
+  const padW = rect.w * 0.88;
+  const fitWidth = padW / tickerUnits(symbol);
   const fitHeight = rect.h * 0.46;
-  const tf = Math.max(4.5, Math.min(62, Math.min(fitWidth, fitHeight)));
+  let tf = Math.min(fitWidth, fitHeight);
   const showSymbol = tf >= 6 && rect.w > 18 && rect.h > 10;
-  const showPct = showSymbol && rect.h >= tf * 2.0 && rect.w >= 34;
+  const showPct = showSymbol && rect.h >= tf * 1.95 && rect.w >= 36;
+  if (showPct) tf = Math.min(tf, padW / 2.5); // keep the "-XX.XX%" line inside the tile too
+  tf = Math.max(4.5, Math.min(150, tf));
   const pf = tf * 0.6;
   const cy = rect.y + rect.h / 2;
   return {
@@ -82,7 +121,37 @@ export function SpxHeatmapPanel() {
   const [liveStatus, setLiveStatus] = useState<SpxHeatmapLiveStatus | null>(null);
   const [followLive, setFollowLive] = useState(true);
   const [liveBusy, setLiveBusy] = useState(false);
+  const [size, setSize] = useState({ w: VIEW_W, h: VIEW_H });
   const idxRef = useRef(0);
+  const stageRef = useRef<HTMLDivElement>(null);
+
+  // Size the map to the actual available area (width AND the height left in the
+  // viewport), so it fills the space like Finviz instead of ballooning off-screen
+  // on wide windows. Re-measures on resize and when the map first mounts.
+  const mapReady = Boolean(payload && payload.tiles.length > 0);
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    const measure = () => {
+      const rect = el.getBoundingClientRect();
+      // Fit-to-screen: fill the full container width (capped/centred only on huge
+      // ultrawide) and exactly the leftover viewport height, so the whole panel
+      // always fits with no scrolling at any size. On small screens tiles get
+      // short — the accepted trade-off; never a side-scroller.
+      const MAX_W = 2600;
+      const w = Math.max(320, Math.min(Math.round(rect.width), MAX_W));
+      const h = Math.max(150, Math.round(window.innerHeight - rect.top - 62));
+      setSize((prev) => (Math.abs(prev.w - w) < 1 && Math.abs(prev.h - h) < 1 ? prev : { w, h }));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [mapReady]);
 
   // Initial load + periodic re-fetch so a running live feed keeps the map current.
   // The follow-live effect below re-pins the scrubber to each new frontier.
@@ -135,7 +204,10 @@ export function SpxHeatmapPanel() {
       action()
         .then((status) => {
           setLiveStatus(status);
-          window.setTimeout(reloadHeatmap, 1500);
+          // The Yahoo backfill lands ~15s after Start and the first IBKR sweep
+          // ~50s — poll a few times so the map fills promptly instead of waiting
+          // for the 30s refresh.
+          [1500, 5000, 10000, 16000, 24000, 40000].forEach((ms) => window.setTimeout(reloadHeatmap, ms));
         })
         .catch(() => undefined)
         .finally(() => setLiveBusy(false));
@@ -160,42 +232,50 @@ export function SpxHeatmapPanel() {
   // Layout depends only on the universe + which sector is focused — NOT on the
   // scrubbed time — so playback just recolours tiles instead of relaying out.
   const layout = useMemo(() => {
-    if (!payload) return { tiles: [] as PlacedTile[], sectors: [] as SectorBlock[] };
-    const bounds: Rect = { x: 2, y: 2, w: VIEW_W - 4, h: VIEW_H - 4 };
+    const result = { tiles: [] as PlacedTile[], sectors: [] as SectorBlock[], industries: [] as IndustryBlock[] };
+    if (!payload) return result;
+    const bounds: Rect = { x: 1, y: 1, w: size.w - 2, h: size.h - 2 };
+
+    // Lay the industry level inside a sector's area, then the stocks inside each
+    // industry — a squarified treemap nested sector → industry → stock.
+    const placeIndustries = (sectorName: string, sectorTiles: SpxHeatmapTile[], area: Rect) => {
+      const blocks = squarifyTreemap(
+        groupIndustries(sectorTiles).map((group) => ({ key: group.name, value: group.weight, data: group })),
+        area,
+      );
+      for (const block of blocks) {
+        const showHeader = block.rect.h > 34 && block.rect.w > 64;
+        result.industries.push({ sector: sectorName, name: block.key, rect: block.rect, showHeader });
+        const inner: Rect = showHeader
+          ? { x: block.rect.x + 0.5, y: block.rect.y + INDUSTRY_HEADER_H, w: block.rect.w - 1, h: block.rect.h - INDUSTRY_HEADER_H - 0.5 }
+          : { x: block.rect.x + 0.5, y: block.rect.y + 0.5, w: block.rect.w - 1, h: block.rect.h - 1 };
+        const placed = squarifyTreemap(
+          block.data.tiles.map((tile) => ({ key: tile.symbol, value: tile.weight, data: tile })),
+          inner,
+        );
+        for (const node of placed) result.tiles.push({ tile: node.data, rect: node.rect });
+      }
+    };
 
     if (focusedSector) {
-      const sectorTiles = payload.tiles.filter((tile) => tile.sector === focusedSector);
-      const placed = squarifyTreemap(
-        sectorTiles.map((tile) => ({ key: tile.symbol, value: tile.weight, data: tile })),
-        bounds,
-      );
-      return {
-        tiles: placed.map((node) => ({ tile: node.data, rect: node.rect })),
-        sectors: [] as SectorBlock[],
-      };
+      placeIndustries(focusedSector, payload.tiles.filter((tile) => tile.sector === focusedSector), bounds);
+      return result;
     }
 
     const sectorBlocks = squarifyTreemap(
       payload.sectors.map((sector) => ({ key: sector.name, value: sector.weight, data: sector })),
       bounds,
     );
-    const tiles: PlacedTile[] = [];
-    const sectors: SectorBlock[] = [];
     for (const block of sectorBlocks) {
       const showHeader = block.rect.h > 46 && block.rect.w > 78;
-      sectors.push({ name: block.key, rect: block.rect, showHeader });
+      result.sectors.push({ name: block.key, rect: block.rect, showHeader });
       const inner: Rect = showHeader
         ? { x: block.rect.x + 1, y: block.rect.y + SECTOR_HEADER_H, w: block.rect.w - 2, h: block.rect.h - SECTOR_HEADER_H - 1 }
         : { x: block.rect.x + 1, y: block.rect.y + 1, w: block.rect.w - 2, h: block.rect.h - 2 };
-      const sectorTiles = payload.tiles.filter((tile) => tile.sector === block.key);
-      const placed = squarifyTreemap(
-        sectorTiles.map((tile) => ({ key: tile.symbol, value: tile.weight, data: tile })),
-        inner,
-      );
-      for (const node of placed) tiles.push({ tile: node.data, rect: node.rect });
+      placeIndustries(block.key, payload.tiles.filter((tile) => tile.sector === block.key), inner);
     }
-    return { tiles, sectors };
-  }, [payload, focusedSector]);
+    return result;
+  }, [payload, focusedSector, size]);
 
   // Per-frame aggregates (index move, breadth, sector tints) at the scrubbed minute.
   const frame = useMemo(() => {
@@ -331,37 +411,47 @@ export function SpxHeatmapPanel() {
       <div className="heatmap-livebar">
         <span className={`heatmap-live-dot${liveStatus?.running ? " on" : ""}`} aria-hidden="true" />
         <span className="heatmap-live-label">
-          IBKR live feed <b>{liveStatus?.running ? "running" : "off"}</b>
+          IBKR feed: <b>{liveStatus?.running ? "running" : "off"}</b>
         </span>
         {liveStatus?.running ? (
           <button type="button" className="heatmap-live-btn" disabled={liveBusy} onClick={() => runLiveAction(stopSpxHeatmapLive)}>
-            Stop
+            Stop feed
           </button>
         ) : (
-          <button
-            type="button"
-            className="heatmap-live-btn primary"
-            disabled={liveBusy || liveStatus?.available === false}
-            title={liveStatus?.available === false ? "refresh-spx-heatmap.py not found" : "Start the per-minute IBKR snapshot feed"}
-            onClick={() => runLiveAction(startSpxHeatmapLive)}
-          >
-            {liveBusy ? "Starting…" : "Start live"}
-          </button>
+          <>
+            <button
+              type="button"
+              className="heatmap-live-btn primary"
+              disabled={liveBusy || liveStatus?.available === false || liveStatus?.marketOpen === false}
+              title={
+                liveStatus?.marketOpen === false
+                  ? "Market closed — the feed only pulls 09:25–16:00 ET, Mon–Fri"
+                  : liveStatus?.available === false
+                    ? "refresh-spx-heatmap.py not found"
+                    : "Start the per-minute IBKR snapshot feed (backfills today from Yahoo immediately)"
+              }
+              onClick={() => runLiveAction(startSpxHeatmapLive)}
+            >
+              {liveBusy ? "Starting…" : "Start feed"}
+            </button>
+            {liveStatus?.marketOpen === false && <span className="heatmap-live-now">market closed</span>}
+          </>
         )}
         {!followLive ? (
-          <button type="button" className="heatmap-live-btn" onClick={() => setFollowLive(true)} title="Jump to the latest minute and follow the feed">
-            <Radio size={12} /> Go live
+          <button type="button" className="heatmap-live-btn" onClick={() => setFollowLive(true)} title="Jump to the latest minute and track it">
+            Jump to now
           </button>
-        ) : payload.live ? (
-          <span className="heatmap-live-follow"><Radio size={12} /> following</span>
-        ) : null}
+        ) : (
+          <span className="heatmap-live-now" title="Showing the latest minute">● now</span>
+        )}
         <span className="heatmap-live-meta">
-          {payload.source === "ibkr-live" ? `live · updated ${payload.asOf ?? "—"} ET` : `feed: ${payload.source}`}
+          updated {payload.asOf ?? "—"} ET · {payload.source}
           {liveStatus?.autoStartEt ? ` · auto-start ${liveStatus.autoStartEt} ET wkdays` : ""}
         </span>
       </div>
 
-      <div className="heatmap-stage">
+      <div className="heatmap-stage-wrap" ref={stageRef}>
+        <div className="heatmap-stage" style={{ width: size.w, height: size.h }}>
         {focusedSector && (
           <button type="button" className="heatmap-back" onClick={() => setFocusedSector(null)}>
             <ArrowLeft size={14} /> All sectors
@@ -369,7 +459,7 @@ export function SpxHeatmapPanel() {
         )}
         <svg
           className="heatmap-svg"
-          viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
+          viewBox={`0 0 ${size.w} ${size.h}`}
           preserveAspectRatio="none"
           role="img"
           aria-label="S&P 500 constituents sized by index weight and coloured by intraday percentage change"
@@ -410,6 +500,34 @@ export function SpxHeatmapPanel() {
             );
           })}
 
+          {layout.industries.map((block) =>
+            block.showHeader ? (
+              <text
+                key={`ind-${block.sector}-${block.name}`}
+                x={block.rect.x + 3}
+                y={block.rect.y + 9}
+                fontSize={7.5}
+                className="heatmap-industry-label"
+              >
+                {fitCaption(block.name, block.rect.w, 7.5)}
+              </text>
+            ) : null,
+          )}
+
+          {layout.industries.map((block) => (
+            <rect
+              key={`indb-${block.sector}-${block.name}`}
+              x={block.rect.x}
+              y={block.rect.y}
+              width={Math.max(0, block.rect.w)}
+              height={Math.max(0, block.rect.h)}
+              fill="none"
+              stroke="#0a0d12"
+              strokeWidth={0.9}
+              pointerEvents="none"
+            />
+          ))}
+
           {layout.sectors.map((block) =>
             block.showHeader ? (
               <g key={`hdr-${block.name}`} className="heatmap-sector-label" onClick={() => setFocusedSector(block.name)}>
@@ -448,7 +566,7 @@ export function SpxHeatmapPanel() {
             </div>
             <div className="heatmap-tooltip-name">{hover.tile.name}</div>
             <div className="heatmap-tooltip-row">
-              <span>{hover.tile.sector}</span>
+              <span>{hover.tile.sector} · {hover.tile.industry}</span>
               <span>{hover.tile.weight.toFixed(2)}% wt</span>
             </div>
             {hover.tile.last !== null && (
@@ -459,6 +577,7 @@ export function SpxHeatmapPanel() {
             )}
           </div>
         )}
+        </div>
       </div>
 
       <div className="heatmap-controls">
@@ -497,12 +616,6 @@ export function SpxHeatmapPanel() {
         </div>
       </div>
 
-      <p className="heatmap-caption">
-        <b>How to read it:</b> every tile is an S&amp;P 500 constituent, sized by its index weight and coloured by intraday % change
-        (deep red −3% → grey flat → deep green +3%). Tiles are grouped into GICS sectors. Hover for detail, click a tile or sector to
-        zoom in, and use the scrubber / <b>Play</b> to roll the map through the trading day.
-        {payload.note ? <span className="heatmap-skip"> {payload.note}</span> : null}
-      </p>
     </section>
   );
 }

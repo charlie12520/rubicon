@@ -1,27 +1,32 @@
 .heatmap-panel {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 18px 20px 22px;
+  gap: 5px;
+  padding: 6px 10px 8px;
 }
 
 .heatmap-head {
-  min-height: 58px;
-  padding: 12px 14px;
+  min-height: 0;
+  padding: 3px 10px;
   display: flex;
   justify-content: space-between;
-  align-items: flex-end;
-  gap: 16px;
+  align-items: center;
+  gap: 12px;
   flex-wrap: wrap;
   border: 1px solid rgba(143, 155, 173, 0.14);
   border-radius: 8px;
   background: linear-gradient(135deg, rgba(19, 28, 39, 0.92), rgba(9, 15, 22, 0.88));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.heatmap-head .eyeless-label {
+  display: none;
 }
 
 .heatmap-head h2 {
-  margin: 2px 0 0;
-  font-size: 20px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #cbd5e1;
 }
 
 .heatmap-focus-name {
@@ -83,19 +88,19 @@
 .heatmap-sector-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 4px;
 }
 
 .heatmap-chip {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 11px;
+  gap: 5px;
+  padding: 2px 8px;
   background: #0b1220;
   border: 1px solid #1f2937;
   border-radius: 999px;
   color: #9ca3af;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   cursor: pointer;
   transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
@@ -132,6 +137,12 @@
   color: #ef4444;
 }
 
+.heatmap-stage-wrap {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
 .heatmap-stage {
   position: relative;
   border: 1px solid #1f2937;
@@ -143,8 +154,7 @@
 .heatmap-svg {
   display: block;
   width: 100%;
-  height: auto;
-  aspect-ratio: 1000 / 620;
+  height: 100%;
 }
 
 .heatmap-tile {
@@ -190,6 +200,14 @@
 .heatmap-sector-label .heatmap-sector-pct {
   fill: rgba(148, 163, 184, 0.9);
   font-weight: 600;
+}
+
+.heatmap-industry-label {
+  fill: rgba(203, 213, 225, 0.6);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  pointer-events: none;
 }
 
 .heatmap-back {
@@ -267,11 +285,11 @@
 .heatmap-controls {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 14px;
+  gap: 10px;
+  padding: 4px 10px;
   background: #0b1220;
   border: 1px solid #1f2937;
-  border-radius: 12px;
+  border-radius: 8px;
 }
 
 .heatmap-scrub-controls {
@@ -284,8 +302,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   background: #070c16;
   border: 1px solid #243042;
@@ -374,12 +392,12 @@
 .heatmap-livebar {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 7px 12px;
+  gap: 8px;
+  padding: 3px 10px;
   background: #0b1220;
   border: 1px solid #1f2937;
-  border-radius: 10px;
-  font-size: 12px;
+  border-radius: 8px;
+  font-size: 11px;
   color: #9ca3af;
   flex-wrap: wrap;
 }
@@ -444,6 +462,15 @@
   gap: 5px;
   color: #22c55e;
   font-weight: 600;
+}
+
+/* Muted "● now" — means the scrubber is on the latest minute (not a liveness claim;
+   the header LIVE badge conveys whether the data itself is real-time). */
+.heatmap-live-now {
+  color: #64748b;
+  font-weight: 600;
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .heatmap-live-meta {

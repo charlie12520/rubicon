@@ -13,7 +13,11 @@ dist-ssr
 *.local
 
 # Local runtime/state data and generated QA artifacts
-data/
+# Ignore local runtime/generated data, but TRACK the hand-curated Finviz
+# sector/industry taxonomy the SPX heatmap loader depends on (data/* + negation,
+# because a plain `data/` exclusion can't be re-included file-by-file).
+data/*
+!data/finviz-classification.json
 artifacts/
 output/
 .claude/

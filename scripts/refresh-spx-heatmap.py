@@ -46,6 +46,11 @@ SSGA_URLS = [
     "https://www.ssga.com/library-content/products/fund-data/etfs/us/holdings-daily-us-en-spy.xlsx",
     "https://www.ssga.com/us/en/institutional/etfs/library-content/products/fund-data/etfs/us/holdings-daily-us-en-spy.xlsx",
 ]
+# QQQ (Nasdaq-100) membership + weights. Slickcharts lists every constituent with
+# its index weight (clean Symbol/Weight table); Wikipedia is the offline-ish
+# fallback (membership + ICB sector, equal-weight approximation).
+SLICKCHARTS_NDX_URL = "https://www.slickcharts.com/nasdaq100"
+WIKI_NDX_URL = "https://en.wikipedia.org/wiki/Nasdaq-100"
 UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
@@ -274,6 +279,141 @@ def load_universe_from_manifest() -> list[dict]:
     return universe
 
 
+def _parse_slickcharts_ndx(html: str) -> list[dict]:
+    """Nasdaq-100 constituents from Slickcharts: columns #, Company, Symbol, Weight, …"""
+    parser = _TableRowParser()
+    parser.feed(html)
+    universe: list[dict] = []
+    for row in parser.rows:
+        if len(row) < 4:
+            continue
+        symbol = row[2].strip().upper()
+        weight = _to_float(row[3])  # "12.90%" -> 12.90
+        if not symbol or " " in symbol or not any(ch.isalpha() for ch in symbol):
+            continue
+        if weight is None or weight <= 0:
+            continue
+        universe.append({"symbol": symbol, "name": row[1].strip() or symbol, "sector": "Unknown", "weight": weight})
+    if len(universe) < 90:
+        raise RuntimeError(f"Slickcharts Nasdaq-100 table not found (got {len(universe)})")
+    return universe
+
+
+def _parse_wikipedia_ndx(html: str) -> list[dict]:
+    """Fallback: Nasdaq-100 components from Wikipedia (Ticker, Company, ICB sector).
+    No weights on the page, so approximate equal weights — the map still renders."""
+    parser = _TableRowParser()
+    parser.feed(html)
+    seen: dict[str, dict] = {}
+    for row in parser.rows:
+        if len(row) < 2:
+            continue
+        ticker = row[0].strip().upper()
+        if not (1 <= len(ticker) <= 6) or " " in ticker or not ticker.isalpha() or ticker in ("TICKER", "SYMBOL"):
+            continue
+        name = row[1].strip()
+        if not name:
+            continue
+        sector = row[2].strip() if len(row) > 2 and row[2].strip() else "Unknown"
+        seen.setdefault(ticker, {"symbol": ticker, "name": name, "sector": sector, "weight": 0.0})
+    out = list(seen.values())
+    if len(out) < 90:
+        raise RuntimeError(f"Wikipedia Nasdaq-100 table not found (got {len(out)})")
+    weight = round(100.0 / len(out), 4)
+    for entry in out:
+        entry["weight"] = weight
+    return out
+
+
+def load_universe_qqq() -> tuple[list[dict], str]:
+    """Nasdaq-100 membership + weights: Slickcharts (weights) → Wikipedia (fallback)."""
+    try:
+        universe = _parse_slickcharts_ndx(_http_bytes(SLICKCHARTS_NDX_URL).decode("utf-8", "ignore"))
+        return universe, "slickcharts-ndx"
+    except Exception as exc:  # noqa: BLE001
+        print(f"Slickcharts Nasdaq-100 unavailable ({exc!r}); trying Wikipedia.", file=sys.stderr)
+    universe = _parse_wikipedia_ndx(_http_bytes(WIKI_NDX_URL).decode("utf-8", "ignore"))
+    return universe, "wikipedia-ndx"
+
+
+# --------------------------------------------------------------------------- #
+# Index registry — each index loads its own members/weights; the live + batch
+# feeds pull the UNION of all requested indices once and project per index so a
+# stock in both (e.g. AAPL in SPY and QQQ) is fetched a single time.
+# --------------------------------------------------------------------------- #
+def _load_spx_universe(out_path: Path, for_live: bool) -> tuple[list[dict], str, str]:
+    if for_live:
+        try:
+            return load_universe_from_existing(out_path), "existing-payload", "existing-payload"
+        except Exception:  # noqa: BLE001
+            pass
+    try:
+        universe = load_universe_from_ssga()
+        universe_source = "ssga-holdings"
+    except Exception as exc:  # noqa: BLE001
+        print(f"SSGA holdings unavailable ({exc}); falling back to equity-history manifest.", file=sys.stderr)
+        universe = load_universe_from_manifest()
+        universe_source = "manifest-fallback"
+    sector_source = apply_sectors(universe)
+    return universe, universe_source, sector_source
+
+
+def _load_qqq_universe(out_path: Path, for_live: bool) -> tuple[list[dict], str, str]:
+    if for_live:
+        try:
+            return load_universe_from_existing(out_path), "existing-payload", "existing-payload"
+        except Exception:  # noqa: BLE001
+            pass
+    universe, universe_source = load_universe_qqq()
+    # Re-key shared names to GICS sectors (consistent with SPX); Nasdaq-only names
+    # keep their source sector and are covered by the Finviz classification overlay.
+    sector_source = apply_sectors(universe)
+    return universe, universe_source, sector_source
+
+
+INDEX_SPECS: dict[str, dict] = {
+    "spx": {"label": "S&P 500 (SPY weights)", "out": APP_ROOT / "data" / "spx-heatmap.json", "load": _load_spx_universe},
+    "qqq": {"label": "Nasdaq-100 (QQQ weights)", "out": APP_ROOT / "data" / "qqq-heatmap.json", "load": _load_qqq_universe},
+}
+
+
+def build_index_configs(index_ids: list[str], *, for_live: bool) -> tuple[list[dict], list[dict]]:
+    """Load each requested index's universe and return (union_universe, [cfg,...]).
+
+    Each cfg carries order/weight/meta/label/out so the shared per-symbol caches can
+    be projected per index. A single index's load failure is skipped (never breaks
+    the others — e.g. a QQQ source outage must not take down the SPX feed)."""
+    cfgs: list[dict] = []
+    union: dict[str, dict] = {}
+    for index_id in index_ids:
+        spec = INDEX_SPECS.get(index_id)
+        if not spec:
+            print(f"[index {index_id}] unknown index, skipping", file=sys.stderr)
+            continue
+        try:
+            universe, universe_source, sector_source = spec["load"](spec["out"], for_live)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[index {index_id}] universe load failed ({exc!r}); skipping this index", file=sys.stderr)
+            continue
+        cfgs.append(
+            {
+                "id": index_id,
+                "label": spec["label"],
+                "out": spec["out"],
+                "order": [e["symbol"] for e in universe],
+                "weight": {e["symbol"]: e["weight"] for e in universe},
+                "meta": {e["symbol"]: {"name": e["name"], "sector": e["sector"]} for e in universe},
+                "universeSource": universe_source,
+                "sectorSource": sector_source,
+            }
+        )
+        for entry in universe:
+            union.setdefault(entry["symbol"], entry)
+    if not cfgs:
+        raise RuntimeError("no index universes could be loaded")
+    return list(union.values()), cfgs
+
+
 # --------------------------------------------------------------------------- #
 # Bar sources
 # --------------------------------------------------------------------------- #
@@ -412,7 +552,11 @@ def latest_pct(series: list[float | None]) -> float | None:
     return None
 
 
-def assemble(universe: list[dict], source: str, axis: list[str], limit: int | None) -> dict:
+def pull_bars(universe: list[dict], source: str, axis: list[str], limit: int | None):
+    """Pull each symbol's intraday bars ONCE (keyed by symbol) so multiple indices
+    can project the same data without re-fetching shared names. Returns
+    (bars_by_symbol, session, source_label, delay, note) where each bar is
+    {prevClose, last, series}."""
     if limit:
         universe = universe[:limit]
 
@@ -422,9 +566,8 @@ def assemble(universe: list[dict], source: str, axis: list[str], limit: int | No
         if sector not in sector_drift:
             sector_drift[sector] = random.Random(abs(hash(sector)) % (2**32)).uniform(-0.0016, 0.0016)
 
-    tiles: list[dict] = []
+    bars: dict[str, dict] = {}
     session = ""
-    frontier_idx = len(axis) - 1
 
     if source in ("yahoo", "ibkr-disk"):
         raw: dict[str, dict | None] = {}
@@ -471,19 +614,47 @@ def assemble(universe: list[dict], source: str, axis: list[str], limit: int | No
                         (record["by_label"][axis[i]] for i in range(frontier_idx, -1, -1) if axis[i] in record["by_label"]),
                         None,
                     )
-                tiles.append(_tile_from(entry, record["prevClose"], last, series))
+                bars[entry["symbol"]] = {"prevClose": record["prevClose"], "last": last, "series": series}
             else:
-                tiles.append(_tile_from(entry, None, None, [None] * len(axis)))
+                bars[entry["symbol"]] = {"prevClose": None, "last": None, "series": [None] * len(axis)}
     else:  # sample
         for entry in universe:
             bar = sample_series(axis, entry["symbol"], entry["sector"], sector_drift[entry["sector"]])
             session = bar["session"]
-            tiles.append(_tile_from(entry, bar["prevClose"], bar["last"], bar["pctByTime"]))
+            bars[entry["symbol"]] = {"prevClose": bar["prevClose"], "last": bar["last"], "series": bar["pctByTime"]}
 
     source_label = {"yahoo": "yahoo-1m", "ibkr-disk": "ibkr-1m-disk", "sample": "sample"}.get(source, source)
     delay = {"yahoo": 15, "sample": None, "ibkr-disk": None}.get(source)
     note = "Synthetic sample colours — swap to --source yahoo or the IBKR live feed for real %." if source == "sample" else None
-    return finalize_payload(tiles, axis, source_label, live=False, delay=delay, session=session, note=note)
+    return bars, session, source_label, delay, note
+
+
+def build_index_payload(
+    bars: dict[str, dict],
+    cfg: dict,
+    axis: list[str],
+    source_label: str,
+    *,
+    live: bool,
+    delay: int | None,
+    session: str,
+    note: str | None,
+) -> dict:
+    """Project the shared per-symbol bars onto one index's members + weights + label."""
+    tiles: list[dict] = []
+    for sym in cfg["order"]:
+        bar = bars.get(sym)
+        if bar is None:
+            continue
+        meta = cfg["meta"][sym]
+        entry = {"symbol": sym, "name": meta["name"], "sector": meta["sector"], "weight": cfg["weight"][sym]}
+        tiles.append(_tile_from(entry, bar["prevClose"], bar["last"], bar["series"]))
+    payload = finalize_payload(
+        tiles, axis, source_label, live=live, delay=delay, session=session, note=note, label=cfg["label"]
+    )
+    payload["universeSource"] = cfg.get("universeSource")
+    payload["sectorSource"] = cfg.get("sectorSource")
+    return payload
 
 
 def finalize_payload(
@@ -495,6 +666,7 @@ def finalize_payload(
     delay: int | None,
     session: str,
     note: str | None = None,
+    label: str = "S&P 500 (SPY weights)",
 ) -> dict:
     """Compute sector aggregates, index breadth, and asOf, then wrap the payload.
     Shared by the batch builder and the live IBKR loop so both stay consistent."""
@@ -530,7 +702,7 @@ def finalize_payload(
         else:
             unchanged += 1
     index = {
-        "label": "S&P 500 (SPY weights)",
+        "label": label,
         "pct": round(num / den, 3) if den > 0 else None,
         "advancers": advancers,
         "decliners": decliners,
@@ -554,7 +726,14 @@ def finalize_payload(
     }
 
 
-def _tile_from(entry: dict, prev_close: float | None, last: float | None, series: list[float | None]) -> dict:
+def _tile_from(
+    entry: dict,
+    prev_close: float | None,
+    last: float | None,
+    series: list[float | None],
+    iv: float | None = None,
+    earnings: dict | None = None,
+) -> dict:
     return {
         "symbol": entry["symbol"],
         "name": entry["name"],
@@ -564,6 +743,9 @@ def _tile_from(entry: dict, prev_close: float | None, last: float | None, series
         "prevClose": prev_close,
         "pct": latest_pct(series),
         "pctByTime": series,
+        "iv": iv,  # annualized ATM IV (IBKR tick 106); null outside the live IV sweep
+        "earningsDate": (earnings or {}).get("date"),  # Nasdaq next-earnings date / timing
+        "earningsTime": (earnings or {}).get("time"),
     }
 
 
@@ -633,52 +815,80 @@ def load_universe_from_existing(out_path: Path) -> list[dict]:
     return rows
 
 
-def _seed_live_state(out_path: Path, universe: list[dict], axis: list[str], today: str):
-    """Continue today's session across restarts (and pick up any morning Yahoo
-    fill) by seeding pctByTime from the existing payload when it's today's."""
+def _seed_live_state(out_paths: list[Path], universe: list[dict], axis: list[str], today: str):
+    """Continue today's session across restarts (and pick up any morning Yahoo fill)
+    by seeding pctByTime from each index's existing payload when it's today's. A
+    symbol is seeded once (first today-payload that has it) — shared names carry
+    identical data across indices."""
     series: dict[str, list] = {e["symbol"]: [None] * len(axis) for e in universe}
     prev_close: dict[str, float] = {}
     last_price: dict[str, float] = {}
     last_pct: dict[str, float] = {}
-    try:
-        data = json.loads(out_path.read_text(encoding="utf-8"))
-        if data.get("session") == today:
-            for tile in data.get("tiles", []):
-                sym = tile.get("symbol")
-                arr = tile.get("pctByTime")
-                if sym in series and isinstance(arr, list) and len(arr) == len(axis):
-                    series[sym] = [float(x) if isinstance(x, (int, float)) else None for x in arr]
-                    if tile.get("prevClose") is not None:
-                        prev_close[sym] = float(tile["prevClose"])
-                    if tile.get("last") is not None:
-                        last_price[sym] = float(tile["last"])
-                    seeded = latest_pct(series[sym])
-                    if seeded is not None:
-                        last_pct[sym] = seeded
-    except Exception:  # noqa: BLE001
-        pass
+    seeded_syms: set[str] = set()
+    for out_path in out_paths:
+        try:
+            data = json.loads(out_path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            continue
+        if data.get("session") != today:
+            continue
+        for tile in data.get("tiles", []):
+            sym = tile.get("symbol")
+            if sym in seeded_syms or sym not in series:
+                continue
+            arr = tile.get("pctByTime")
+            if isinstance(arr, list) and len(arr) == len(axis):
+                series[sym] = [float(x) if isinstance(x, (int, float)) else None for x in arr]
+                if tile.get("prevClose") is not None:
+                    prev_close[sym] = float(tile["prevClose"])
+                if tile.get("last") is not None:
+                    last_price[sym] = float(tile["last"])
+                seeded = latest_pct(series[sym])
+                if seeded is not None:
+                    last_pct[sym] = seeded
+                seeded_syms.add(sym)
     return series, prev_close, last_price, last_pct
+
+
+def sweep_iv(ib, contracts: dict, batch: int, settle: float) -> dict:
+    """Stream IBKR's per-stock ~30-day ATM implied vol (generic tick 106) for the
+    whole universe in batches and return {symbol: iv_fraction}. IV moves slowly, so
+    the live loop calls this only every few minutes and caches the result. Streaming
+    (not snapshot) is required — the IV tick does not reliably arrive in snapshot mode."""
+    out: dict[str, float] = {}
+    items = list(contracts.items())
+    for i in range(0, len(items), batch):
+        chunk = items[i : i + batch]
+        tickers = [(sym, ib.reqMktData(contract, "106", False, False)) for sym, contract in chunk]
+        ib.sleep(settle)
+        for sym, ticker in tickers:
+            iv = _finite(getattr(ticker, "impliedVolatility", None))
+            if iv is not None and iv > 0:
+                out[sym] = round(iv, 4)
+        for _sym, contract in chunk:
+            try:
+                ib.cancelMktData(contract)
+            except Exception:  # noqa: BLE001
+                pass
+    return out
 
 
 def run_ibkr_live(
     universe: list[dict],
     axis: list[str],
-    out_path: Path,
+    indexes: list[dict],
     *,
     host: str,
     ports: list[int],
     client_id: int,
     batch: int,
     settle: float,
-    universe_source: str,
-    sector_source: str,
 ) -> int:
     from ib_insync import IB, Stock  # lazy: only the live feed needs ib_insync
 
     label_to_idx = {label: i for i, label in enumerate(axis)}
     today = et_now().strftime("%Y-%m-%d")
-    series, prev_close, last_price, last_pct = _seed_live_state(out_path, universe, axis, today)
-    by_symbol = {e["symbol"]: e for e in universe}
+    series, prev_close, last_price, last_pct = _seed_live_state([cfg["out"] for cfg in indexes], universe, axis, today)
     order = [e["symbol"] for e in universe]
 
     ib = None
@@ -720,6 +930,27 @@ def run_ibkr_live(
         print("[ibkr-live] no contracts qualified; aborting", flush=True)
         return 3
 
+    iv_by_symbol: dict[str, float] = {}
+    # Sweep per-stock IV in a rolling slice each minute (a cursor through the
+    # universe; full cycle ~ len(order)/iv_slice minutes) instead of one big burst
+    # every ~10 min. The burst took ~48s and, on top of the ~36s price snapshot,
+    # overran the minute boundary — the loop then skipped a whole minute, leaving
+    # every tile null (a grey "blank minute"). A small slice keeps each iteration
+    # under 60s so no minute is skipped.
+    iv_slice = max(batch, int(os.environ.get("IBKR_HEATMAP_IV_SLICE", "64")))
+    iv_cursor = 0
+
+    # Earnings-this-week (free Nasdaq calendar, no IBKR). Fetched once at startup —
+    # the feed restarts daily, and earnings dates don't move intraday.
+    earnings_by_symbol: dict = {}
+    try:
+        from earnings_nasdaq import week_earnings
+
+        earnings_by_symbol = week_earnings(order, et_now().date())
+        print(f"[ibkr-live] earnings: {len(earnings_by_symbol)}/{len(order)} report this week", flush=True)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[ibkr-live] earnings fetch failed: {exc!r}", flush=True)
+
     try:
         while True:
             now = et_now()
@@ -731,6 +962,19 @@ def run_ibkr_live(
                 print("[ibkr-live] session complete (>16:00 ET); exiting", flush=True)
                 break
             idx = label_to_idx.get(hhmm, len(axis) - 1)
+
+            # Per-stock IV: sweep one rolling slice this minute (IV moves slowly, so
+            # a per-name refresh every ~8 min is plenty); cached values colour the σ
+            # view. Slicing keeps the IV cost ~one batch instead of a ~48s burst.
+            iv_chunk = {sym: contracts[sym] for sym in order[iv_cursor : iv_cursor + iv_slice] if sym in contracts}
+            if iv_chunk:
+                fresh_iv = sweep_iv(ib, iv_chunk, batch, max(4.0, settle))
+                if fresh_iv:
+                    iv_by_symbol.update(fresh_iv)
+            prev_cursor = iv_cursor
+            iv_cursor = (iv_cursor + iv_slice) % max(1, len(order))
+            if iv_cursor <= prev_cursor:  # wrapped → whole universe refreshed once
+                print(f"[ibkr-live {hhmm} ET] iv cycle complete {len(iv_by_symbol)}/{len(contracts)}", flush=True)
 
             started = time.perf_counter()
             items = list(contracts.items())
@@ -752,11 +996,25 @@ def run_ibkr_live(
                 if series[sym][idx] is None and sym in last_pct:
                     series[sym][idx] = last_pct[sym]
 
-            tiles = [_tile_from(by_symbol[sym], prev_close.get(sym), last_price.get(sym), series[sym]) for sym in order]
-            payload = finalize_payload(tiles, axis, "ibkr-live", live=True, delay=0, session=today, note=None)
-            payload["universeSource"] = universe_source
-            payload["sectorSource"] = sector_source
-            write_json_atomic(out_path, payload)
+            # Project the shared per-symbol caches onto each index (members + weights
+            # + label) and write one payload per index — AAPL etc. are pulled once.
+            for cfg in indexes:
+                tiles = [
+                    _tile_from(
+                        {"symbol": sym, "name": cfg["meta"][sym]["name"], "sector": cfg["meta"][sym]["sector"], "weight": cfg["weight"][sym]},
+                        prev_close.get(sym),
+                        last_price.get(sym),
+                        series[sym],
+                        iv_by_symbol.get(sym),
+                        earnings_by_symbol.get(sym),
+                    )
+                    for sym in cfg["order"]
+                    if sym in series
+                ]
+                payload = finalize_payload(tiles, axis, "ibkr-live", live=True, delay=0, session=today, note=None, label=cfg["label"])
+                payload["universeSource"] = cfg["universeSource"]
+                payload["sectorSource"] = cfg["sectorSource"]
+                write_json_atomic(cfg["out"], payload)
 
             duration = time.perf_counter() - started
             top_err = ", ".join(f"{code}x{n}" for code, n in errors.most_common(3)) or "none"
@@ -780,78 +1038,71 @@ def write_json_atomic(path: Path, payload: dict) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Build Rubicon's intraday S&P 500 heatmap payload.")
+    parser = argparse.ArgumentParser(description="Build Rubicon's intraday index heatmap payload(s).")
     parser.add_argument("--source", choices=["sample", "yahoo", "ibkr-disk", "ibkr-live"], default="sample")
-    parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    parser.add_argument("--indexes", default="spx", help="comma list of indices to build (spx,qqq); the union is pulled once")
+    parser.add_argument("--out", type=Path, default=None, help="override output path (single index only)")
     parser.add_argument("--limit", type=int, default=None, help="cap the number of constituents (debugging)")
     parser.add_argument("--host", default="127.0.0.1", help="IBKR host (ibkr-live)")
     parser.add_argument("--ports", default="7496,4001", help="IBKR ports to try (ibkr-live)")
     parser.add_argument("--client-id", type=int, default=941, help="IBKR base client id (ibkr-live)")
     parser.add_argument("--batch", type=int, default=45, help="snapshot batch size (ibkr-live)")
     parser.add_argument("--settle", type=float, default=3.0, help="seconds to let each snapshot batch populate (ibkr-live)")
+    parser.add_argument("--no-backfill", action="store_true", help="skip the one-shot Yahoo backfill before the ibkr-live loop")
     args = parser.parse_args()
 
     axis = session_axis()
+    index_ids = [s.strip().lower() for s in args.indexes.split(",") if s.strip()] or ["spx"]
+    is_live = args.source == "ibkr-live"
+    # Load each index's members/weights and build the UNION universe so a stock in
+    # more than one index (e.g. AAPL in SPY + QQQ) is pulled a single time.
+    union_universe, cfgs = build_index_configs(index_ids, for_live=is_live)
+    if args.out is not None and len(cfgs) == 1:
+        cfgs[0]["out"] = args.out
+    if args.limit:
+        union_universe = union_universe[: args.limit]
 
-    if args.source == "ibkr-live":
-        # Reuse the standing payload's structure if present (no SSGA/Wikipedia hit);
-        # otherwise build it fresh once.
-        try:
-            universe = load_universe_from_existing(args.out)
-            universe_source = sector_source = "existing-payload"
-        except Exception:  # noqa: BLE001
-            try:
-                universe = load_universe_from_ssga()
-                universe_source = "ssga-holdings"
-            except Exception as exc:  # noqa: BLE001
-                print(f"SSGA holdings unavailable ({exc}); using manifest.", file=sys.stderr)
-                universe = load_universe_from_manifest()
-                universe_source = "manifest-fallback"
-            sector_source = apply_sectors(universe)
-        if args.limit:
-            universe = universe[: args.limit]
+    if is_live:
         ports = [int(p) for p in args.ports.split(",") if p.strip()]
+        # Immediate backfill: pull the whole session from Yahoo up front so each map
+        # fills in ~15s (instead of waiting ~50s for IBKR's first sweep) and isn't
+        # blank if IBKR can't connect or it's after hours. The live loop seeds from
+        # this and overwrites each minute in real time.
+        if not args.no_backfill:
+            try:
+                bars, session, source_label, delay, note = pull_bars(union_universe, "yahoo", axis, None)
+                for cfg in cfgs:
+                    payload = build_index_payload(bars, cfg, axis, source_label, live=False, delay=delay, session=session, note=note)
+                    write_json_atomic(cfg["out"], payload)
+                print(f"[ibkr-live] yahoo backfill written for {', '.join(c['id'] for c in cfgs)}", flush=True)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[ibkr-live] yahoo backfill skipped ({exc})", file=sys.stderr, flush=True)
         return run_ibkr_live(
-            universe,
+            union_universe,
             axis,
-            args.out,
+            cfgs,
             host=args.host,
             ports=ports,
             client_id=args.client_id,
             batch=args.batch,
             settle=args.settle,
-            universe_source=universe_source,
-            sector_source=sector_source,
         )
 
-    try:
-        universe = load_universe_from_ssga()
-        universe_source = "ssga-holdings"
-    except Exception as exc:  # noqa: BLE001
-        print(f"SSGA holdings unavailable ({exc}); falling back to equity-history manifest.", file=sys.stderr)
-        universe = load_universe_from_manifest()
-        universe_source = "manifest-fallback"
-
-    sector_source = apply_sectors(universe)
-
-    payload = assemble(universe, args.source, axis, args.limit)
-    payload["universeSource"] = universe_source
-    payload["sectorSource"] = sector_source
-    write_json_atomic(args.out, payload)
-    print(
-        json.dumps(
+    bars, session, source_label, delay, note = pull_bars(union_universe, args.source, axis, None)
+    results = []
+    for cfg in cfgs:
+        payload = build_index_payload(bars, cfg, axis, source_label, live=False, delay=delay, session=session, note=note)
+        write_json_atomic(cfg["out"], payload)
+        results.append(
             {
-                "ok": True,
-                "outPath": str(args.out),
-                "source": payload["source"],
-                "universeSource": universe_source,
+                "index": cfg["id"],
+                "outPath": str(cfg["out"]),
                 "tiles": len(payload["tiles"]),
-                "sectors": len(payload["sectors"]),
-                "session": payload["session"],
+                "universeSource": cfg["universeSource"],
                 "asOf": payload["asOf"],
             }
         )
-    )
+    print(json.dumps({"ok": True, "source": source_label, "session": session, "indexes": results}))
     return 0
 
 

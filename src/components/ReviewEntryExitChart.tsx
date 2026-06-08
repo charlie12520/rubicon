@@ -11,6 +11,8 @@ import {
   type UTCTimestamp,
 } from "lightweight-charts";
 import type { SpxBar, TradeRecord } from "../../shared/types";
+import { resampleBars } from "../../shared/resampleBars";
+import { buildWarmedCheatOverlays } from "../movingAverages";
 import type { DailyPnlSimulationPoint } from "../dailyPnlSimulator";
 import { reviewActionDirectionLabel, reviewActionSide } from "../dailyReviewSide";
 import { formatNumber, formatSignedCurrency } from "../format";
@@ -126,12 +128,16 @@ export function ReviewEntryExitChart({
   pnlPoints = [],
   trades,
   onSelectTrade,
+  cheatCode = false,
+  warmupCloses = [],
 }: {
   bars: SpxBar[];
   intervalMinutes?: number;
   pnlPoints?: DailyPnlSimulationPoint[];
   trades: TradeRecord[];
   onSelectTrade?: (trade: TradeRecord) => void;
+  cheatCode?: boolean;
+  warmupCloses?: number[];
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const displayBars = useMemo(() => aggregateReviewBars(bars, intervalMinutes), [bars, intervalMinutes]);
@@ -248,6 +254,29 @@ export function ReviewEntryExitChart({
     });
     series.setData(toCandlestickData(displayBars));
 
+    // Cheat-code MA overlays, warm-started from prior sessions so the 50/200
+    // EMA/SMA are true full-period lines across the whole session.
+    if (cheatCode) {
+      const overlays = buildWarmedCheatOverlays(
+        displayBars.map((bar) => ({ time: bar.time, close: bar.close })),
+        warmupCloses,
+      );
+      for (const overlay of overlays) {
+        if (!overlay.data.length) {
+          continue;
+        }
+        const overlaySeries = chart.addSeries(LineSeries, {
+          color: overlay.color,
+          lineWidth: 1,
+          lineStyle: overlay.dashed ? LineStyle.Dashed : LineStyle.Solid,
+          lastValueVisible: false,
+          priceLineVisible: false,
+          crosshairMarkerVisible: false,
+        });
+        overlaySeries.setData(overlay.data.map((point) => ({ time: point.time as UTCTimestamp, value: point.value })));
+      }
+    }
+
     const hoverReadout = document.createElement("div");
     hoverReadout.className = "review-hover-readout";
     hoverReadout.setAttribute("aria-live", "polite");
@@ -285,7 +314,7 @@ export function ReviewEntryExitChart({
       cleanupPnlAxisOverlay();
       chart.remove();
     };
-  }, [bars, displayBars, pnlPoints, trades, onSelectTrade]);
+  }, [bars, displayBars, pnlPoints, trades, onSelectTrade, cheatCode, warmupCloses]);
 
   return <div className="review-entry-exit-chart" data-pnl-overlay={pnlPoints.length ? "true" : "false"} ref={containerRef} />;
 }
@@ -442,33 +471,10 @@ function hoverReadoutHtml(readout: ReviewHoverReadout | null): string {
   ].join("");
 }
 
+// Thin wrapper kept for call sites/tests; delegates to the shared resampler so the
+// Daily Review chart, the Replay chart, and the server warmup feed bucket identically.
 export function aggregateReviewBars(bars: SpxBar[], intervalMinutes: number): SpxBar[] {
-  if (intervalMinutes <= 1) {
-    return bars;
-  }
-  const intervalSeconds = intervalMinutes * 60;
-  const buckets = new Map<number, SpxBar[]>();
-  for (const bar of bars) {
-    const bucketTime = Math.floor(bar.time / intervalSeconds) * intervalSeconds;
-    buckets.set(bucketTime, [...(buckets.get(bucketTime) ?? []), bar]);
-  }
-
-  return [...buckets.entries()]
-    .sort(([left], [right]) => left - right)
-    .map(([time, bucket]) => {
-      const sorted = [...bucket].sort((left, right) => left.time - right.time);
-      const first = sorted[0];
-      const last = sorted.at(-1) ?? first;
-      return {
-        close: last.close,
-        high: Math.max(...sorted.map((bar) => bar.high)),
-        label: first.label,
-        low: Math.min(...sorted.map((bar) => bar.low)),
-        open: first.open,
-        time,
-        timestampEt: first.timestampEt,
-      };
-    });
+  return resampleBars(bars, intervalMinutes);
 }
 
 export function buildReviewMarkers(bars: SpxBar[], trades: TradeRecord[]): MarkerEvent[] {

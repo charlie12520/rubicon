@@ -10,14 +10,15 @@ import {
   optionLegTradeCsvCandidates,
   readCsv,
   safeSpxCsvCandidates,
+  tradeDates,
 } from "./dataImporter.ts";
 import { firstExistingPath, mtimeMs, readJson, writeJsonAtomic } from "./jsonStore.ts";
 import type { SpreadSpeedFrame, SpreadSpeedPayload, SpreadSpeedPick, SpreadSpeedRow, SpxBar } from "../shared/types.ts";
 
 const MIN_PER_YEAR = 252 * 390;
 const WIDTH = 5;
-const TARGET_NET_DELTA = 0.05; // the live "frontier" edge a credit seller wants
-const FAST = 0.05;
+export const TARGET_NET_DELTA = 0.05; // the live "frontier" edge a credit seller wants
+export const FAST = 0.05;
 const MED = 0.02;
 const EM_PER_STRADDLE = 1.2533;
 const SPREAD_SPEED_STATE_FILE = "rubicon_spread_speed_state.json";
@@ -142,7 +143,7 @@ function atmStraddle(spot: number, calls: ChainSide, puts: ChainSide): { straddl
   return null;
 }
 
-function buildFrame(label: string, spot: number, calls: ChainSide, puts: ChainSide): SpreadSpeedFrame | null {
+export function buildFrame(label: string, spot: number, calls: ChainSide, puts: ChainSide): SpreadSpeedFrame | null {
   const atm = atmStraddle(spot, calls, puts);
   if (!atm) return null;
   const tMin = minutesToClose(label);
@@ -300,4 +301,31 @@ export async function refreshSpreadSpeedState(_ibkrTradesRoot: string, date: str
 
 export async function loadSpreadSpeed(date: string, options: SpreadSpeedLoadOptions = {}): Promise<SpreadSpeedPayload> {
   return loadOrBuildSpreadSpeedState(date, { refresh: options.refreshSafeState });
+}
+
+// How many prior trade-dates to probe when the requested day has no assembled
+// frame. Trade-dates are sparse (market days only), so 10 covers ~2 weeks.
+const MAX_FALLBACK_LOOKBACK = 10;
+
+// Like loadSpreadSpeed, but when the requested date has no assembled frame (e.g.
+// today, before the post-close pull lands its CSV sidecars), walk back to the
+// most recent earlier session that does, so the Signal Stack shows the last real
+// picks instead of a dead-end. Tags the payload with the originally requested
+// date and whether a fallback occurred.
+export async function loadSpreadSpeedWithFallback(
+  date: string,
+  options: SpreadSpeedLoadOptions = {},
+): Promise<SpreadSpeedPayload> {
+  const primary = await loadSpreadSpeed(date, options);
+  if (primary.available) {
+    return { ...primary, requestedDate: date, fallback: false };
+  }
+  const earlier = (await tradeDates()).filter((candidate) => candidate < date).sort((a, b) => (a < b ? 1 : -1));
+  for (const candidate of earlier.slice(0, MAX_FALLBACK_LOOKBACK)) {
+    const payload = await loadSpreadSpeed(candidate);
+    if (payload.available) {
+      return { ...payload, requestedDate: date, fallback: true };
+    }
+  }
+  return { ...primary, requestedDate: date, fallback: false };
 }

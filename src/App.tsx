@@ -1,6 +1,6 @@
 // New to this codebase? Read codebase.md at the repo root first — it maps the whole project.
 // NOTE: this file is ~3,000 lines / ~20 components. Grep within it; the screens live here:
-// JournalScreen, DailyPullScreen, DailyReviewScreen (+ TradeTable, SourceLedger, SessionHealth).
+// JournalScreen, DailyPullScreen, DailyReviewScreen (+ TradeTable, SourceLedger).
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
@@ -17,7 +17,6 @@ import {
   Download,
   Flag,
   Gauge,
-  HardDrive,
   LogIn,
   LogOut,
   Pause,
@@ -25,23 +24,23 @@ import {
   Play,
   RefreshCcw,
   Save,
-  Server,
   ShieldCheck,
   Target,
   Trash2,
 } from "lucide-react";
-import type { DailySummary, DailySyncStatusResult, DailySyncStepStatus, ReplayPayload, SourceHealth, SpreadMark, SpreadSpeedPayload, SpxBar, TrackerSnapshot, TradeRecord, WalletSnapshot } from "../shared/types";
-import { fetchDailySyncStatus, fetchReplay, fetchSpreadSpeed, fetchTracker, refreshGoogleSnapshot, runDailySync, saveTradeJournalSnapshot } from "./api";
+import type { DailySummary, DailySyncStatusResult, DailySyncStepStatus, ReplayPayload, SourceHealth, SpreadMark, SpreadSpeedPayload, SpxBar, SpxLiveBarsLiveStatus, TrackerSnapshot, TradeRecord, WalletSnapshot } from "../shared/types";
+import { fetchDailySyncStatus, fetchLiveSpreadSpeed, fetchLiveSpreadSpeedStatus, fetchReplay, fetchSpreadSpeed, fetchTracker, refreshGoogleSnapshot, runDailyOptionPull, runDailySync, saveTradeJournalSnapshot, startLiveSpreadSpeed, stopLiveSpreadSpeed } from "./api";
 import { rangePresets, tradesInRange, type RangeId } from "./dateRanges";
 import { formatCurrency, formatNumber, formatPercent, formatSignedCurrency } from "./format";
 import { buildDailyReview, REPLAY_SPEEDS, summarizeTrades } from "./stats";
 import { reviewActionDirectionLabel } from "./dailyReviewSide";
 import { buildDailyPnlSimulation, summarizeDailyPnlSimulation } from "./dailyPnlSimulator";
 import { marketDateFromSnapshot, selectDateAfterTrackerRefresh } from "./refreshLogic";
-import { quickTradeAriaLabel, quickTradeCountLabel, quickTradeLabel } from "./quickTrades";
+import { buildQuickSpreadGroups, quickSpreadAriaLabel, quickSpreadKey, quickSpreadLabel } from "./quickTrades";
 import { tradeClockLabel, tradeExitClockLabel, tradeHeldLabel } from "./tradeTime";
 import { countTradesByDate, mapTradesById, selectTradeById, selectTradeByIdOrFirst, sortTradesByEntryTime, tradesForDate } from "./tradeSelectors";
 import { buildDailySyncDiagnostics } from "./dailySyncDiagnostics";
+import { buildDailySyncProgress, type DailySyncProgressModel } from "./dailySyncProgress";
 import { buildDailySyncReadiness } from "./dailySyncReadiness";
 import { buildDailySyncRunGuard } from "./dailySyncRunGuard";
 import { dailySyncCompletionRefreshKey, shouldRefreshTrackerAfterDailySyncStatus } from "./dailySyncRefresh";
@@ -73,21 +72,21 @@ import {
   type TradeJournalEntry,
 } from "./tradeJournal";
 import { ReplayCharts } from "./components/ReplayCharts";
-import { SpreadSpeedPanel } from "./components/SpreadSpeedPanel";
 import { ReviewEntryExitChart } from "./components/ReviewEntryExitChart";
+import { useSpxMaContext } from "./useSpxMaContext";
 import { MorningDashboard } from "./components/MorningDashboard";
 import { RrgPanel } from "./components/RrgPanel";
-import { SpxHeatmapPanel } from "./components/SpxHeatmapPanel";
 import "./App.css";
 import "./FplIndicator.css";
 
-type AppPortion = "morning" | "replay" | "rotation" | "heatmap";
+type AppPortion = "morning" | "replay" | "rotation";
 type ViewMode = "replay" | "pull" | "review" | "journal";
 type ReviewExportStatus = "idle" | "copied" | "downloaded" | "copy_unavailable";
 
 const EMPTY_WALLET: WalletSnapshot = { netLiquidation: null, source: "not_loaded", updatedAt: null };
 const AUTO_IMPORT_REFRESH_MS = 60_000;
 const DAILY_SYNC_STATUS_REFRESH_MS = 60_000;
+const DAILY_SYNC_RUNNING_STATUS_REFRESH_MS = 5_000;
 const ACCEPTED_PULL_ISSUE_DATES_KEY = "rubicon.acceptedPullIssueDates.v1";
 const REVIEW_CHART_INTERVALS = [1, 2, 5, 15, 30] as const;
 type ReviewChartInterval = (typeof REVIEW_CHART_INTERVALS)[number];
@@ -116,6 +115,7 @@ function App() {
   const [morningTracksToday, setMorningTracksToday] = useState(true);
   const [selectedDate, setSelectedDate] = useState("");
   const [selectedTradeId, setSelectedTradeId] = useState<string | undefined>();
+  const [selectedSpreadKey, setSelectedSpreadKey] = useState<string | undefined>();
   const [replayIndex, setReplayIndex] = useState(0);
   const [replayMode, setReplayMode] = useState(false);
   const [playing, setPlaying] = useState(false);
@@ -131,10 +131,13 @@ function App() {
   const [dailySyncPreflighting, setDailySyncPreflighting] = useState(false);
   const [dailySyncMessage, setDailySyncMessage] = useState("");
   const [dailySyncStatus, setDailySyncStatus] = useState<DailySyncStatusResult | null>(null);
+  const [dailyOptionRetrying, setDailyOptionRetrying] = useState(false);
   const [lastImportCheck, setLastImportCheck] = useState("");
   const [replayRefreshToken, setReplayRefreshToken] = useState(0);
-  const [spreadSpeed, setSpreadSpeed] = useState<SpreadSpeedPayload | null>(null);
   const [morningSpreadSpeed, setMorningSpreadSpeed] = useState<SpreadSpeedPayload | null>(null);
+  const [morningLiveSpreadSpeed, setMorningLiveSpreadSpeed] = useState<SpreadSpeedPayload | null>(null);
+  const [morningLiveStatus, setMorningLiveStatus] = useState<SpxLiveBarsLiveStatus | null>(null);
+  const [morningLiveBusy, setMorningLiveBusy] = useState(false);
   const [journalEntries, setJournalEntries] = useState<Record<string, TradeJournalEntry>>(readJournalEntriesFromStorage);
   const [acceptedPullIssueDates, setAcceptedPullIssueDates] = useState<Set<string>>(readAcceptedPullIssueDatesFromStorage);
   const [journalSelectedTradeId, setJournalSelectedTradeId] = useState<string | undefined>();
@@ -197,6 +200,17 @@ function App() {
     () => selectTradeByIdOrFirst(tradesForSelectedDate, selectedTradeId),
     [selectedTradeId, tradesForSelectedDate],
   );
+  const quickSpreadGroups = useMemo(() => buildQuickSpreadGroups(tradesForSelectedDate), [tradesForSelectedDate]);
+  const activeSpreadKey = selectedSpreadKey ?? (selectedTrade ? quickSpreadKey(selectedTrade) : undefined);
+  const selectedSpreadGroup = useMemo(
+    () => quickSpreadGroups.find((group) => group.key === activeSpreadKey) ?? null,
+    [activeSpreadKey, quickSpreadGroups],
+  );
+  const selectedChartTrades = useMemo(
+    () => selectedSpreadGroup?.trades ?? (selectedTrade ? [selectedTrade] : []),
+    [selectedSpreadGroup, selectedTrade],
+  );
+  const selectedReplayLabel = selectedSpreadGroup ? quickSpreadLabel(selectedSpreadGroup) : selectedTrade?.strategy ?? "Selected Spread";
   const selectedSummary = useMemo(
     () => snapshot?.dailySummaries.find((summary) => summary.date === selectedDate) ?? null,
     [selectedDate, snapshot],
@@ -250,7 +264,6 @@ function App() {
   const freshness = useMemo(() => (snapshot ? marketFreshness(snapshot, selectedDate) : null), [selectedDate, snapshot]);
   const dateScopedReplay = replay?.date === selectedDate ? replay : null;
   const needsReplayPayload = portion === "replay" && (view === "replay" || view === "review");
-  const needsSelectedSpreadSpeed = portion === "replay" && view === "replay";
 
   const refreshSnapshot = useCallback(
     async ({ silent = false }: { silent?: boolean } = {}) => {
@@ -299,6 +312,12 @@ function App() {
   }, [selectedTrade, tradesForSelectedDate]);
 
   useEffect(() => {
+    if (selectedSpreadKey && !quickSpreadGroups.some((group) => group.key === selectedSpreadKey)) {
+      setSelectedSpreadKey(undefined);
+    }
+  }, [quickSpreadGroups, selectedSpreadKey]);
+
+  useEffect(() => {
     replayIntentRef.current = { playing, replayIndex, replayMode };
   }, [playing, replayIndex, replayMode]);
 
@@ -344,28 +363,15 @@ function App() {
   }, [needsReplayPayload, replayRefreshToken, selectedDate]);
 
   useEffect(() => {
-    if (!selectedDate || !needsSelectedSpreadSpeed) {
-      setSpreadSpeed(null);
-      return;
-    }
-    const controller = new AbortController();
-    fetchSpreadSpeed(selectedDate, controller.signal)
-      .then(setSpreadSpeed)
-      .catch((nextError: Error) => {
-        if (!isAbortLike(nextError)) {
-          setSpreadSpeed(null);
-        }
-      });
-    return () => controller.abort();
-  }, [needsSelectedSpreadSpeed, replayRefreshToken, selectedDate]);
-
-  useEffect(() => {
     if (!morningDate) {
       setMorningSpreadSpeed(null);
       return;
     }
     const controller = new AbortController();
-    fetchSpreadSpeed(morningDate, controller.signal)
+    // For the live "today" view, fall back to the most recent completed session
+    // when today's chain hasn't been pulled yet. Explicit past-date selections
+    // stay exact so the user sees that date's stack (or its honest empty state).
+    fetchSpreadSpeed(morningDate, controller.signal, { fallback: morningTracksToday })
       .then(setMorningSpreadSpeed)
       .catch((nextError: Error) => {
         if (!isAbortLike(nextError)) {
@@ -373,7 +379,54 @@ function App() {
         }
       });
     return () => controller.abort();
-  }, [morningDate, replayRefreshToken]);
+  }, [morningDate, morningTracksToday, replayRefreshToken]);
+
+  // Live SPXW 0DTE Signal-Stack feed: only while tracking today. Polls the live
+  // snapshot (and feed status) every 20s; when it reports `available`, the live
+  // payload is preferred over the EOD fallback below.
+  useEffect(() => {
+    if (!morningTracksToday) {
+      setMorningLiveSpreadSpeed(null);
+      setMorningLiveStatus(null);
+      return;
+    }
+    let cancelled = false;
+    const controller = new AbortController();
+    const poll = () => {
+      fetchLiveSpreadSpeed(controller.signal)
+        .then((payload) => {
+          if (!cancelled) setMorningLiveSpreadSpeed(payload);
+        })
+        .catch((nextError: Error) => {
+          if (!cancelled && !isAbortLike(nextError)) setMorningLiveSpreadSpeed(null);
+        });
+      fetchLiveSpreadSpeedStatus(controller.signal)
+        .then((status) => {
+          if (!cancelled) setMorningLiveStatus(status);
+        })
+        .catch(() => undefined);
+    };
+    poll();
+    const interval = window.setInterval(poll, 20_000);
+    return () => {
+      cancelled = true;
+      controller.abort();
+      window.clearInterval(interval);
+    };
+  }, [morningTracksToday, replayRefreshToken]);
+
+  const runMorningLiveAction = useCallback((action: () => Promise<SpxLiveBarsLiveStatus>) => {
+    setMorningLiveBusy(true);
+    action()
+      .then(setMorningLiveStatus)
+      .catch(() => undefined)
+      .finally(() => setMorningLiveBusy(false));
+  }, []);
+
+  // Prefer the live frame while tracking today and the feed reports data;
+  // otherwise the EOD payload (which itself falls back to the last session).
+  const effectiveMorningSpreadSpeed =
+    morningTracksToday && morningLiveSpreadSpeed?.available ? morningLiveSpreadSpeed : morningSpreadSpeed;
 
   useEffect(() => {
     if (!snapshot) {
@@ -414,6 +467,9 @@ function App() {
         .then((status) => {
           setDailySyncStatus(status);
           setDailySyncRunning(status.state === "running");
+          if (status.state !== "running") {
+            setDailyOptionRetrying(false);
+          }
           if (status.state !== "idle") {
             setDailySyncMessage(dailySyncStatusMessage(status));
           }
@@ -439,6 +495,9 @@ function App() {
       .then((status) => {
         setDailySyncStatus(status);
         setDailySyncRunning(status.state === "running");
+        if (status.state !== "running") {
+          setDailyOptionRetrying(false);
+        }
         setDailySyncMessage(dailySyncStatusMessage(status));
         dailySyncCompletionRefreshKeyRef.current = dailySyncCompletionRefreshKey(status);
       })
@@ -461,6 +520,9 @@ function App() {
         .then((status) => {
           setDailySyncStatus(status);
           setDailySyncRunning(status.state === "running");
+          if (status.state !== "running") {
+            setDailyOptionRetrying(false);
+          }
           setDailySyncMessage(dailySyncStatusMessage(status));
           const decision = shouldRefreshTrackerAfterDailySyncStatus(dailySyncCompletionRefreshKeyRef.current, status);
           dailySyncCompletionRefreshKeyRef.current = decision.nextKey;
@@ -473,7 +535,7 @@ function App() {
             setDailySyncMessage(nextError.message);
           }
         });
-    }, 15_000);
+    }, DAILY_SYNC_RUNNING_STATUS_REFRESH_MS);
 
     return () => window.clearInterval(interval);
   }, [dailySyncRunning, refreshSnapshot]);
@@ -577,6 +639,33 @@ function App() {
     }
   }
 
+  async function runDailyOptionPullFromApp() {
+    if (dailySyncRunning || dailySyncPreflighting || !selectedDate) {
+      return;
+    }
+    setDailyOptionRetrying(true);
+    setDailySyncRunning(true);
+    setDailySyncMessage("");
+    setError(null);
+    let stillRunning = false;
+    try {
+      const result = await runDailyOptionPull(selectedDate);
+      setDailySyncStatus(result);
+      stillRunning = result.state === "running";
+      setDailySyncRunning(stillRunning);
+      setDailySyncMessage(dailySyncStatusMessage(result));
+      await refreshSnapshot({ silent: true });
+    } catch (nextError) {
+      const message = nextError instanceof Error ? nextError.message : String(nextError);
+      setDailySyncRunning(false);
+      setDailySyncMessage(message);
+    } finally {
+      if (!stillRunning) {
+        setDailyOptionRetrying(false);
+      }
+    }
+  }
+
   if (!snapshot) {
     return (
       <main className="loading-shell">
@@ -598,6 +687,7 @@ function App() {
       setSelectedDate(marketToday);
       setCustomDate(marketToday);
       setSelectedTradeId(undefined);
+      setSelectedSpreadKey(undefined);
     }
     setReplayMode(false);
     setPlaying(false);
@@ -609,6 +699,7 @@ function App() {
     setSelectedDate(targetDate);
     setCustomDate(targetDate);
     setRange("custom");
+    setSelectedSpreadKey(undefined);
     setPortion("replay");
     setView("replay");
     showFullDayReplay();
@@ -685,15 +776,6 @@ function App() {
               onClick={() => setPortion("rotation")}
             >
               Rotation
-            </button>
-            <button
-              type="button"
-              role="tab"
-              className={portion === "heatmap" ? "active" : ""}
-              aria-selected={portion === "heatmap"}
-              onClick={() => setPortion("heatmap")}
-            >
-              Heatmap
             </button>
           </div>
           <span className={`refresh-status ${refreshing ? "active" : ""}`} title="Automatic local import check">
@@ -782,20 +864,27 @@ function App() {
 
       {portion === "rotation" ? (
         <RrgPanel />
-      ) : portion === "heatmap" ? (
-        <SpxHeatmapPanel />
       ) : portion === "morning" ? (
         <MorningDashboard
           onOpenReplay={openReplayForMorningDate}
           onSelectDate={selectMorningCalendarDate}
           selectedDate={morningDate || easternDateOffset(0)}
-          spreadSpeed={morningSpreadSpeed}
+          spreadSpeed={effectiveMorningSpreadSpeed}
+          liveFeed={{
+            status: morningLiveStatus,
+            busy: morningLiveBusy,
+            tracksToday: morningTracksToday,
+            onStart: () => runMorningLiveAction(startLiveSpreadSpeed),
+            onStop: () => runMorningLiveAction(stopLiveSpreadSpeed),
+          }}
+          trades={snapshot?.trades ?? []}
         />
       ) : view === "pull" ? (
         <DailyPullScreen
           allTrades={snapshot.trades}
           availableDates={snapshot.availableDates}
           dailySyncMessage={dailySyncMessage}
+          dailyOptionRetrying={dailyOptionRetrying}
           dailySyncPreflighting={dailySyncPreflighting}
           dailySyncRunning={dailySyncRunning}
           dailySyncStatus={dailySyncStatus}
@@ -808,11 +897,13 @@ function App() {
           onPreflightDailySync={() => void preflightDailySyncFromApp()}
           onRefreshGoogleSnapshot={() => void refreshGoogleSnapshotFromApp()}
           onAcceptDateIssues={acceptPullDateIssues}
+          onRunDailyOptionPull={() => void runDailyOptionPullFromApp()}
           onRunDailySync={() => void runDailySyncFromApp()}
           onSelectDate={(date) => {
             setSelectedDate(date);
             setCustomDate(date);
             setRange("custom");
+            setSelectedSpreadKey(undefined);
           }}
           selectedDate={selectedDate}
           sourceHealth={visibleSourceHealth}
@@ -832,6 +923,7 @@ function App() {
             setSelectedDate(trade.date);
             setCustomDate(trade.date);
             setSelectedTradeId(trade.id);
+            setSelectedSpreadKey(undefined);
             setJournalSelectedTradeId(trade.id);
             setPortion("replay");
             setView("replay");
@@ -841,10 +933,12 @@ function App() {
             setSelectedDate(date);
             setCustomDate(date);
             setRange("custom");
+            setSelectedSpreadKey(undefined);
             setJournalSelectedTradeId(undefined);
           }}
           onSelectTrade={(trade) => {
             setSelectedTradeId(trade.id);
+            setSelectedSpreadKey(undefined);
             setJournalSelectedTradeId(trade.id);
           }}
           selectedDate={selectedDate}
@@ -868,6 +962,7 @@ function App() {
             setSelectedDate(trade.date);
             setCustomDate(trade.date);
             setSelectedTradeId(trade.id);
+            setSelectedSpreadKey(undefined);
             setPortion("replay");
             setView("replay");
           }}
@@ -875,6 +970,7 @@ function App() {
             setSelectedDate(date);
             setCustomDate(date);
             setRange("custom");
+            setSelectedSpreadKey(undefined);
           }}
         />
       ) : (
@@ -895,6 +991,7 @@ function App() {
                   if (preset.id === "today") {
                     setSelectedDate(marketToday);
                     setCustomDate(marketToday);
+                    setSelectedSpreadKey(undefined);
                     showFullDayReplay();
                   }
                   if (preset.id === "yesterday") {
@@ -902,6 +999,7 @@ function App() {
                     yesterday.setDate(yesterday.getDate() - 1);
                     setSelectedDate(yesterday.toLocaleDateString("en-CA"));
                     setCustomDate(yesterday.toLocaleDateString("en-CA"));
+                    setSelectedSpreadKey(undefined);
                     showFullDayReplay();
                   }
                 }}
@@ -918,6 +1016,7 @@ function App() {
               setCustomDate(event.target.value);
               setSelectedDate(event.target.value);
               setRange("custom");
+              setSelectedSpreadKey(undefined);
               showFullDayReplay();
             }}
             type="date"
@@ -936,6 +1035,7 @@ function App() {
                   onClick={() => {
                     setSelectedDate(date);
                     setCustomDate(date);
+                    setSelectedSpreadKey(undefined);
                     showFullDayReplay();
                   }}
                   title={issueBadge?.title ?? (acceptedIssues ? `${date}: issues accepted` : undefined)}
@@ -970,6 +1070,7 @@ function App() {
               setSelectedDate(trade.date);
               setCustomDate(trade.date);
               setSelectedTradeId(trade.id);
+              setSelectedSpreadKey(undefined);
               showFullDayReplay();
             }}
           />
@@ -980,39 +1081,50 @@ function App() {
             <div>
               <span className="eyeless-label">Replay Cockpit</span>
               <h2>{selectedDate}{replayMode ? ` at ${currentTime}` : ""}</h2>
-              {selectedTrade && (
+              {selectedSpreadGroup ? (
+                <p className="trade-entry-meta spread-mode">
+                  Spread {selectedSpreadGroup.side} {selectedSpreadGroup.shortStrike}/{selectedSpreadGroup.longStrike} - {selectedSpreadGroup.trades.length} entries - {formatNumber(selectedSpreadGroup.contracts)} contracts - {formatSignedCurrency(selectedSpreadGroup.pnl)}
+                </p>
+              ) : selectedTrade ? (
                 <p className="trade-entry-meta">
                   Entry {tradeClockLabel(selectedTrade.entryTime)} EST - {selectedTrade.side} {selectedTrade.shortStrike}/{selectedTrade.longStrike} - {formatNumber(selectedTrade.contracts)}
                 </p>
-              )}
+              ) : null}
             </div>
-            <div className="quick-trades" aria-label={quickTradeCountLabel(tradesForSelectedDate)}>
-              {tradesForSelectedDate.map((trade) => {
-                const selected = selectedTrade?.id === trade.id;
-                return (
-                <button
-                  className={selected ? "active" : ""}
-                  aria-label={quickTradeAriaLabel(trade)}
-                  aria-pressed={selected}
-                  data-testid="quick-trade-button"
-                  data-trade-id={trade.id}
-                  key={trade.id}
-                  onClick={() => {
-                    setSelectedTradeId(trade.id);
-                    showFullDayReplay();
-                  }}
-                  title={trade.entryChartDeviationFlag ? entryDeviationTitle(trade) : quickTradeAriaLabel(trade)}
-                  type="button"
-                >
-                  {trade.entryChartDeviationFlag && <span className="quick-alert" aria-hidden="true">!</span>}
-                  {quickTradeLabel(trade)}
-                  {selected && <span className="quick-selected-label">Selected</span>}
-                </button>
-                );
-              })}
+            <div className="replay-selection-panel">
+              <div className="replay-selection-row">
+                <span className="eyeless-label">Spreads</span>
+                <div className="quick-spreads" aria-label={`${quickSpreadGroups.length} selectable spreads`}>
+                  {quickSpreadGroups.map((group) => {
+                    const selected = selectedSpreadGroup?.key === group.key;
+                    const sideClass = group.side.toLowerCase();
+                    return (
+                      <button
+                        aria-label={quickSpreadAriaLabel(group)}
+                        aria-pressed={selected}
+                        className={selected ? "active" : ""}
+                        data-spread-key={group.key}
+                        data-testid="quick-spread-button"
+                        key={group.key}
+                        onClick={() => {
+                          setSelectedSpreadKey(group.key);
+                          setSelectedTradeId(group.trades[0]?.id);
+                          showFullDayReplay();
+                        }}
+                        title={`${quickSpreadLabel(group)} - ${formatNumber(group.contracts)} contracts - ${formatSignedCurrency(group.pnl)}`}
+                        type="button"
+                      >
+                        <span className={`spread-side-dot ${sideClass}`} aria-hidden="true" />
+                        <span>{quickSpreadLabel(group)}</span>
+                        <span className={`quick-spread-pnl ${group.pnl >= 0 ? "profit" : "loss"}`}>{formatSignedCurrency(group.pnl)}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           </div>
-          <ReplayCharts replay={dateScopedReplay} replayIndex={replayIndex} replayMode={replayMode} selectedTrade={selectedTrade} />
+          <ReplayCharts replay={dateScopedReplay} replayIndex={replayIndex} replayMode={replayMode} selectedTrade={selectedTrade} selectedTrades={selectedChartTrades} selectionLabel={selectedReplayLabel} />
           <div className="scrubber">
             <div className="replay-mode-toggle micro-segment" role="group" aria-label="Replay chart mode">
               <button className={!replayMode ? "active" : ""} disabled={replayControlsDisabled} onClick={showFullDayReplay} type="button">
@@ -1048,7 +1160,6 @@ function App() {
               </select>
             </label>
           </div>
-          <SpreadSpeedPanel payload={spreadSpeed} currentLabel={currentTime} />
         </section>
       </div>
       </>
@@ -1534,6 +1645,7 @@ function DailyPullScreen({
   allTrades,
   availableDates,
   dailySyncMessage,
+  dailyOptionRetrying,
   dailySyncPreflighting,
   dailySyncRunning,
   dailySyncStatus,
@@ -1545,6 +1657,7 @@ function DailyPullScreen({
   onAcceptDateIssues,
   onPreflightDailySync,
   onRefreshGoogleSnapshot,
+  onRunDailyOptionPull,
   onRunDailySync,
   onSelectDate,
   selectedDate,
@@ -1556,6 +1669,7 @@ function DailyPullScreen({
   allTrades: TradeRecord[];
   availableDates: string[];
   dailySyncMessage: string;
+  dailyOptionRetrying: boolean;
   dailySyncPreflighting: boolean;
   dailySyncRunning: boolean;
   dailySyncStatus: DailySyncStatusResult | null;
@@ -1567,6 +1681,7 @@ function DailyPullScreen({
   onAcceptDateIssues: (date: string) => void;
   onPreflightDailySync: () => void;
   onRefreshGoogleSnapshot: () => void;
+  onRunDailyOptionPull: () => void;
   onRunDailySync: () => void;
   onSelectDate: (date: string) => void;
   selectedDate: string;
@@ -1603,9 +1718,68 @@ function DailyPullScreen({
       }),
     [availableDates, checklist, countsByDate, dailySummaries, selectedDate, selectedTradeCount, summary, today],
   );
+  const runGuard = buildDailySyncRunGuard(dailySyncStatus, today);
+  const runDisabled = dailySyncRunning || dailySyncPreflighting || runGuard.disabled;
+  const optionPullDisabled = dailySyncRunning || dailySyncPreflighting || !selectedDate;
+  const dailySyncProgress = useMemo(() => buildDailySyncProgress(dailySyncStatus), [dailySyncStatus]);
+  const visibleDailySyncMessage =
+    dailySyncMessage && (dailySyncRunning || dailySyncPreflighting || dailySyncStatus?.ok === false || dailySyncStatus?.state === "running")
+      ? dailySyncMessage
+      : "";
 
   return (
     <section className="daily-pull-shell" aria-label="Daily pull review">
+      <section className="daily-pull-pipeline-bar" aria-label="Daily pipeline actions">
+        <div className="daily-pull-pipeline-summary">
+          <div>
+            <span className="eyeless-label">Pipeline</span>
+            {visibleDailySyncMessage && <p>{visibleDailySyncMessage}</p>}
+          </div>
+          <DailySyncProgressBar progress={dailySyncProgress} />
+        </div>
+        <div className="daily-pull-pipeline-actions">
+          <button
+            className={`daily-pull-pipeline-button secondary ${dailySyncPreflighting ? "busy" : ""}`}
+            disabled={dailySyncRunning || dailySyncPreflighting}
+            onClick={onPreflightDailySync}
+            title="Check the local daily pipeline command and target without starting the import"
+            type="button"
+          >
+            <RefreshCcw size={14} />
+            {dailySyncPreflighting ? "Preflighting" : "Preflight Pipeline"}
+          </button>
+          <button
+            className={`daily-pull-pipeline-button primary ${dailySyncRunning ? "busy" : runGuard.disabled ? "locked" : ""}`}
+            disabled={runDisabled}
+            onClick={onRunDailySync}
+            title={runGuard.title}
+            type="button"
+          >
+            <RefreshCcw size={15} />
+            {dailySyncRunning ? "Pipeline Running" : "Run Daily Pipeline"}
+          </button>
+        </div>
+      </section>
+
+      <section className="option-repull-bar" aria-label="Option data retry">
+        <div>
+          <span className="eyeless-label">Option Data Retry</span>
+          <p>Retries failed or missing option pulls for {selectedDate}</p>
+        </div>
+        <div className="option-repull-actions">
+          <button
+            className={dailyOptionRetrying ? "busy" : ""}
+            disabled={optionPullDisabled}
+            onClick={onRunDailyOptionPull}
+            title="Retry failed or missing SPX spread-leg, SPX chain-band, owned option, and option open-interest pulls"
+            type="button"
+          >
+            <RefreshCcw size={14} />
+            {dailyOptionRetrying ? "Retry Running" : "Retry Missing Option Data"}
+          </button>
+        </div>
+      </section>
+
       <aside className="review-date-rail" aria-label="Daily pull dates">
         <div className="rail-title">
           <CalendarDays size={16} />
@@ -1657,23 +1831,15 @@ function DailyPullScreen({
             <p>{reviewModel.subtitle}</p>
           </div>
           <div className="pull-status-cluster" aria-label="Daily pull status totals">
-            <PullStatusPill status={reviewModel.tone} label="Review" value={`${reviewModel.reviewItems.filter((item) => item.status === "complete").length}/${reviewModel.reviewItems.length}`} />
+            <PullStatusPill status={reviewModel.tone} label="Important" value={`${reviewModel.reviewItems.filter((item) => item.status === "complete").length}/${reviewModel.reviewItems.length}`} />
             <PullStatusPill status={bucketStatus(reviewModel.buckets.diagnostic)} label="Diagnostics" value={reviewModel.diagnosticProblemCount} />
-            <PullStatusPill status={bucketStatus(reviewModel.buckets.archive)} label="Archive" value={reviewModel.archiveProblemCount} />
+            <PullStatusPill status={bucketStatus(reviewModel.buckets.archive)} label="Upload" value={reviewModel.archiveProblemCount} />
           </div>
         </div>
 
         {reviewModel.todayBanner && <TodayPullBanner banner={reviewModel.todayBanner} onSelectDate={onSelectDate} />}
 
-        <PullCoveragePanel
-          countLabel={`${reviewModel.reviewProblemCount} review item${reviewModel.reviewProblemCount === 1 ? "" : "s"} need attention`}
-          eyebrow="Review Critical"
-          items={reviewModel.reviewItems}
-          selectedDate={selectedDate}
-          title="Trade, SPX, and replay outputs"
-        />
-
-        <SessionHealth model={reviewModel} selectedDate={selectedDate} summary={summary} />
+        <DailyPullGlance model={reviewModel} selectedDate={selectedDate} />
 
         <DailyPullDetailSection
           bucket={reviewModel.buckets.diagnostic}
@@ -1685,50 +1851,74 @@ function DailyPullScreen({
 
         <details className="pull-detail-section" data-testid="daily-pull-archive">
           <summary>
-            <span>Pipeline / Archive Details</span>
+            <span>Pipeline / Upload Details</span>
             <b>{reviewModel.archiveProblemCount} item{reviewModel.archiveProblemCount === 1 ? "" : "s"}</b>
           </summary>
           <PullCoveragePanel
-            countLabel={`${reviewModel.archiveProblemCount} archive item${reviewModel.archiveProblemCount === 1 ? "" : "s"}`}
-            eyebrow="Archive"
+            countLabel={`${reviewModel.archiveProblemCount} upload item${reviewModel.archiveProblemCount === 1 ? "" : "s"}`}
+            eyebrow="Upload"
             items={reviewModel.archiveItems}
             selectedDate={selectedDate}
-            title="Payload, workbook, and upload receipt"
+            title="Tracker payload and Google update"
           />
           <DailyPullIssueBucketPanel bucket={reviewModel.buckets.archive} />
           <UploadReceiptCheckPanel summary={summary} />
-          <section className="pull-checklist" data-testid="daily-pull-checklist" aria-label={`Daily pull process checks for ${selectedDate}`}>
-            <div className="review-panel-heading">
-              <div>
-                <span className="eyeless-label">Process</span>
-                <h3>Pull/upload process checks</h3>
+          <details className="pull-audit-details" data-testid="daily-pull-audit">
+            <summary>
+              <span>Run audit</span>
+              <b>{checklist.completeCount}/{checklist.steps.length} checked</b>
+            </summary>
+            <section className="pull-checklist" data-testid="daily-pull-checklist" aria-label={`Daily pull process checks for ${selectedDate}`}>
+              <div className="review-panel-heading">
+                <div>
+                  <span className="eyeless-label">Process</span>
+                  <h3>Pull/upload process checks</h3>
+                </div>
+                <span className="panel-count">{checklist.completeCount}/{checklist.steps.length} checked</span>
               </div>
-              <span className="panel-count">{checklist.completeCount}/{checklist.steps.length} checked</span>
-            </div>
-            <div className="pull-step-list">
-              {checklist.steps.map((step, index) => (
-                <PullStepRow index={index + 1} key={step.id} step={step} />
-              ))}
-            </div>
-          </section>
-          <SourceLedger
-            dailySyncMessage={dailySyncMessage}
-            dailySyncPreflighting={dailySyncPreflighting}
-            dailySyncRunning={dailySyncRunning}
-            dailySyncStatus={dailySyncStatus}
-            googleSnapshotRefreshMessage={googleSnapshotRefreshMessage}
-            googleSnapshotRefreshing={googleSnapshotRefreshing}
-            latestTradeDate={latestTradeDate}
-            onPreflightDailySync={onPreflightDailySync}
-            onRunDailySync={onRunDailySync}
-            onRefreshGoogleSnapshot={onRefreshGoogleSnapshot}
-            selectedDate={selectedDate}
-            sources={sourceHealth}
-            today={today}
-          />
+              <div className="pull-step-list">
+                {checklist.steps.map((step, index) => (
+                  <PullStepRow index={index + 1} key={step.id} step={step} />
+                ))}
+              </div>
+            </section>
+            <SourceLedger
+              dailySyncStatus={dailySyncStatus}
+              googleSnapshotRefreshMessage={googleSnapshotRefreshMessage}
+              googleSnapshotRefreshing={googleSnapshotRefreshing}
+              latestTradeDate={latestTradeDate}
+              onRefreshGoogleSnapshot={onRefreshGoogleSnapshot}
+              selectedDate={selectedDate}
+              sources={sourceHealth}
+              today={today}
+            />
+          </details>
         </details>
       </section>
     </section>
+  );
+}
+
+function DailySyncProgressBar({ progress }: { progress: DailySyncProgressModel }) {
+  const valueNow = Math.round(progress.percent);
+  return (
+    <div className={`daily-sync-progress ${progress.tone}`} data-testid="daily-sync-progress">
+      <div className="daily-sync-progress-copy">
+        <strong>{progress.label}</strong>
+        <span>{progress.countLabel}</span>
+      </div>
+      <div
+        aria-label="Daily sync progress"
+        aria-valuemax={100}
+        aria-valuemin={0}
+        aria-valuenow={valueNow}
+        className="daily-sync-progress-track"
+        role="progressbar"
+      >
+        <span style={{ width: `${valueNow}%` }} />
+      </div>
+      <div className="daily-sync-progress-detail">{progress.detail}</div>
+    </div>
   );
 }
 
@@ -1857,6 +2047,63 @@ function UploadReceiptCheckPanel({ summary }: { summary: DailySummary | null }) 
   );
 }
 
+function DailyPullGlance({ model, selectedDate }: { model: DailyPullViewModel; selectedDate: string }) {
+  const readyCount = model.reviewItems.filter((item) => item.status === "complete").length;
+  const problemCount = model.reviewItems.length - readyCount;
+  const tone = model.reviewItems.some((item) => item.status === "failed")
+    ? "failed"
+    : model.reviewItems.some((item) => item.status === "warning")
+      ? "warning"
+      : "complete";
+
+  return (
+    <section className={`daily-pull-glance ${tone}`} data-testid="daily-pull-glance" aria-label={`Important daily pull checks for ${selectedDate}`}>
+      <div className="review-panel-heading">
+        <div>
+          <span className="eyeless-label">Important Checks</span>
+          <h3>{problemCount ? "Important checks need attention" : "Everything important is complete"}</h3>
+        </div>
+        <span className={`panel-count ${tone}`}>{readyCount}/{model.reviewItems.length} complete</span>
+      </div>
+      <div className="glance-check-list">
+        {model.reviewItems.map((item) => (
+          <DailyPullGlanceRow item={item} key={item.id} />
+        ))}
+      </div>
+      {model.buckets.review.entries.length > 0 && (
+        <div className="issue-list pull-issue-list" aria-label={`Important check blockers for ${selectedDate}`}>
+          {model.buckets.review.entries.map((entry) => (
+            <DailyPullIssueEntryRow entry={entry} key={entry.id} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function DailyPullGlanceRow({ item }: { item: DailyPullCoverageItem }) {
+  const Icon = item.status === "complete" ? CheckCircle2 : item.status === "warning" ? AlertTriangle : CircleX;
+  const detailText = item.status === "complete" ? item.readinessLabel : coverageImpactSummary(item);
+  const statusLabel = item.status === "complete" ? "Complete" : item.status === "warning" ? "Check" : "Blocked";
+  const title = [detailText, ...item.failures, ...item.warnings, ...item.notes].join("\n") || item.basis;
+
+  return (
+    <article aria-label={`${item.label}. ${statusLabel}. ${title}`} className={`glance-check ${item.status}`} title={title}>
+      <span className="glance-check-icon" aria-hidden="true">
+        <Icon size={17} />
+      </span>
+      <div className="glance-check-copy">
+        <b>{item.label}</b>
+        <small>{detailText}</small>
+      </div>
+      <div className="glance-check-meta">
+        <span>{item.pulledLabel}</span>
+        <b>{statusLabel}</b>
+      </div>
+    </article>
+  );
+}
+
 function PullCoveragePanel({
   countLabel,
   eyebrow = "Required Outputs",
@@ -1888,7 +2135,6 @@ function PullCoveragePanel({
           <span role="columnheader">Needed</span>
           <span role="columnheader">Pulled</span>
           <span role="columnheader">Missing</span>
-          <span role="columnheader">Coverage</span>
         </div>
         {items.map((item) => (
           <PullCoverageRow item={item} key={item.id} />
@@ -1935,12 +2181,6 @@ function PullCoverageRow({ item }: { item: DailyPullCoverageItem }) {
       <span className="coverage-number" role="cell">{item.expectedLabel}</span>
       <span className="coverage-number" role="cell">{item.pulledLabel}</span>
       <span className={`coverage-number ${missingTone}`} role="cell">{item.missingLabel}</span>
-      <div className="coverage-meter-cell" role="cell">
-        <span>{formatCoveragePercent(item.coveragePct)}</span>
-        <div className="coverage-meter" aria-hidden="true">
-          <i style={{ width: `${Math.max(0, Math.min(100, item.coveragePct ?? 0))}%` }} />
-        </div>
-      </div>
       {detailGroups.length > 0 && (
         <div className="coverage-detail-popover" role="tooltip">
           <div className={`coverage-detail-group impact ${item.status}`}>
@@ -1988,13 +2228,6 @@ function bucketStatus(bucket: DailyPullIssueBucket): DailyPullStepStatus {
     return "warning";
   }
   return "complete";
-}
-
-function formatCoveragePercent(value: number | null): string {
-  if (value === null || Number.isNaN(value)) {
-    return "Unknown";
-  }
-  return `${value.toFixed(1)}%`;
 }
 
 function PullStepRow({ index, step }: { index: number; step: DailyPullChecklistStep }) {
@@ -2073,11 +2306,14 @@ function DailyReviewScreen({
   trades: TradeRecord[];
 }) {
   const review = useMemo(() => buildDailyReview(trades), [trades]);
+  const reviewTimelineEvents = useMemo(() => review.events.filter((event) => event.kind !== "expiration"), [review.events]);
   const reviewStats = useMemo(() => summarizeTrades(trades, EMPTY_WALLET), [trades]);
   const pnlSimulation = useMemo(() => buildDailyPnlSimulation(trades, spreadMarks, spxBars), [spxBars, spreadMarks, trades]);
   const pnlSimulationSummary = useMemo(() => summarizeDailyPnlSimulation(pnlSimulation), [pnlSimulation]);
   const tradeMap = useMemo(() => mapTradesById(trades), [trades]);
   const [reviewChartInterval, setReviewChartInterval] = useState<ReviewChartInterval>(2);
+  const [cheatCode, setCheatCode] = useState(false);
+  const maContext = useSpxMaContext(selectedDate || null, cheatCode);
   const [exportStatus, setExportStatus] = useState<ReviewExportStatus>("idle");
   const [canCopyReview, setCanCopyReview] = useState(canAttemptClipboardCopy);
   const countsByDate = useMemo(() => countTradesByDate(allTrades), [allTrades]);
@@ -2161,9 +2397,9 @@ function DailyReviewScreen({
         <div className="review-hero">
           <div>
             <span className="eyeless-label">Daily Review</span>
-            <h2>{selectedDate} entries, exits, and expiries</h2>
+            <h2>{selectedDate} entries and exits</h2>
             <p>
-              {review.events.length} timestamped events from {review.totalEntries} entries, {review.totalExits} exits, and {review.totalExpirations} expiries.
+              {reviewTimelineEvents.length} timestamped events from {review.totalEntries} entries and {review.totalExits} exits.
             </p>
           </div>
           <div className="review-hero-actions">
@@ -2212,8 +2448,8 @@ function DailyReviewScreen({
           <ReviewMetric
             detail={`${review.closedTrades} closed - ${review.openTrades} open`}
             icon={<ClipboardList size={15} />}
-            label="Entries / exits / expiries"
-            value={`${review.totalEntries} / ${review.totalExits} / ${review.totalExpirations}`}
+            label="Entries / exits"
+            value={`${review.totalEntries} / ${review.totalExits}`}
           />
           <ReviewMetric
             detail={`${formatPercent(reviewStats.winRate)} win rate`}
@@ -2274,6 +2510,15 @@ function DailyReviewScreen({
                     {interval}m
                   </button>
                 ))}
+                <button
+                  aria-pressed={cheatCode}
+                  className={cheatCode ? "active" : ""}
+                  onClick={() => setCheatCode((enabled) => !enabled)}
+                  title="Toggle cheat-code moving averages (50/200 EMA & SMA)"
+                  type="button"
+                >
+                  CC
+                </button>
               </div>
             </div>
           </div>
@@ -2285,6 +2530,8 @@ function DailyReviewScreen({
                 pnlPoints={pnlSimulation}
                 trades={trades}
                 onSelectTrade={onReplayTrade}
+                cheatCode={cheatCode}
+                warmupCloses={maContext?.byInterval[String(reviewChartInterval)] ?? []}
               />
             ) : (
               <div className="review-empty">SPX bars are not loaded for this date yet.</div>
@@ -2299,10 +2546,10 @@ function DailyReviewScreen({
                 <span className="eyeless-label">Sequence</span>
                 <h3>Entry / Exit Timeline</h3>
               </div>
-              <span className="panel-count">{review.events.length} events</span>
+              <span className="panel-count">{reviewTimelineEvents.length} events</span>
             </div>
             <div className="event-timeline">
-              {review.events.map((event) => {
+              {reviewTimelineEvents.map((event) => {
                 const trade = tradeMap.get(event.tradeId);
                 return (
                   <button
@@ -2312,7 +2559,7 @@ function DailyReviewScreen({
                     onClick={() => trade && onReplayTrade(trade)}
                     type="button"
                   >
-                    <span className="event-kind-icon">{event.kind === "entry" ? <LogIn size={14} /> : event.kind === "expiration" ? <CircleX size={14} /> : <LogOut size={14} />}</span>
+                    <span className="event-kind-icon">{event.kind === "entry" ? <LogIn size={14} /> : <LogOut size={14} />}</span>
                     <span className="event-time">{event.timeLabel}</span>
                     <span className={`side-pill ${event.side.toLowerCase()}`}>{reviewActionDirectionLabel(event.side)}</span>
                     <span className="event-main">
@@ -2320,7 +2567,7 @@ function DailyReviewScreen({
                       <small>{event.strategy} - {formatNumber(event.contracts)} contract{event.contracts === 1 ? "" : "s"}</small>
                     </span>
                     <span className="event-detail">
-                      <b>{event.kind === "entry" ? "Entry" : event.kind === "expiration" ? "Expiry" : "Exit"} {formatNumber(event.price, 2)}</b>
+                      <b>{event.kind === "entry" ? "Entry" : "Exit"} {formatNumber(event.price, 2)}</b>
                       <small>SPX {formatNumber(event.spx, 2)}</small>
                     </span>
                     <span className="event-lifecycle">
@@ -2342,7 +2589,7 @@ function DailyReviewScreen({
                   </button>
                 );
               })}
-              {!review.events.length && <div className="review-empty">No review events were imported for this date.</div>}
+              {!reviewTimelineEvents.length && <div className="review-empty">No entry or exit events were imported for this date.</div>}
             </div>
           </section>
 
@@ -2502,29 +2749,19 @@ function isIbkrWalletSource(source: SourceHealth): boolean {
 }
 
 function SourceLedger({
-  dailySyncMessage,
-  dailySyncPreflighting,
-  dailySyncRunning,
   dailySyncStatus,
   googleSnapshotRefreshMessage,
   googleSnapshotRefreshing,
   latestTradeDate,
-  onPreflightDailySync,
-  onRunDailySync,
   onRefreshGoogleSnapshot,
   selectedDate,
   sources,
   today,
 }: {
-  dailySyncMessage: string;
-  dailySyncPreflighting: boolean;
-  dailySyncRunning: boolean;
   dailySyncStatus: DailySyncStatusResult | null;
   googleSnapshotRefreshMessage: string;
   googleSnapshotRefreshing: boolean;
   latestTradeDate: string | null;
-  onPreflightDailySync: () => void;
-  onRunDailySync: () => void;
   onRefreshGoogleSnapshot: () => void;
   selectedDate: string;
   sources: SourceHealth[];
@@ -2532,39 +2769,13 @@ function SourceLedger({
 }) {
   const diagnostics = buildDailySyncDiagnostics(dailySyncStatus, selectedDate);
   const readiness = buildDailySyncReadiness(dailySyncStatus, today, latestTradeDate);
-  const runGuard = buildDailySyncRunGuard(dailySyncStatus, today);
-  const runDisabled = dailySyncRunning || dailySyncPreflighting || runGuard.disabled;
   const visibleSources = sources.filter((source) => source.status !== "ok" && !isIbkrWalletSource(source));
-  const visibleDailySyncMessage =
-    dailySyncMessage && (dailySyncRunning || dailySyncPreflighting || dailySyncStatus?.ok === false || dailySyncStatus?.state === "running")
-      ? dailySyncMessage
-      : "";
 
   return (
     <section className="source-ledger" aria-label="Data source state">
       <div className="source-ledger-heading">
         <span className="eyeless-label">Source State</span>
         <div className="source-ledger-actions">
-          <button
-            className={`source-action-button ${dailySyncPreflighting ? "busy" : ""}`}
-            disabled={dailySyncRunning || dailySyncPreflighting}
-            onClick={onPreflightDailySync}
-            title="Check the local AI STUFF daily sync command and target without starting the import"
-            type="button"
-          >
-            <RefreshCcw size={13} />
-            {dailySyncPreflighting ? "Preflighting" : "Preflight Sync"}
-          </button>
-          <button
-            className={`source-action-button ${dailySyncRunning ? "busy" : runGuard.disabled ? "locked" : ""}`}
-            disabled={runDisabled}
-            onClick={onRunDailySync}
-            title={runGuard.title}
-            type="button"
-          >
-            <RefreshCcw size={13} />
-            {dailySyncRunning ? "Sync Running" : "Run Daily Sync"}
-          </button>
           <button
             className="source-action-button"
             disabled={googleSnapshotRefreshing}
@@ -2577,7 +2788,6 @@ function SourceLedger({
           </button>
         </div>
       </div>
-      {visibleDailySyncMessage && <p className="source-ledger-message">{visibleDailySyncMessage}</p>}
       {googleSnapshotRefreshMessage && <p className="source-ledger-message">{googleSnapshotRefreshMessage}</p>}
       {readiness.tone === "error" && (
         <section className={`sync-readiness ${readiness.tone}`} aria-label="Daily sync readiness">
@@ -2602,6 +2812,22 @@ function SourceLedger({
               </span>
             ))}
           </div>
+          {diagnostics.stages.length > 0 && (
+            <ol className="sync-step-list pipeline-stage-list" aria-label="Daily pipeline stage progress">
+              {diagnostics.stages.map((stage) => {
+                const Icon = pipelineStatusIcon(stage.status);
+                return (
+                  <li className={`sync-step-item ${stage.status}`} key={stage.id}>
+                    <Icon size={13} />
+                    <div>
+                      <b>{stage.label}</b>
+                      <span>{stage.detail || formatStatus(stage.status)}</span>
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+          )}
           {diagnostics.steps.length > 0 && (
             <ol className="sync-step-list" aria-label="Daily sync output progress">
               {diagnostics.steps.map((step) => {
@@ -2667,13 +2893,18 @@ function SourceLedger({
 }
 
 function dailySyncStatusMessage(status: DailySyncStatusResult): string {
-  const summary = status.latestSummary
-    ? ` Latest summary ${status.latestSummary.date}: ${status.latestSummary.status ?? "unknown"} availability, ${formatNumber(status.latestSummary.entryCount ?? 0)} entries.`
+  const evidenceSummary = status.latestSummary ?? status.latestPipelineRun;
+  const summary = evidenceSummary
+    ? ` Latest pipeline run ${evidenceSummary.date}: ${evidenceSummary.status ?? "unknown"} availability, ${formatNumber(evidenceSummary.entryCount ?? 0)} entries.`
     : "";
   const pid = status.pid ? ` PID ${status.pid}.` : "";
+  const googleVerdict = status.googleUploaded === undefined ? "unknown" : status.googleUploaded ? "uploaded" : "not uploaded";
+  const verdict = status.reviewReady !== undefined || status.googleUploaded !== undefined
+    ? ` Review ${status.reviewReady ? "ready" : "not ready"}; Google ${googleVerdict}.`
+    : "";
   const targetPlan = status.targetPlan ? ` ${status.targetPlan.note}` : "";
   const command = status.dryRun && status.command?.length ? ` Command: ${status.command.join(" ")}` : "";
-  return `${status.message}${pid}${summary}${targetPlan}${command}`;
+  return `${status.message}${pid}${verdict}${summary}${targetPlan}${command}`;
 }
 
 function isAbortLike(error: Error): boolean {
@@ -2690,99 +2921,13 @@ function Kpi({ detail, label, tone, value }: { detail?: string; label: string; t
   );
 }
 
-function SessionHealth({ model, selectedDate, summary }: { model: DailyPullViewModel; selectedDate: string; summary: DailySummary | null }) {
-  const reviewBucket = model.buckets.review;
-  const diagnosticBucket = model.buckets.diagnostic;
-  const archiveBucket = model.buckets.archive;
-  const readyReviewItems = model.reviewItems.filter((item) => item.status === "complete").length;
-  const healthTone = model.tone === "failed" ? "error" : model.tone === "warning" ? "warning" : "ok";
-
-  return (
-    <section className={`session-health review-first ${healthTone === "ok" ? "clean" : "has-issues"}`}>
-      <div className="health-heading">
-        <div>
-          <span className="eyeless-label">Data Integrity</span>
-          <h2>{selectedDate} review readiness</h2>
-        </div>
-        <span className={`health-pill ${healthTone}`}>
-          {healthTone === "ok" ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}
-          {model.title}
-        </span>
-      </div>
-
-      <div className="health-metrics">
-        <HealthMetric
-          detail={`${readyReviewItems}/${model.reviewItems.length} critical outputs ready${summary ? `; ${formatNumber(summary.entryCount)} entries` : ""}.`}
-          icon={<Server size={15} />}
-          label="Review"
-          tone={healthTone}
-          value={model.verdict === "today_in_progress" ? "Waiting" : model.verdict === "blocked" ? "Blocked" : "Usable"}
-        />
-        <HealthMetric
-          detail="Option breadth, OI, underlying, endpoint, and source context."
-          icon={<Gauge size={15} />}
-          label="Diagnostics"
-          tone={bucketTone(diagnosticBucket)}
-          value={diagnosticBucket.entries.length ? `${diagnosticBucket.entries.length} item${diagnosticBucket.entries.length === 1 ? "" : "s"}` : "Quiet"}
-        />
-        <HealthMetric
-          detail={summary ? `${summary.uploadTabCount} tabs - ${formatNumber(summary.payloadRows)} staged rows.` : "No selected-date archive summary."}
-          icon={<HardDrive size={15} />}
-          label="Archive"
-          tone={bucketTone(archiveBucket)}
-          value={archiveBucket.entries.length ? `${archiveBucket.entries.length} item${archiveBucket.entries.length === 1 ? "" : "s"}` : "Quiet"}
-        />
-      </div>
-
-      {reviewBucket.entries.length ? (
-        <div className="issue-list" aria-label={`Review blockers for ${selectedDate}`}>
-          {reviewBucket.entries.map((entry) => (
-            <DailyPullIssueEntryRow entry={entry} key={entry.id} />
-          ))}
-        </div>
-      ) : (
-        <p className="health-empty">{reviewBucket.emptyText}</p>
-      )}
-    </section>
-  );
-}
-
-function bucketTone(bucket: DailyPullIssueBucket): "ok" | "warning" | "error" {
-  return bucket.tone;
-}
-
-function HealthMetric({
-  detail,
-  icon,
-  label,
-  tone,
-  value,
-}: {
-  detail: string;
-  icon: ReactNode;
-  label: string;
-  tone: "ok" | "warning" | "error";
-  value: string;
-}) {
-  return (
-    <div className={`health-metric ${tone}`}>
-      <span className="metric-label">
-        {icon}
-        {label}
-      </span>
-      <strong>{value}</strong>
-      <small>{detail}</small>
-    </div>
-  );
-}
-
 function formatStatus(value: string): string {
   return value
     .replaceAll("_", " ")
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
-function syncStepIcon(status: DailySyncStepStatus) {
+function pipelineStatusIcon(status: string) {
   if (status === "complete") {
     return CheckCircle2;
   }
@@ -2793,6 +2938,10 @@ function syncStepIcon(status: DailySyncStepStatus) {
     return CircleX;
   }
   return Activity;
+}
+
+function syncStepIcon(status: DailySyncStepStatus) {
+  return pipelineStatusIcon(status);
 }
 
 function compactPath(value: string): string {
@@ -2825,20 +2974,21 @@ function TradeTable({
       <table className="trade-table">
         <thead>
           <tr>
-            <th>Time</th>
+            <th>In</th>
+            <th>Out</th>
             <th>Side</th>
             <th>Strikes</th>
             <th>Qty</th>
             <th>Entry</th>
             <th>Exit</th>
             <th>P/L</th>
-            <th>Status</th>
           </tr>
         </thead>
         <tbody>
           {trades.map((trade) => (
             <tr className={tradeRowClass(trade, selectedTradeId)} key={trade.id} onClick={() => onSelect(trade)}>
               <td>{tradeClockLabel(trade.entryTime)}</td>
+              <td>{tradeExitClockLabel(trade)}</td>
               <td>
                 <span className={`side-pill ${trade.side.toLowerCase()}`}>{trade.side}</span>
               </td>
@@ -2856,7 +3006,6 @@ function TradeTable({
               </td>
               <td>{trade.exitPrice === null ? "-" : trade.exitPrice.toFixed(2)}</td>
               <td className={trade.pnl >= 0 ? "profit" : "loss"}>{formatSignedCurrency(trade.pnl)}</td>
-              <td>{trade.status}</td>
             </tr>
           ))}
           {!trades.length && (

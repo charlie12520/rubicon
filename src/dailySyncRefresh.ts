@@ -10,8 +10,9 @@ export function dailySyncCompletionRefreshKey(status: DailySyncStatusResult | nu
     return null;
   }
   const finished = status.finishedAt ?? status.generatedAt;
-  const summaryDate = status.latestSummary?.date ?? "unknown";
-  return `${finished}|${summaryDate}`;
+  const date = status.targetDate ?? status.latestSummary?.date ?? status.latestPipelineRun?.date ?? "unknown";
+  const run = status.runId ?? "unknown";
+  return `${finished}|${date}|${run}`;
 }
 
 export function shouldRefreshTrackerAfterDailySyncStatus(

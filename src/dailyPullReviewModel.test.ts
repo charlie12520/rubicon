@@ -33,21 +33,15 @@ describe("daily pull review model", () => {
     expect(model.buckets.diagnostic.entries.map((entry) => entry.title)).toContain("Availability check not clean");
   });
 
-  it("keeps Google receipt and workbook warnings in the archive bucket", () => {
+  it("keeps Google tracker upload warnings in the upload bucket", () => {
     const summary = dailySummary({
-      issueCount: 2,
+      issueCount: 1,
       issues: [
         {
-          detail: "No daily workbook found at spx_daily_upload_2026-06-02.xlsx.",
+          detail: "The compact tracker payload exists, but no successful Google tracker update is recorded in the daily summary.",
           severity: "warning",
           stage: "upload",
-          title: "Raw upload workbook missing",
-        },
-        {
-          detail: "The local archive has a sheet payload, but no raw_upload_google_sheet_url/upload receipt was found for this date.",
-          severity: "warning",
-          stage: "upload",
-          title: "Live Google upload not confirmed",
+          title: "Google tracker upload not confirmed",
         },
       ],
       rawUploadGoogleSheetUrl: undefined,
@@ -59,7 +53,7 @@ describe("daily pull review model", () => {
     expect(model.verdict).toBe("ready");
     expect(model.buckets.review.entries).toEqual([]);
     expect(model.buckets.archive.entries.map((entry) => entry.title)).toEqual(
-      expect.arrayContaining(["Local raw upload workbook", "Google raw upload receipt", "Raw upload workbook missing", "Live Google upload not confirmed"]),
+      expect.arrayContaining(["Google tracker upload", "Google tracker upload not confirmed"]),
     );
   });
 

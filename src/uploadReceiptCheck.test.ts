@@ -6,7 +6,7 @@ describe("upload receipt check", () => {
   it("builds concrete recovery steps for a locally staged but unconfirmed Google upload", () => {
     const check = buildUploadReceiptCheck(summary({
       generatedAtLocal: "2026-05-29T16:38:22-04:00",
-      payloadRows: 59333,
+      payloadRows: 20,
       uploadReceiptCheck: {
         checkedAt: "2026-05-29T17:43:01-04:00",
         detail: "Connector search returned 0 matching rows.",
@@ -16,13 +16,13 @@ describe("upload receipt check", () => {
         status: "missing_receipt_row",
       },
       uploadStatus: "payload_ready_unconfirmed",
-      uploadTabCount: 10,
+      uploadTabCount: 1,
     }));
 
     expect(check?.tone).toBe("warning");
-    expect(check?.badge).toBe("Needs receipt");
-    expect(check?.detail).toContain("59,333 locally staged rows");
-    expect(check?.facts).toContainEqual({ label: "Local payload", value: "59,333 rows / 10 tabs" });
+    expect(check?.badge).toBe("Needs upload");
+    expect(check?.detail).toContain("20 locally staged tracker rows");
+    expect(check?.facts).toContainEqual({ label: "Local payload", value: "20 rows / 1 tab" });
     expect(check?.facts).toContainEqual({
       label: "Connector search",
       value: "0 rows at 17:43 ET (A1:AA998)",
@@ -30,12 +30,11 @@ describe("upload receipt check", () => {
     expect(check?.steps.join(" ")).toContain("GOOGLE_SHEETS_ACCESS_TOKEN");
     expect(check?.steps.join(" ")).toContain("npm run google:snapshot");
     expect(check?.steps.join(" ")).toContain("2026-05-29");
-    expect(check?.steps.join(" ")).toContain("raw_upload_google_sheet_url");
+    expect(check?.steps.join(" ")).toContain("google_upload_status complete");
   });
 
-  it("stays quiet when the raw Google workbook receipt is already confirmed", () => {
+  it("stays quiet when the Google tracker upload is already confirmed", () => {
     expect(buildUploadReceiptCheck(summary({
-      rawUploadGoogleSheetUrl: "https://docs.google.com/spreadsheets/d/raw",
       uploadStatus: "uploaded",
     }))).toBeNull();
   });

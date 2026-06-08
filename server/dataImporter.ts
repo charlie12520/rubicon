@@ -39,7 +39,7 @@ const ENTRY_CHART_DEVIATION_REL_THRESHOLD = 0.25;
 const DEFAULT_TRACKER_SNAPSHOT_CACHE_TTL_MS = 30_000;
 const REPLAY_SAFE_STATE_FILE = "rubicon_replay_safe_state.json";
 const REPLAY_SAFE_STATE_SCHEMA = "rubicon-replay-safe-state";
-const REPLAY_SAFE_STATE_VERSION = 2;
+const REPLAY_SAFE_STATE_VERSION = 3;
 
 type CsvRow = Record<string, string>;
 
@@ -423,9 +423,17 @@ function isReplaySafeStateCache(value: ReplaySafeStateCache | null, source: Repl
 }
 
 function replayPayloadWithSelectedTrade(payload: ReplayPayload, selectedTradeId?: string): ReplayPayload {
+  const sanitized = sanitizeReplayPayload(payload);
+  return {
+    ...sanitized,
+    selectedTradeId: selectedTradeId || sanitized.quickTrades[0]?.id || null,
+  };
+}
+
+function sanitizeReplayPayload(payload: ReplayPayload): ReplayPayload {
   return {
     ...payload,
-    selectedTradeId: selectedTradeId || payload.quickTrades[0]?.id || null,
+    spreadMarks: sanitizeSpreadMarksForTrades(payload.spreadMarks, payload.quickTrades),
   };
 }
 
@@ -508,10 +516,10 @@ export function googleDriveSnapshotFreshness(
     };
   }
 
-  if (requiredReceiptDate && !snapshotContainsRawUploadReceipt(snapshot, requiredReceiptDate)) {
+  if (requiredReceiptDate && !snapshotContainsTrackerUploadReceipt(snapshot, requiredReceiptDate)) {
     return {
       ageHours,
-      detail: `${detailPrefix}. Snapshot was read after ${requiredReadAfterLabel} but did not include a ${requiredReceiptDate} raw upload receipt row; Google upload remains unconfirmed.`,
+      detail: `${detailPrefix}. Snapshot was read after ${requiredReadAfterLabel} but did not include a completed ${requiredReceiptDate} tracker upload row; Google upload remains unconfirmed.`,
       isFresh: false,
       status: "warning",
     };
@@ -534,12 +542,13 @@ export function googleDriveSnapshotFreshness(
   };
 }
 
-function snapshotContainsRawUploadReceipt(snapshot: GoogleDriveTrackerSnapshot, date: string): boolean {
+function snapshotContainsTrackerUploadReceipt(snapshot: GoogleDriveTrackerSnapshot, date: string): boolean {
   return (snapshot.dailySyncRuns ?? []).some((row) => {
     const record = asRecord(row);
     const rowDate = firstString(record.target_trade_date_et, record.date);
     const rawUploadGoogleSheetUrl = firstString(record.raw_upload_google_sheet_url, record.rawUploadGoogleSheetUrl);
-    return rowDate === date && Boolean(rawUploadGoogleSheetUrl);
+    const googleUploadStatus = firstString(record.google_upload_status, record.googleUploadStatus);
+    return rowDate === date && (Boolean(rawUploadGoogleSheetUrl) || googleUploadStatus === "complete" || googleUploadStatus === "uploaded");
   });
 }
 
@@ -796,7 +805,7 @@ function normalizeTrade(row: CsvRow, source: string): TradeRecord {
   };
 }
 
-async function tradeDates(): Promise<string[]> {
+export async function tradeDates(): Promise<string[]> {
   if (!(await pathExists(IBKR_TRADES_ROOT))) {
     return [];
   }
@@ -957,15 +966,19 @@ export function mergeGoogleDriveDailySyncSummaries(
     }
 
     const rawUploadGoogleSheetUrl = firstString(row.raw_upload_google_sheet_url, row.rawUploadGoogleSheetUrl, summary.rawUploadGoogleSheetUrl);
+    const googleUploadStatus = firstString(row.google_upload_status, row.googleUploadStatus);
     const connectorReceiptFound = Boolean(rawUploadGoogleSheetUrl && !summary.rawUploadGoogleSheetUrl);
-    const issues = summary.issues.filter((nextIssue) => nextIssue.title !== "Live Google upload not confirmed");
-    if (connectorReceiptFound) {
+    const connectorTrackerUploadFound = connectorReceiptFound || googleUploadStatus === "complete" || googleUploadStatus === "uploaded";
+    const issues = summary.issues.filter((nextIssue) => !["Live Google upload not confirmed", "Google tracker upload not confirmed"].includes(nextIssue.title));
+    if (connectorTrackerUploadFound) {
       issues.push(
         issue(
           "upload",
           "info",
-          "Live Google upload confirmed",
-          `Google Drive connector snapshot found raw workbook ${rawUploadGoogleSheetUrl}.`,
+          "Google tracker upload confirmed",
+          rawUploadGoogleSheetUrl
+            ? `Google Drive connector snapshot found a historical raw workbook link ${rawUploadGoogleSheetUrl}.`
+            : "Google Drive connector snapshot found a completed tracker upload row.",
         ),
       );
     }
@@ -1000,9 +1013,9 @@ export function mergeGoogleDriveDailySyncSummaries(
       underlyingIntradayStatus: firstString(summary.underlyingIntradayStatus, row.ibkr_underlying_1m_status),
       underlyingIntradaySymbolCount: firstNumber(summary.underlyingIntradaySymbolCount, row.ibkr_underlying_1m_symbol_count),
       volumeProfileRowCount: firstNumber(summary.volumeProfileRowCount, row.volume_profile_rows),
-      uploadReceiptReadAt: connectorReceiptFound ? snapshot?.readAt : summary.uploadReceiptReadAt,
-      uploadReceiptSource: connectorReceiptFound ? "Google Drive connector snapshot" : summary.uploadReceiptSource,
-      uploadStatus: rawUploadGoogleSheetUrl ? "uploaded" : summary.uploadStatus,
+      uploadReceiptReadAt: connectorTrackerUploadFound ? snapshot?.readAt : summary.uploadReceiptReadAt,
+      uploadReceiptSource: connectorTrackerUploadFound ? "Google Drive connector snapshot" : summary.uploadReceiptSource,
+      uploadStatus: connectorTrackerUploadFound ? "uploaded" : summary.uploadStatus,
     };
   });
 }
@@ -1405,7 +1418,7 @@ async function buildSourceHealth(
     googleDriveTrackerSnapshot,
     new Date(),
     googleDriveSnapshotStaleHours(),
-    latestSummary?.rawUploadGoogleSheetUrl
+    latestSummary?.uploadStatus === "uploaded"
       ? undefined
       : {
           timestamp: latestSummary?.generatedAtLocal,
@@ -1436,16 +1449,16 @@ async function buildSourceHealth(
       label: "Staged sheet payload",
       status: stagedPayloadReady ? "ok" : "warning",
       detail: latestSummary
-        ? `${latestSummary.date}: ${latestSummary.uploadTabCount} staged tabs and ${latestSummary.payloadRows} rows available locally.`
+        ? `${latestSummary.date}: ${latestSummary.uploadTabCount} tracker tab and ${latestSummary.payloadRows} tracker rows available locally.`
         : "No staged Google Sheet payload summary is available.",
       count: latestSummary?.payloadRows ?? 0,
     },
     {
-      label: "Google raw workbook access",
-      status: latestSummary?.rawUploadGoogleSheetUrl ? "ok" : "warning",
-      detail: latestSummary?.rawUploadGoogleSheetUrl
-        ? "Daily raw workbook receipt exists; opening raw tabs still requires Google auth."
-        : "Raw daily workbook access requires Google auth; desktop app uses local mirrors when unauthenticated CSV export is unavailable.",
+      label: "Google tracker upload",
+      status: latestSummary?.uploadStatus === "uploaded" ? "ok" : "warning",
+      detail: latestSummary?.uploadStatus === "uploaded"
+        ? "Daily Sync Runs and Trade Log rows are marked uploaded; raw archive workbooks are no longer part of the sync."
+        : "Tracker upload has not been confirmed; local Rubicon review remains independent of Google.",
       url: latestSummary?.rawUploadGoogleSheetUrl,
     },
     {
@@ -1557,6 +1570,78 @@ async function loadSafeSpreadMarks(date: string, tradeIds: Set<string>): Promise
     .map(spreadMarkFromRow)
     .filter((row): row is SpreadMark => row !== null && tradeIds.has(row.tradeId) && isMinuteBoundary(row.timestampEt))
     .sort((a, b) => a.time - b.time);
+}
+
+function sanitizeSpreadMarksForTrades(spreadMarks: SpreadMark[], trades: TradeRecord[]): SpreadMark[] {
+  if (!spreadMarks.length || !trades.length) {
+    return spreadMarks;
+  }
+  const tradesById = new Map(trades.map((trade) => [trade.id, trade]));
+  return spreadMarks.map((mark) => {
+    const trade = tradesById.get(mark.tradeId);
+    const bounds = trade ? spreadMarkBoundsForTrade(trade) : null;
+    if (!bounds) {
+      return mark;
+    }
+
+    const nextValue = clampSpreadMarkValue(mark.value, bounds);
+    const nextOpen = clampOptionalSpreadMarkValue(mark.open, bounds);
+    const nextHigh = clampOptionalSpreadMarkValue(mark.high, bounds);
+    const nextLow = clampOptionalSpreadMarkValue(mark.low, bounds);
+    const nextClose = clampOptionalSpreadMarkValue(mark.close, bounds);
+    const nextVwap = clampOptionalSpreadMarkValue(mark.vwap, bounds);
+    const changed =
+      nextValue !== mark.value ||
+      nextOpen !== mark.open ||
+      nextHigh !== mark.high ||
+      nextLow !== mark.low ||
+      nextClose !== mark.close ||
+      nextVwap !== mark.vwap;
+
+    if (!changed) {
+      return mark;
+    }
+
+    const rangeValues = [nextOpen, nextHigh, nextLow, nextClose, nextValue].filter((value): value is number => Number.isFinite(value));
+    return {
+      ...mark,
+      close: nextClose,
+      high: rangeValues.length ? Math.max(...rangeValues) : nextHigh,
+      low: rangeValues.length ? Math.min(...rangeValues) : nextLow,
+      open: nextOpen,
+      source: appendSourceMarker(mark.source, "rubicon_width_clamped"),
+      value: nextValue,
+      vwap: nextVwap,
+    };
+  });
+}
+
+function spreadMarkBoundsForTrade(trade: TradeRecord): { lower: number; upper: number } | null {
+  if (!Number.isFinite(trade.width) || trade.width <= 0) {
+    return null;
+  }
+  if (trade.priceType === "Credit" || trade.strategy.includes("Credit")) {
+    return { lower: -trade.width, upper: 0 };
+  }
+  if (trade.priceType === "Debit" || trade.strategy.includes("Debit")) {
+    return { lower: 0, upper: trade.width };
+  }
+  return null;
+}
+
+function clampOptionalSpreadMarkValue(value: number | undefined, bounds: { lower: number; upper: number }): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? clampSpreadMarkValue(value, bounds) : value;
+}
+
+function clampSpreadMarkValue(value: number, bounds: { lower: number; upper: number }): number {
+  if (!Number.isFinite(value)) {
+    return value;
+  }
+  return Math.min(bounds.upper, Math.max(bounds.lower, value));
+}
+
+function appendSourceMarker(source: string, marker: string): string {
+  return source.includes(marker) ? source : `${source}|${marker}`;
 }
 
 function normalizeSymbol(value: string): string {
@@ -1815,10 +1900,11 @@ async function buildReplaySafePayload(date: string): Promise<ReplayPayload> {
     loadTradesForDate(date),
   ]);
   const tradeIds = new Set(baseTrades.map((trade) => trade.id));
-  const [spreadMarks, volume] = await Promise.all([
+  const [rawSpreadMarks, volume] = await Promise.all([
     loadSafeSpreadMarks(date, tradeIds),
     loadSafeVolume(date),
   ]);
+  const spreadMarks = sanitizeSpreadMarksForTrades(rawSpreadMarks, baseTrades);
   const quickTrades = hydrateReplayTrades(baseTrades, spxBars, spreadMarks);
 
   return {
@@ -1842,7 +1928,7 @@ async function loadOrBuildReplaySafeState(date: string, options: { refresh?: boo
   if (!options.refresh) {
     const cached = await readJson<ReplaySafeStateCache | null>(cachePath, null);
     if (isReplaySafeStateCache(cached, source)) {
-      return cached.payload;
+      return sanitizeReplayPayload(cached.payload);
     }
   }
 
@@ -1905,7 +1991,7 @@ async function loadFullReplayPayload(date: string, selectedTradeId?: string): Pr
     date,
     selectedTradeId: fallbackTradeId,
     spxBars,
-    spreadMarks: allMarks,
+    spreadMarks: sanitizeSpreadMarksForTrades(allMarks, quickTrades),
     openInterest,
     volume,
     quickTrades,

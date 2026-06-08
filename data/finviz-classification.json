@@ -1,15 +1,15 @@
 {
   "Technology": {
-    "Software - Infrastructure": ["MSFT", "ORCL", "PLTR", "PANW", "CRWD", "FTNT", "SNPS", "XYZ", "NTAP", "VRSN", "CPAY", "FFIV", "AKAM", "GPN", "GEN", "GDDY"],
+    "Software - Infrastructure": ["MSFT", "ORCL", "PLTR", "PANW", "CRWD", "FTNT", "SNPS", "XYZ", "NTAP", "VRSN", "CPAY", "FFIV", "AKAM", "GPN", "GEN", "GDDY", "ZS"],
     "Computer Hardware": ["DELL", "SNDK", "ANET", "STX", "WDC", "SMCI", "HPQ"],
-    "Semiconductors": ["NVDA", "AVGO", "MU", "AMD", "INTC", "TXN", "QCOM", "ADI", "NXPI", "MPWR", "MCHP", "ON", "SWKS"],
-    "Software - Application": ["CRM", "UBER", "NOW", "CDNS", "ADBE", "ADP", "INTU", "DDOG", "ADSK", "PAYX", "WDAY", "ROP", "FICO", "PTC", "TYL"],
+    "Semiconductors": ["NVDA", "AVGO", "MU", "AMD", "INTC", "TXN", "QCOM", "ADI", "NXPI", "MPWR", "MCHP", "ON", "SWKS", "ARM", "MRVL"],
+    "Software - Application": ["CRM", "UBER", "NOW", "CDNS", "ADBE", "ADP", "INTU", "DDOG", "ADSK", "PAYX", "WDAY", "ROP", "FICO", "PTC", "TYL", "SHOP", "MSTR"],
     "Communication Equipment": ["CSCO", "CIEN", "MSI", "LITE", "HPE", "ZBRA"],
     "Consumer Electronics": ["AAPL"],
     "Electronic Components": ["APH", "GLW", "TEL", "JBL"],
     "Scientific & Technical Instruments": ["COHR", "KEYS", "GRMN", "TDY", "FTV", "TRMB"],
     "Solar": ["FSLR"],
-    "Semiconductor Equipment & Materials": ["LRCX", "AMAT", "KLAC", "TER", "Q"],
+    "Semiconductor Equipment & Materials": ["LRCX", "AMAT", "KLAC", "TER", "Q", "ASML"],
     "Information Technology Services": ["IBM", "ACN", "FISV", "CTSH", "FIS", "BR", "LDOS", "CDW", "IT", "JKHY"]
   },
   "Communication Services": {
@@ -33,7 +33,7 @@
     "Insurance - Reinsurance": ["EG"]
   },
   "Consumer Cyclical": {
-    "Internet Retail": ["AMZN", "DASH", "EBAY"],
+    "Internet Retail": ["AMZN", "DASH", "EBAY", "MELI", "PDD"],
     "Auto Manufacturers": ["TSLA", "GM", "F"],
     "Home Improvement Retail": ["HD", "LOW"],
     "Travel Services": ["BKNG", "ABNB", "RCL", "CCL", "EXPE", "NCLH"],
@@ -60,12 +60,12 @@
     "Building Products & Equipment": ["TT", "JCI", "CARR", "LII", "MAS", "BLDR"],
     "Integrated Freight & Logistics": ["FDX", "UPS", "JBHT", "CHRW", "EXPD"],
     "Conglomerates": ["HON", "MMM"],
-    "Engineering & Construction": ["PWR", "FIX", "EME", "J"],
+    "Engineering & Construction": ["PWR", "FIX", "EME", "J", "FER"],
     "Waste Management": ["WM", "RSG"],
     "Industrial Distribution": ["GWW", "FAST", "POOL"],
     "Airlines": ["DAL", "UAL", "LUV"],
     "Electrical Equipment & Parts": ["VRT", "HUBB"],
-    "Specialty Business Services": ["CTAS", "CPRT"],
+    "Specialty Business Services": ["CTAS", "CPRT", "TRI"],
     "Consulting Services": ["VRSK", "EFX"],
     "Tools & Accessories": ["SNA", "SWK"],
     "Rental & Leasing Services": ["URI"],
@@ -75,7 +75,7 @@
   },
   "Consumer Defensive": {
     "Discount Stores": ["WMT", "COST", "TGT", "DG", "DLTR"],
-    "Beverages - Non-Alcoholic": ["KO", "PEP", "MNST", "KDP"],
+    "Beverages - Non-Alcoholic": ["KO", "PEP", "MNST", "KDP", "CCEP"],
     "Household & Personal Products": ["PG", "CL", "KVUE", "KMB", "EL", "CHD", "CLX"],
     "Confectioners": ["MDLZ", "HSY"],
     "Farm Products": ["ADM", "BG", "TSN"],
@@ -126,7 +126,7 @@
     "Diagnostics & Research": ["TMO", "DHR", "IDXX", "A", "WAT", "IQV", "MTD", "DGX", "LH", "RVTY", "CRL"],
     "Medical Instruments & Supplies": ["ISRG", "BDX", "RMD", "WST", "SOLV", "ALGN", "COO", "BAX"],
     "Medical Devices": ["ABT", "SYK", "MDT", "BSX", "EW", "GEHC", "DXCM", "STE", "ZBH", "PODD"],
-    "Biotechnology": ["VRTX", "REGN", "INCY", "MRNA", "TECH"],
+    "Biotechnology": ["VRTX", "REGN", "INCY", "MRNA", "TECH", "ALNY", "INSM"],
     "Medical Distribution": ["MCK", "COR", "CAH", "HSIC"],
     "Medical Care Facilities": ["HCA", "DVA", "UHS"],
     "Drug Manufacturers - Specialty & Generic": ["ZTS", "VTRS"],

@@ -33,8 +33,8 @@ describe("live update desktop alerts", () => {
 
     expect(payload).toEqual({
       body: "Fed speaker comments on tariff risks",
-      detail: "Matched fed, tariff - FirstSquawk - 8:31 AM - 2 matching updates",
-      title: "Live update matched your word filter",
+      detail: "Matched fed, tariff - 8:31 AM - 2 matching updates",
+      title: "FirstSquawk word-filter alert",
     });
   });
 
@@ -57,8 +57,8 @@ describe("live update desktop alerts", () => {
     expect(sent).toEqual([
       {
         body: "Fed speaker comments on tariff risks",
-        detail: "Matched fed - FirstSquawk - 8:00 AM",
-        title: "Live update matched your word filter",
+        detail: "Matched fed - 8:00 AM",
+        title: "FirstSquawk word-filter alert",
       },
     ]);
   });

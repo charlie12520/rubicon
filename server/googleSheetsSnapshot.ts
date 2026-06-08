@@ -5,7 +5,7 @@ import type { SourceHealth } from "../shared/types.ts";
 
 export const SPX_TRACKER_SPREADSHEET_ID = "1w0S_DNJJ6ZhcSGB0qEtkBxsVLxQk0prVPqnV9t-WvtE";
 export const SPX_TRACKER_SPREADSHEET_URL = `https://docs.google.com/spreadsheets/d/${SPX_TRACKER_SPREADSHEET_ID}/edit`;
-export const DAILY_SYNC_RUNS_RANGE = "Daily Sync Runs!A1:AA1000";
+export const DAILY_SYNC_RUNS_RANGE = "Daily Sync Runs!A1:AZ1000";
 export const DEFAULT_GOOGLE_SERVICE_ACCOUNT_PATH = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",

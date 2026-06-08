@@ -16,37 +16,35 @@ npm run build
 - Dev web server: `http://[::1]:5173`
 - Use `http://[::1]:5174` when another project owns `127.0.0.1:5174`.
 
-## Latest Validation - 2026-06-02 A139
+## Latest Validation - 2026-06-04 Canonical 5-Wide SPX Verticals
 
 Commands:
 
 ```bash
-npm run test -- src/components/MorningDashboard.test.tsx server/godelLiveNews.test.ts server/morningBrief.test.ts
-npm run typecheck
-npm run build
+python -m pytest tests -q
+python -m py_compile daily_spx_ibkr_sync.py
+python prepare_spx_google_sheet_upload.py --date 2026-06-03 --tracker-only
+npm run rubicon:ingest -- --date 2026-06-03
+npm run test -- server/dataImporter.test.ts server/dataImporterSafeReplay.test.ts src/dailyPnlSimulator.test.ts src/quickTrades.test.ts
 ```
 
-Runtime probes:
-
-```bash
-Playwright smoke: http://127.0.0.1:5174?morningCopySmoke=1780429180
-```
-
-Result: GREEN for A139.
+Result: GREEN for canonical 5-wide SPX vertical recording and the 2026-06-03 manual backfill.
 
 Proof:
 
-- Calendar event rows no longer render subheader metadata under each event.
-- Godel no longer surfaces the long setup paragraph; missing source detail is now `Godel feed unavailable.`
-- AI Notes no longer renders the generated empty-state message line.
-- TC2000 no longer renders `Latest scanner pulls` or the scanner-list count heading.
-- Focused tests passed 3 files / 28 tests; typecheck passed; build passed with only the existing Vite large-chunk warning.
-- Browser smoke found none of the requested noisy phrases and no console/page errors.
+- `daily_spx_ibkr_sync.py` decomposes wider SPXW verticals into adjacent 5-wide rungs before lifecycle matching, normalizes numeric CSV expirations for synthetic SPXW symbols, preserves actual close time on partial-expiration rows, adds synthetic middle-strike contracts, and rewrites canonical `entries.csv` prices after spread-mark generation.
+- The 2026-06-03 pull was manually rebuilt from stored fills and existing 5-second option bars: 164 fills, 28 raw spread summaries, 24 canonical entry rows, 18 contracts, and 114,386 canonical spread-mark rows. The wide exits `44054554` and `44054868` now attach to four existing 5-wide rows.
+- IBKR Python tests passed 17/17; Rubicon focused importer/replay/P&L tests passed 36/36; `npm run rubicon:ingest -- --date 2026-06-03` refreshed tracker, replay safe state, and spread-speed state with no warnings.
+- Live replay smoke for 2026-06-03 returned 17 canonical quick trades, 6,885 sampled replay marks, 4,680 SPX bars, and all SPX vertical trade ids had matching spread marks.
 
 ## Recent Validation Notes
 
 | ID | Focus | Result |
 |---|---|---|
+| A142 | Missing public macro calendar sources | Macro calendar tests passed 1 file / 15 tests, including ADP/MBA/API generators, API holiday behavior, NAR/NAHB/NYFed parsing, and UMich schedule warning behavior; Morning dashboard tests passed 2 files / 21 tests; typecheck/build passed. |
+| A141 follow-up | FirstSquawk toast AppID/debug hardening | The toast script now auto-resolves the Edge-installed Rubicon AppID and the API waits for script completion. Focused `desktopAlert liveUpdateAlerts` tests passed; live `5174` API route returned `ok` via `127.0.0.1-9BBB1E10_tz517vvf8m8yt!App`. Typecheck/build are currently blocked by unrelated `src/components/SpreadSpeedPanel.tsx` concurrent edits. |
+| A141 | FirstSquawk Windows toast notifications | Focused alert/dashboard tests passed 3 files / 16 tests; PowerShell parser/script smoke passed; typecheck/build passed; browser smoke on `http://127.0.0.1:5180` passed; API route returned `ok`. |
+| A140 | Three-stage Daily Pipeline | Focused pipeline tests passed 11 files / 57 tests; full Vitest passed 61 files / 326 tests; typecheck/build passed; IBKR Python pytest passed 5/5; Python and PowerShell syntax checks passed. |
 | A139 | Morning calendar/Godel/AI Notes/TC2000 copy cleanup | Focused tests passed 3 files / 28 tests; typecheck/build passed with the existing Vite large-chunk warning; browser smoke found no requested noisy phrases and no console/page errors. |
 | A138 | Rubicon desktop/taskbar icon identity | Focused icon tests passed 1 file / 2 tests; shortcut reinstall/inspection confirmed Desktop and Start Menu shortcuts use `public\favicon.ico,0`; typecheck/build passed with the existing Vite large-chunk warning. |
 | A137 | Replay/Daily Pull copy cleanup | Focused tests passed 9 files / 52 tests; typecheck/build passed with the existing Vite large-chunk warning; browser smoke found no targeted Replay/Daily Pull noisy phrases and no console/page errors. |

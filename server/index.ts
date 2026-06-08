@@ -10,14 +10,23 @@ import { armFplLiveAutoStart, getFplLiveStatus, startFplLive, stopFplLive } from
 import { refreshGoogleDriveSnapshot } from "../scripts/refresh-google-drive-snapshot.ts";
 import { refreshIbkrWalletSnapshot } from "./ibkrWalletRefresh.ts";
 import { armIbkrHoldingsAutoRefresh, readIbkrHoldingsSnapshot, refreshIbkrHoldingsSnapshot } from "./ibkrHoldings.ts";
-import { getDailySyncStatus, startDailySync } from "./dailySync.ts";
+import { getDailySyncStatus, startDailyOptionPull, startDailySync } from "./dailySync.ts";
 import { getDailySyncCatchupStatus, maybeRunDailySyncCatchup } from "./dailySyncCatchup.ts";
 import { maybeAutoRefreshGoogleDriveSnapshot } from "./googleSnapshotAutoRefresh.ts";
-import { loadSpreadSpeed } from "./spreadSpeed.ts";
+import { loadSpreadSpeed, loadSpreadSpeedWithFallback } from "./spreadSpeed.ts";
+import {
+  armSpreadSpeedLiveAutoStart,
+  getSpreadSpeedLiveStatus,
+  loadLiveSpreadSpeed,
+  startSpreadSpeedLive,
+  stopSpreadSpeedLive,
+} from "./spreadSpeedLive.ts";
+import { loadSpxMaContext } from "./spxMaContext.ts";
 import { loadRrgBars } from "./rrgBars.ts";
-import { loadSpxHeatmap } from "./spxHeatmap.ts";
+import { loadSpxHeatmap, loadQqqHeatmap } from "./spxHeatmap.ts";
 import { armSpxHeatmapLiveAutoStart, getSpxHeatmapLiveStatus, startSpxHeatmapLive, stopSpxHeatmapLive } from "./spxHeatmapLive.ts";
 import { armSpxLiveBarsAutoStart, getSpxLiveBarsStatus, loadSpxLiveBars, startSpxLiveBars, stopSpxLiveBars } from "./spxLiveBars.ts";
+import { armIndexReconcileAutoRun } from "./indexReconcile.ts";
 import { loadMorningBrief, loadMorningLiveUpdates, resolveTc2000Artifact } from "./morningBrief.ts";
 import { loadMorningAiNotes } from "./morningAiNotes.ts";
 import { writeTradeJournalSnapshot } from "./tradeJournalSnapshot.ts";
@@ -180,6 +189,32 @@ app.post("/api/daily-sync/run", async (request, response) => {
   }
 });
 
+app.post("/api/daily-sync/options/run", async (request, response) => {
+  try {
+    const date = String(request.body?.date ?? "");
+    const scope = String(request.body?.scope ?? "failed-or-missing");
+    if (scope !== "failed-or-missing") {
+      response.status(400).json({
+        ok: false,
+        state: "failed",
+        message: "Manual option retry only supports failed-or-missing scope.",
+        generatedAt: new Date().toISOString(),
+      });
+      return;
+    }
+    const result = await startDailyOptionPull({ date, scope: "failed-or-missing" });
+    response.status(result.ok ? 200 : 409).json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    response.status(400).json({
+      ok: false,
+      state: "failed",
+      message,
+      generatedAt: new Date().toISOString(),
+    });
+  }
+});
+
 app.get("/api/replay", async (request, response, next) => {
   try {
     const date = String(request.query.date ?? "");
@@ -213,11 +248,61 @@ app.get("/api/spread-speed", async (request, response, next) => {
       response.status(400).json({ error: "date query must be YYYY-MM-DD" });
       return;
     }
-    response.json(
-      await loadSpreadSpeed(date, {
-        refreshSafeState: String(request.query.refresh ?? "") === "1",
-      }),
-    );
+    const refreshSafeState = String(request.query.refresh ?? "") === "1";
+    const payload =
+      String(request.query.fallback ?? "") === "1"
+        ? await loadSpreadSpeedWithFallback(date, { refreshSafeState })
+        : await loadSpreadSpeed(date, { refreshSafeState });
+    response.json(payload);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/spread-speed/live", async (_request, response, next) => {
+  try {
+    response.setHeader("Cache-Control", "no-store, max-age=0");
+    response.json(await loadLiveSpreadSpeed(appRoot));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/spread-speed/live/status", async (_request, response, next) => {
+  try {
+    response.setHeader("Cache-Control", "no-store, max-age=0");
+    response.json(await getSpreadSpeedLiveStatus());
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/spread-speed/live/start", async (request, response, next) => {
+  try {
+    const clientId = request.body?.clientId ? Number(request.body.clientId) : undefined;
+    const ports = request.body?.ports ? String(request.body.ports) : undefined;
+    response.json(await startSpreadSpeedLive({ clientId, ports }));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/spread-speed/live/stop", async (_request, response, next) => {
+  try {
+    response.json(await stopSpreadSpeedLive());
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/spx-ma-context", async (request, response, next) => {
+  try {
+    const date = String(request.query.date ?? "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      response.status(400).json({ error: "date query must be YYYY-MM-DD" });
+      return;
+    }
+    response.json(await loadSpxMaContext(date));
   } catch (error) {
     next(error);
   }
@@ -267,6 +352,44 @@ app.post("/api/spx-heatmap/live/start", async (request, response, next) => {
 });
 
 app.post("/api/spx-heatmap/live/stop", async (_request, response, next) => {
+  try {
+    response.json(await stopSpxHeatmapLive());
+  } catch (error) {
+    next(error);
+  }
+});
+
+// QQQ (Nasdaq-100) heatmap — same payload shape as SPX, projected onto the QQQ
+// universe + weights by the SAME large-cap feed process (one IBKR pull writes both
+// files), so the live controls proxy to the shared spxHeatmapLive manager.
+app.get("/api/qqq-heatmap", async (_request, response, next) => {
+  try {
+    response.json(await loadQqqHeatmap(appRoot));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/qqq-heatmap/live/status", async (_request, response, next) => {
+  try {
+    response.setHeader("Cache-Control", "no-store, max-age=0");
+    response.json(await getSpxHeatmapLiveStatus());
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/qqq-heatmap/live/start", async (request, response, next) => {
+  try {
+    const clientId = request.body?.clientId ? Number(request.body.clientId) : undefined;
+    const ports = request.body?.ports ? String(request.body.ports) : undefined;
+    response.json(await startSpxHeatmapLive({ clientId, ports }));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/qqq-heatmap/live/stop", async (_request, response, next) => {
   try {
     response.json(await stopSpxHeatmapLive());
   } catch (error) {
@@ -559,6 +682,8 @@ export function startRubiconServer(): ReturnType<typeof app.listen> {
     armIbkrHoldingsAutoRefresh();
     armSpxHeatmapLiveAutoStart();
     armSpxLiveBarsAutoStart();
+    armSpreadSpeedLiveAutoStart();
+    armIndexReconcileAutoRun();
     void maybeRunDailySyncCatchup().then((status) => {
       if (status.refreshedDates.length) {
         invalidateTrackerSnapshotCache();

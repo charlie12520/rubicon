@@ -1,4 +1,4 @@
-import type { DailySyncStatusResult, DailySyncStep } from "../shared/types";
+import type { DailyPipelineStage, DailySyncStatusResult, DailySyncStep } from "../shared/types";
 
 export type DailySyncDiagnostics = {
   available: boolean;
@@ -6,6 +6,7 @@ export type DailySyncDiagnostics = {
   facts: Array<{ label: string; value: string }>;
   logLines: string[];
   logPath: string;
+  stages: DailyPipelineStage[];
   steps: DailySyncStep[];
   title: string;
   tone: "ok" | "warning" | "error";
@@ -22,8 +23,9 @@ export function buildDailySyncDiagnostics(status: DailySyncStatusResult | null |
       facts: [],
       logLines: [],
       logPath: "",
+      stages: [],
       steps: [],
-      title: "Latest sync diagnostics unavailable",
+      title: "Pipeline diagnostics unavailable",
       tone: "warning",
       warnings: [],
     };
@@ -31,21 +33,27 @@ export function buildDailySyncDiagnostics(status: DailySyncStatusResult | null |
 
   const logLines = splitLogTail(status.latestLogTail);
   const flaggedCount = logLines.filter((line) => FLAGGED_LOG_LINE.test(line)).length;
+  const stages = status.stages ? Object.values(status.stages) : [];
   const steps = Array.isArray(status.steps) ? status.steps : [];
   const warnings = Array.isArray(status.warnings) ? status.warnings.filter(Boolean) : [];
   const failedStepCount = steps.filter((step) => step.status === "failed").length;
   const warningStepCount = steps.filter((step) => step.status === "warning").length;
-  const warningCount = warnings.length + warningStepCount;
+  const failedStageCount = stages.filter((stage) => stage.status === "failed").length;
+  const warningStageCount = stages.filter((stage) => stage.status === "warning").length;
+  const warningCount = warnings.length + warningStepCount + warningStageCount;
   const failed = !status.ok || status.state === "failed";
-  const tone = failed || failedStepCount ? "error" : flaggedCount || warningCount ? "warning" : "ok";
-  const latestSummaryLabel = selectedDate && status.latestSummary?.date && status.latestSummary.date !== selectedDate
+  const tone = failed || failedStepCount || failedStageCount ? "error" : flaggedCount || warningCount ? "warning" : "ok";
+  const evidenceSummary = status.latestSummary ?? status.latestPipelineRun;
+  const latestSummaryLabel = selectedDate && evidenceSummary?.date && evidenceSummary.date !== selectedDate
     ? "Latest pipeline run"
-    : "Latest summary";
+    : status.latestSummary
+      ? "Current summary"
+      : "Latest pipeline run";
 
   return {
     available: true,
-    badge: failed || failedStepCount
-      ? "Sync failed"
+    badge: failed || failedStepCount || failedStageCount
+      ? "Pipeline failed"
       : warningCount
         ? `${warningCount} warning${warningCount === 1 ? "" : "s"}`
         : flaggedCount
@@ -53,14 +61,19 @@ export function buildDailySyncDiagnostics(status: DailySyncStatusResult | null |
           : "No flagged tail lines",
     facts: [
       { label: "State", value: status.state },
+      ...(status.pipelineState ? [{ label: "Pipeline", value: status.pipelineState }] : []),
+      ...(status.reviewReady !== undefined ? [{ label: "Review", value: status.reviewReady ? "ready" : "not ready" }] : []),
+      ...(status.googleUploaded !== undefined ? [{ label: "Google", value: status.googleUploaded ? "uploaded" : "not uploaded" }] : []),
+      ...(status.runId ? [{ label: "Run ID", value: status.runId }] : []),
       { label: "Target", value: targetLabel(status) },
       { label: latestSummaryLabel, value: summaryLabel(status) },
       { label: "Updated", value: status.generatedAt },
     ],
     logLines,
     logPath: status.latestLogPath ?? status.logPath ?? "",
+    stages,
     steps,
-    title: "Latest sync diagnostics",
+    title: "Pipeline diagnostics",
     tone,
     warnings,
   };
@@ -82,10 +95,11 @@ function targetLabel(status: DailySyncStatusResult): string {
 }
 
 function summaryLabel(status: DailySyncStatusResult): string {
-  if (!status.latestSummary) {
+  const summary = status.latestSummary ?? status.latestPipelineRun;
+  if (!summary) {
     return "No summary yet";
   }
-  const entries = status.latestSummary.entryCount ?? 0;
-  const availability = status.latestSummary.status ?? "unknown";
-  return `${status.latestSummary.date}: ${availability}, ${entries} entr${entries === 1 ? "y" : "ies"}`;
+  const entries = summary.entryCount ?? 0;
+  const availability = summary.status ?? "unknown";
+  return `${summary.date}: ${availability}, ${entries} entr${entries === 1 ? "y" : "ies"}`;
 }

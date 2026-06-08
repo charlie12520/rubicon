@@ -63,7 +63,7 @@ export type DailyPullChecklistInput = {
 };
 
 const OK_STATUSES = new Set(["ok", "ok_with_errors", "uploaded", "up_to_date", "skipped", "skipped_no_non_spx_options", "disabled", "no_contracts"]);
-const REQUIRED_PAYLOAD_TAB_COUNT = 11;
+const REQUIRED_PAYLOAD_TAB_COUNT = 1;
 
 export function buildDailyPullChecklist({
   dailySyncStatus,
@@ -98,7 +98,6 @@ export function buildDailyPullChecklist({
     buildUnderlyingIntradayStep(summary),
     buildOpenInterestStep(summary),
     buildPayloadStep(summary, selectedDateSyncStatus),
-    buildRawWorkbookStep(summary, selectedDateSyncStatus),
     buildUploadStep(summary),
     buildSourceRefreshStep(visibleSourceHealth, sourceByLabel),
   ];
@@ -188,9 +187,7 @@ function buildCoverageItems(
   const hasVolumeProfileWarningIssue = volumeProfileIssues.some((issue) => issue.severity === "warning");
   const payloadHasUsableTabs = Boolean(summary && summary.uploadTabCount > 0 && summary.uploadStatus !== "missing_payload");
   const payloadSyncStep = syncStepById(dailySyncStatus, "sheet-payload");
-  const rawWorkbookSyncStep = syncStepById(dailySyncStatus, "raw-workbook");
   const payloadStepReady = payloadSyncStep?.status === "complete";
-  const rawWorkbookReady = Boolean(summary?.workbookPath) || rawWorkbookSyncStep?.status === "complete";
   const spreadMarkWarnings = summary && spreadMarkExpectedRows && summary.spreadMarkRowCount !== undefined && summary.spreadMarkRowCount < spreadMarkExpectedRows
     ? [`Raw replay mark gap: ${formatNumber(spreadMarkExpectedRows - summary.spreadMarkRowCount)} rows missing, ${formatPct(spreadMarkCoveragePct)} covered.`]
     : [];
@@ -277,7 +274,7 @@ function buildCoverageItems(
       ],
       id: "open-interest",
       importance: "support",
-      label: "0DTE near-open OI values",
+      label: "Option OI",
       missingStatus: "warning",
       notes: openInterestNotes,
       pulled: summary?.openInterestValidRowCount ?? summary?.openInterestRowCount ?? null,
@@ -296,7 +293,7 @@ function buildCoverageItems(
       failures: optionFailureMessages,
       id: "option-bars",
       importance: "breadth",
-      label: `Option ${optionBarLabel} chain breadth`,
+      label: `Option ${optionBarLabel} chain`,
       missingStatus: "warning",
       notes: optionNoteMessages,
       pulled: summary?.optionIntradayRowCount ?? null,
@@ -313,7 +310,7 @@ function buildCoverageItems(
       failures: summary ? [] : ["No summary exists, so volume profile rows cannot be verified."],
       id: "volume-profile",
       importance: "breadth",
-      label: "Option volume profile rows",
+      label: "Option Volume",
       missingStatus: "warning",
       notes: [
         ...volumeProfileIssues.filter((issue) => issue.severity === "info").map((issue) => `${issue.title}: ${issue.detail}`),
@@ -350,12 +347,12 @@ function buildCoverageItems(
         : [],
     }),
     coverageItem({
-      basis: "Required payload tabs now include IBKR Underlying 1m.",
+      basis: "The sync now stages only the compact tracker payload: one Daily Sync Runs tab plus Trade Log blocks.",
       expected: REQUIRED_PAYLOAD_TAB_COUNT,
-      failures: summary && summary.uploadTabCount <= 0 && !payloadStepReady ? ["No Google upload payload tabs were staged."] : syncStepFailures(payloadSyncStep),
+      failures: summary && summary.uploadTabCount <= 0 && !payloadStepReady ? ["No compact Google tracker payload was staged."] : syncStepFailures(payloadSyncStep),
       id: "payload-tabs",
       importance: "support",
-      label: "Google upload payload tabs",
+      label: "Google tracker payload",
       missingStatus: "warning",
       notes: syncStepNotes(payloadSyncStep),
       pulled: summary?.uploadTabCount ?? (payloadStepReady ? 1 : null),
@@ -364,39 +361,24 @@ function buildCoverageItems(
       unit: "tabs",
       warnings: summary
         ? [
-            ...(summary.uploadTabCount < REQUIRED_PAYLOAD_TAB_COUNT ? [`Payload is missing ${formatNumber(REQUIRED_PAYLOAD_TAB_COUNT - summary.uploadTabCount)} required tab.`] : []),
-            `Payload rows staged: ${formatNumber(summary.payloadRows)}.`,
+            ...(summary.uploadTabCount < REQUIRED_PAYLOAD_TAB_COUNT ? ["Compact tracker payload tab is missing."] : []),
+            `Tracker rows staged: ${formatNumber(summary.payloadRows)}.`,
           ]
         : syncStepWarnings(payloadSyncStep),
     }),
     coverageItem({
-      basis: summary?.workbookPath ? `Workbook staged at ${summary.workbookPath}.` : rawWorkbookSyncStep?.detail ?? "No raw upload workbook evidence is available yet.",
-      expected: 1,
-      failures: syncStepFailures(rawWorkbookSyncStep),
-      id: "raw-workbook",
-      importance: "support",
-      label: "Local raw upload workbook",
-      missingStatus: "warning",
-      notes: syncStepNotes(rawWorkbookSyncStep),
-      pulled: rawWorkbookReady ? 1 : 0,
-      readinessLabel: rawWorkbookReady ? "Workbook ready" : "Workbook gap",
-      statusOverride: rawWorkbookReady ? "complete" : undefined,
-      unit: "workbook",
-      warnings: summary?.workbookPath ? [] : syncStepWarnings(rawWorkbookSyncStep),
-    }),
-    coverageItem({
-      basis: summary?.rawUploadGoogleSheetUrl ? "Raw Google workbook receipt confirmed in the tracker." : `Upload status ${summary?.uploadStatus ?? "unknown"}.`,
+      basis: summary?.uploadStatus === "uploaded" ? "Google tracker upload is marked complete." : `Upload status ${summary?.uploadStatus ?? "unknown"}.`,
       expected: 1,
       failures: summary?.uploadStatus === "missing_payload" ? ["Upload cannot be confirmed because the local payload is missing."] : [],
       id: "upload-receipt",
       importance: "support",
-      label: "Google raw upload receipt",
+      label: "Google tracker upload",
       missingStatus: "warning",
       notes: [],
-      pulled: summary?.rawUploadGoogleSheetUrl ? 1 : 0,
-      readinessLabel: summary?.rawUploadGoogleSheetUrl ? "Receipt found" : "Receipt gap",
+      pulled: summary?.uploadStatus === "uploaded" ? 1 : 0,
+      readinessLabel: summary?.uploadStatus === "uploaded" ? "Uploaded" : "Upload gap",
       unit: "receipt",
-      warnings: summary && summary.uploadStatus !== "uploaded" ? ["No raw_upload_google_sheet_url receipt is confirmed for this date."] : [],
+      warnings: summary && summary.uploadStatus !== "uploaded" ? ["Google tracker upload is not confirmed for this date."] : [],
     }),
     coverageItem({
       basis: summary
@@ -647,32 +629,10 @@ function buildPayloadStep(
   warnings.push(...syncStepWarnings(payloadStep));
 
   return step({
-    action: "Build the staged Google Sheet upload payload",
-    evidence: summary ? `${formatNumber(summary.payloadRows)} rows across ${formatNumber(summary.uploadTabCount)} tabs.` : payloadStep?.detail ?? "No payload evidence.",
+    action: "Build the compact Google tracker payload",
+    evidence: summary ? `${formatNumber(summary.payloadRows)} tracker rows across ${formatNumber(summary.uploadTabCount)} tab.` : payloadStep?.detail ?? "No payload evidence.",
     failures,
     id: "payload",
-    notes,
-    warnings,
-  });
-}
-
-function buildRawWorkbookStep(
-  summary: DailySummary | null | undefined,
-  status: DailySyncStatusResult | null | undefined,
-): DailyPullChecklistStep {
-  const rawWorkbookStep = syncStepById(status, "raw-workbook");
-  const failures = syncStepFailures(rawWorkbookStep);
-  const warnings = syncStepWarnings(rawWorkbookStep);
-  const notes = syncStepNotes(rawWorkbookStep);
-  if (!summary?.workbookPath && rawWorkbookStep?.status !== "complete" && rawWorkbookStep?.status !== "failed") {
-    warnings.push("No local raw upload workbook is verified yet.");
-  }
-
-  return step({
-    action: "Rebuild the local raw upload workbook",
-    evidence: summary?.workbookPath ? `Workbook path: ${summary.workbookPath}.` : rawWorkbookStep?.detail ?? "No workbook evidence.",
-    failures,
-    id: "raw-workbook",
     notes,
     warnings,
   });
@@ -682,16 +642,16 @@ function buildUploadStep(summary: DailySummary | null | undefined): DailyPullChe
   const failures: string[] = [];
   const warnings: string[] = [];
   if (!summary) {
-    failures.push("No summary exists, so the upload receipt cannot be verified.");
+    failures.push("No summary exists, so the tracker upload cannot be verified.");
   } else if (summary.uploadStatus === "missing_payload") {
     failures.push("Upload cannot be confirmed because the local payload is missing.");
-  } else if (summary.uploadStatus !== "uploaded" || !summary.rawUploadGoogleSheetUrl) {
-    warnings.push("The local payload exists, but no raw_upload_google_sheet_url receipt is confirmed for this date.");
+  } else if (summary.uploadStatus !== "uploaded") {
+    warnings.push("The compact payload exists, but the Google tracker upload is not confirmed for this date.");
   }
 
   return step({
-    action: "Confirm the raw Google upload receipt in SPX Spread Trade Tracker",
-    evidence: summary?.rawUploadGoogleSheetUrl ? "Raw Google workbook receipt confirmed." : `Upload status ${summary?.uploadStatus ?? "unknown"}.`,
+    action: "Confirm the Google tracker update in SPX Spread Trade Tracker",
+    evidence: summary?.uploadStatus === "uploaded" ? "Tracker upload confirmed." : `Upload status ${summary?.uploadStatus ?? "unknown"}.`,
     failures,
     id: "upload",
     notes: [],
@@ -703,7 +663,7 @@ function buildSourceRefreshStep(sourceHealth: SourceHealth[], sourceByLabel: Map
   const importantLabels = [
     "Google Drive connector snapshot",
     "Staged sheet payload",
-    "Google raw workbook access",
+    "Google tracker upload",
     "AI STUFF IBKR trade mirror",
     "Replay market data",
     "AI STUFF daily sync launcher",
@@ -761,6 +721,9 @@ function dailySyncStatusAppliesToDate(status: DailySyncStatusResult | null | und
     return false;
   }
   if (status.latestSummary?.date === selectedDate) {
+    return true;
+  }
+  if (status.targetDate === selectedDate) {
     return true;
   }
   if (status.targetPlan?.estimatedTargetDate === selectedDate && (status.state === "running" || Boolean(status.steps?.length))) {

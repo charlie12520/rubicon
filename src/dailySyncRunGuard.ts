@@ -5,7 +5,7 @@ export type DailySyncRunGuard = {
   title: string;
 };
 
-const RUN_TITLE = "Launch the local AI STUFF daily SPX/IBKR sync and staged sheet-payload builder";
+const RUN_TITLE = "Launch the local daily pipeline: Data Collection, Rubicon Ingest, and Google Upload";
 
 export function buildDailySyncRunGuard(
   status: DailySyncStatusResult | null | undefined,
@@ -18,7 +18,7 @@ export function buildDailySyncRunGuard(
   if (status.state === "running") {
     return {
       disabled: true,
-      title: "Daily SPX/IBKR sync is already running.",
+      title: "Daily pipeline is already running.",
     };
   }
 
@@ -26,7 +26,7 @@ export function buildDailySyncRunGuard(
   if (plan.mode === "auto" && !plan.afterCutoff && today && plan.estimatedTargetDate !== today) {
     return {
       disabled: true,
-      title: `Auto would still target ${plan.estimatedTargetDate}. Use Preflight Sync for checks; Run Daily Sync unlocks after ${plan.cutoffTimeEt} ET.`,
+      title: `Auto would still target ${plan.estimatedTargetDate}. Use Preflight Pipeline for checks; Run Daily Pipeline unlocks after ${plan.cutoffTimeEt} ET.`,
     };
   }
 

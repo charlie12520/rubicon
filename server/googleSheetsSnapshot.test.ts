@@ -10,7 +10,7 @@ import {
 
 describe("Google Sheets tracker snapshot helpers", () => {
   it("uses a bounded Daily Sync Runs refresh range that covers the current tracker tab", () => {
-    expect(DAILY_SYNC_RUNS_RANGE).toBe("Daily Sync Runs!A1:AA1000");
+    expect(DAILY_SYNC_RUNS_RANGE).toBe("Daily Sync Runs!A1:AZ1000");
   });
 
   it("normalizes Daily Sync Runs values into typed records", () => {

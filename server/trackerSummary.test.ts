@@ -103,7 +103,6 @@ describe("Rubicon tracker summary cache", () => {
     };
     await fs.writeFile(path.join(dayDir, "daily_sync_summary.json"), `${JSON.stringify(syncSummary, null, 2)}\n`, "utf8");
     await fs.writeFile(path.join(dayDir, "google_sheet_upload_payload.json"), "{this file is intentionally not JSON", "utf8");
-    await fs.writeFile(path.join(dayDir, "spx_daily_upload_2026-06-01.xlsx"), "stub", "utf8");
 
     const summary = await loadOrBuildRubiconDailySummary(dayDir);
 
@@ -116,10 +115,10 @@ describe("Rubicon tracker summary cache", () => {
     expect(summary?.volumeProfileRowCount).toBe(540996);
     expect(summary?.openInterestValidRowCount).toBe(123);
     expect(summary?.underlyingIntradayRowCount).toBe(7410);
-    expect(summary?.uploadTabCount).toBe(11);
-    expect(summary?.payloadRows).toBeGreaterThan(1_000_000);
+    expect(summary?.uploadTabCount).toBe(1);
+    expect(summary?.payloadRows).toBe(23);
     expect(summary?.payloadPath).toContain("google_sheet_upload_payload.json");
-    expect(summary?.workbookPath).toContain("spx_daily_upload_2026-06-01.xlsx");
+    expect(summary?.workbookPath).toBeUndefined();
     await expect(fs.access(path.join(dayDir, RUBICON_TRACKER_SUMMARY_FILE))).resolves.toBeUndefined();
   });
 
@@ -157,8 +156,6 @@ describe("Rubicon tracker summary cache", () => {
         date: "2026-06-01",
         payloadExists: true,
         payloadPath: "google_sheet_upload_payload.json",
-        workbookExists: false,
-        workbookPath: "spx_daily_upload_2026-06-01.xlsx",
       },
     );
 

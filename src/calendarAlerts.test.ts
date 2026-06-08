@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { MorningCalendarEvent } from "../shared/types";
 import {
+  calendarAlertGroups,
   calendarAlertTargets,
   calendarEventStartAt,
   formatCalendarAlertStatus,
+  nextCalendarAlertGroup,
   nextCalendarAlertTarget,
 } from "./calendarAlerts";
 
@@ -65,11 +67,40 @@ describe("calendar alert scheduling", () => {
   });
 
   it("describes the next alert compactly for the UI", () => {
-    const target = nextCalendarAlertTarget(
+    const group = nextCalendarAlertGroup(
       [event({ title: "Fed speaker", sortMinute: 10 * 60, timeLabel: "10:00 AM" })],
       new Date(2026, 4, 31, 9, 58, 45),
     );
 
-    expect(formatCalendarAlertStatus(target)).toBe("Next alert in 15s: 10:00 AM - Fed speaker");
+    expect(formatCalendarAlertStatus(group)).toBe("Next alert in 15s: 10:00 AM - Fed speaker");
+  });
+
+  it("coalesces simultaneous events into a single alert group", () => {
+    const groups = calendarAlertGroups(
+      [
+        event({ id: "cpi", title: "CPI", sortMinute: 8 * 60 + 30, timeLabel: "8:30 AM" }),
+        event({ id: "retail", title: "Retail Sales", sortMinute: 8 * 60 + 30, timeLabel: "8:30 AM" }),
+        event({ id: "claims", title: "Jobless Claims", sortMinute: 8 * 60 + 30, timeLabel: "8:30 AM" }),
+        event({ id: "fed", title: "Fed speaker", sortMinute: 8 * 60 + 31, timeLabel: "8:31 AM" }),
+      ],
+      new Date(2026, 4, 31, 8, 0, 0),
+    );
+
+    expect(groups).toHaveLength(2);
+    expect(groups[0].events.map((e) => e.id)).toEqual(["cpi", "claims", "retail"]);
+    expect(groups[0].millisUntilAlert).toBe(29 * 60_000);
+    expect(groups[1].events.map((e) => e.id)).toEqual(["fed"]);
+  });
+
+  it("summarises a coalesced group as an event count", () => {
+    const group = nextCalendarAlertGroup(
+      [
+        event({ id: "cpi", title: "CPI", sortMinute: 8 * 60 + 30, timeLabel: "8:30 AM" }),
+        event({ id: "retail", title: "Retail Sales", sortMinute: 8 * 60 + 30, timeLabel: "8:30 AM" }),
+      ],
+      new Date(2026, 4, 31, 8, 28, 30),
+    );
+
+    expect(formatCalendarAlertStatus(group)).toBe("Next alert in 30s: 8:30 AM - 2 events");
   });
 });

@@ -149,13 +149,7 @@ describe("daily pull checklist", () => {
             id: "sheet-payload",
             label: "Sheet payload",
             status: "complete",
-            detail: "Payload staged for 2026-06-01 with 11 tabs.",
-          },
-          {
-            id: "raw-workbook",
-            label: "Raw upload workbook",
-            status: "complete",
-            detail: "Workbook rebuilt: spx_daily_upload_2026-06-01.xlsx",
+            detail: "Compact tracker payload staged for 2026-06-01 with 1 tab.",
           },
         ],
       }),
@@ -173,14 +167,7 @@ describe("daily pull checklist", () => {
     expect(checklist.steps.find((step) => step.id === "payload")).toMatchObject({
       status: "complete",
     });
-    expect(checklist.steps.find((step) => step.id === "raw-workbook")).toMatchObject({
-      status: "complete",
-    });
     expect(checklist.coverageItems.find((item) => item.id === "payload-tabs")).toMatchObject({
-      pulled: 1,
-      status: "complete",
-    });
-    expect(checklist.coverageItems.find((item) => item.id === "raw-workbook")).toMatchObject({
       pulled: 1,
       status: "complete",
     });
@@ -196,13 +183,7 @@ describe("daily pull checklist", () => {
             id: "sheet-payload",
             label: "Sheet payload",
             status: "complete",
-            detail: "Payload staged for 2026-06-02 with 11 tabs.",
-          },
-          {
-            id: "raw-workbook",
-            label: "Raw upload workbook",
-            status: "complete",
-            detail: "Workbook rebuilt: spx_daily_upload_2026-06-02.xlsx",
+            detail: "Compact tracker payload staged for 2026-06-02 with 1 tab.",
           },
         ],
         targetPlan: {
@@ -225,17 +206,11 @@ describe("daily pull checklist", () => {
     expect(checklist.steps.find((step) => step.id === "payload")).toMatchObject({
       status: "failed",
     });
-    expect(checklist.steps.find((step) => step.id === "raw-workbook")).toMatchObject({
-      status: "warning",
-    });
     expect(checklist.coverageItems.find((item) => item.id === "payload-tabs")).toMatchObject({
       pulled: null,
       status: "warning",
     });
-    expect(checklist.coverageItems.find((item) => item.id === "raw-workbook")).toMatchObject({
-      pulled: 0,
-      status: "warning",
-    });
+    expect(checklist.coverageItems.find((item) => item.id === "raw-workbook")).toBeUndefined();
   });
 
   it("renders skipped enrichment coverage as zero rows instead of unknown", () => {
@@ -400,7 +375,7 @@ function sources(overrides: Partial<SourceHealth>[] = []): SourceHealth[] {
   const base: SourceHealth[] = [
     { detail: "4 Daily Sync Runs rows captured.", label: "Google Drive connector snapshot", status: "ok" },
     { count: 59333, detail: "2026-05-29 payload ready.", label: "Staged sheet payload", status: "ok" },
-    { detail: "Raw workbook receipt exists.", label: "Google raw workbook access", status: "ok" },
+    { detail: "Tracker upload is complete.", label: "Google tracker upload", status: "ok" },
     { count: 66, detail: "Normalized entries available.", label: "AI STUFF IBKR trade mirror", status: "ok" },
     { detail: "Latest replay date: 2026-05-29.", label: "Replay market data", status: "ok" },
     { detail: "Launcher ready.", label: "AI STUFF daily sync launcher", status: "ok" },

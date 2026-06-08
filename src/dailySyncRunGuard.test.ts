@@ -4,17 +4,17 @@ import { buildDailySyncRunGuard } from "./dailySyncRunGuard";
 
 function status(overrides: Partial<DailySyncStatusResult> = {}): DailySyncStatusResult {
   return {
-    generatedAt: "2026-05-29T20:09:00.000Z",
-    message: "Daily SPX/IBKR sync is idle.",
+    generatedAt: "2026-05-29T10:09:00.000Z",
+    message: "Daily pipeline is idle.",
     ok: true,
     state: "idle",
     targetPlan: {
       afterCutoff: false,
-      cutoffTimeEt: "16:25",
+      cutoffTimeEt: "07:00",
       estimatedTargetDate: "2026-05-28",
       mode: "auto",
       note: "Auto mode is estimated to target the previous session.",
-      nowEt: "2026-05-29 16:09 ET",
+      nowEt: "2026-05-29 06:09 ET",
       requestedDate: "auto",
     },
     ...overrides,
@@ -27,7 +27,7 @@ describe("daily sync run guard", () => {
 
     expect(guard.disabled).toBe(true);
     expect(guard.title).toContain("Auto would still target 2026-05-28");
-    expect(guard.title).toContain("unlocks after 16:25 ET");
+    expect(guard.title).toContain("unlocks after 07:00 ET");
   });
 
   it("unlocks the live run after auto targets today", () => {
@@ -35,11 +35,11 @@ describe("daily sync run guard", () => {
       status({
         targetPlan: {
           afterCutoff: true,
-          cutoffTimeEt: "16:25",
+          cutoffTimeEt: "07:00",
           estimatedTargetDate: "2026-05-29",
           mode: "auto",
           note: "Auto mode is estimated to target today's session.",
-          nowEt: "2026-05-29 16:30 ET",
+          nowEt: "2026-05-29 07:30 ET",
           requestedDate: "auto",
         },
       }),
@@ -53,6 +53,6 @@ describe("daily sync run guard", () => {
     const guard = buildDailySyncRunGuard(status({ state: "running" }), "2026-05-29");
 
     expect(guard.disabled).toBe(true);
-    expect(guard.title).toBe("Daily SPX/IBKR sync is already running.");
+    expect(guard.title).toBe("Daily pipeline is already running.");
   });
 });

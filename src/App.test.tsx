@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ReplayPayload, SpreadSpeedPayload, TrackerSnapshot, TradeRecord } from "../shared/types";
+import type { DailySyncStatusResult, DailySyncStep, ReplayPayload, SpreadSpeedPayload, TrackerSnapshot, TradeRecord } from "../shared/types";
 import App from "./App";
-import { fetchDailySyncStatus, fetchReplay, fetchSpreadSpeed, fetchTracker, saveTradeJournalSnapshot } from "./api";
+import { fetchDailySyncStatus, fetchReplay, fetchSpreadSpeed, fetchTracker, runDailyOptionPull, saveTradeJournalSnapshot } from "./api";
 
 vi.mock("./api", () => ({
   fetchDailySyncStatus: vi.fn(),
@@ -12,8 +12,36 @@ vi.mock("./api", () => ({
   fetchSpreadSpeed: vi.fn(),
   fetchTracker: vi.fn(),
   refreshGoogleSnapshot: vi.fn(),
+  runDailyOptionPull: vi.fn(),
   runDailySync: vi.fn(),
   saveTradeJournalSnapshot: vi.fn(),
+  // The Morning live Signal-Stack feed polls these on mount; resolve to inert
+  // values so the (mocked) MorningDashboard render isn't affected.
+  fetchLiveSpreadSpeed: vi.fn(async () => ({
+    date: "",
+    generatedAt: "",
+    available: false,
+    note: "",
+    targetNetDelta: 0.05,
+    fastThreshold: 0.05,
+    frames: [],
+    live: true,
+  })),
+  fetchLiveSpreadSpeedStatus: vi.fn(async () => ({
+    running: false,
+    pid: null,
+    startedAt: null,
+    lastExit: null,
+    logTail: [],
+    script: "",
+    python: "",
+    available: true,
+    autoStartEt: null,
+    autoStartLastFiredDate: null,
+    marketOpen: false,
+  })),
+  startLiveSpreadSpeed: vi.fn(),
+  stopLiveSpreadSpeed: vi.fn(),
 }));
 
 vi.mock("./components/MorningDashboard", () => ({
@@ -32,11 +60,21 @@ vi.mock("./components/ReplayCharts", () => ({
   ReplayCharts: ({
     replay,
     selectedTrade,
+    selectedTrades,
+    selectionLabel,
   }: {
     replay: ReplayPayload | null;
     selectedTrade: TradeRecord | null;
+    selectedTrades?: TradeRecord[];
+    selectionLabel?: string;
   }) => (
-    <div data-replay-date={replay?.date ?? ""} data-selected-trade={selectedTrade?.id ?? ""} data-testid="replay-charts">
+    <div
+      data-replay-date={replay?.date ?? ""}
+      data-selected-trade={selectedTrade?.id ?? ""}
+      data-selected-trades={selectedTrades?.map((trade) => trade.id).join(",") ?? ""}
+      data-selection-label={selectionLabel ?? ""}
+      data-testid="replay-charts"
+    >
       replay {replay?.date ?? "none"} trade {selectedTrade?.id ?? "none"}
     </div>
   ),
@@ -50,6 +88,7 @@ const fetchTrackerMock = vi.mocked(fetchTracker);
 const fetchReplayMock = vi.mocked(fetchReplay);
 const fetchSpreadSpeedMock = vi.mocked(fetchSpreadSpeed);
 const fetchDailySyncStatusMock = vi.mocked(fetchDailySyncStatus);
+const runDailyOptionPullMock = vi.mocked(runDailyOptionPull);
 const saveTradeJournalSnapshotMock = vi.mocked(saveTradeJournalSnapshot);
 
 describe("App Replay state routing", () => {
@@ -68,6 +107,12 @@ describe("App Replay state routing", () => {
       generatedAt: "2026-06-02T12:00:00.000Z",
       message: "saved",
       ok: true,
+    });
+    runDailyOptionPullMock.mockResolvedValue({
+      generatedAt: "2026-06-02T12:00:00.000Z",
+      message: "Failed/missing option data retry started.",
+      ok: true,
+      state: "running",
     });
   });
 
@@ -99,7 +144,7 @@ describe("App Replay state routing", () => {
     await waitFor(() => expect(screen.getByTestId("replay-charts").getAttribute("data-replay-date")).toBe("2026-06-01"));
   });
 
-  it("keeps the date-scoped Replay payload when selecting another quick trade", async () => {
+  it("keeps the date-scoped Replay payload when selecting another spread", async () => {
     fetchReplayMock.mockResolvedValue(replayPayloadFixture("2026-06-02"));
 
     render(<App />);
@@ -107,12 +152,46 @@ describe("App Replay state routing", () => {
 
     await waitFor(() => expect(screen.getByTestId("replay-charts").getAttribute("data-selected-trade")).toBe("trade-new-a"));
 
-    fireEvent.click(screen.getByRole("button", { name: /Replay 10:15 Put/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Replay spread Put/ }));
 
     await waitFor(() => expect(screen.getByTestId("replay-charts").getAttribute("data-selected-trade")).toBe("trade-new-b"));
+    expect(screen.getByTestId("replay-charts").getAttribute("data-selected-trades")).toBe("trade-new-b");
     expect(fetchReplayMock).toHaveBeenCalledTimes(1);
     expect(fetchReplayMock.mock.calls[0][0]).toBe("2026-06-02");
     expect(fetchReplayMock.mock.calls[0][1]).toBeUndefined();
+  });
+
+  it("can select a whole spread and pass all matching entries to Replay charts", async () => {
+    const date = "2026-06-02";
+    const trades = [
+      tradeFixture("call-a", date, "09:45", "Call"),
+      tradeFixture("call-b", date, "10:15", "Call"),
+      tradeFixture("put-a", date, "10:45", "Put"),
+    ];
+    fetchTrackerMock.mockResolvedValue(snapshotFixture({
+      availableDates: [date],
+      dailySummaries: [dailySummaryFixture(date, trades.length)],
+      latestTradeDate: date,
+      today: date,
+      trades,
+    }));
+    fetchReplayMock.mockResolvedValue(replayPayloadFixture(date));
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("tab", { name: "Replay" }));
+
+    await waitFor(() => expect(screen.getByTestId("replay-charts").getAttribute("data-selected-trades")).toBe("call-a,call-b"));
+    expect(screen.queryByText("Entries")).toBeNull();
+    expect(screen.queryAllByTestId("quick-trade-button")).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole("button", { name: /Replay spread Call 5050\/5060 2 entries/i }));
+
+    await waitFor(() => expect(screen.getByTestId("replay-charts").getAttribute("data-selected-trades")).toBe("call-a,call-b"));
+    expect(screen.getByTestId("replay-charts").getAttribute("data-selection-label")).toBe("Call 5050/5060 - 2 entries");
+
+    fireEvent.click(screen.getByRole("button", { name: /Replay spread Put/i }));
+
+    await waitFor(() => expect(screen.getByTestId("replay-charts").getAttribute("data-selected-trades")).toBe("put-a"));
   });
 
   it("keeps Replay copy quiet for pending today and full-session state", async () => {
@@ -165,8 +244,203 @@ describe("App Replay state routing", () => {
 
     expect(await screen.findByRole("heading", { name: "Ready for review" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "2026-06-02" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Trade, SPX, and replay outputs" })).toBeTruthy();
-    expect(screen.getByText("No review-critical blockers for this date.")).toBeTruthy();
+    const glance = screen.getByTestId("daily-pull-glance");
+    expect(within(glance).getByRole("heading", { name: "Everything important is complete" })).toBeTruthy();
+    expect(within(glance).getByText("6/6 complete")).toBeTruthy();
+    expect(within(glance).getByText("IBKR trade files")).toBeTruthy();
+    expect(within(glance).getByText("SPX 5s bars")).toBeTruthy();
+    expect(within(glance).getByText("Traded spread replay marks")).toBeTruthy();
+    expect(within(glance).getByText("Option 5s chain")).toBeTruthy();
+    expect(within(glance).getByText("Option OI")).toBeTruthy();
+    expect(within(glance).getByText("Option Volume")).toBeTruthy();
+    expect(screen.queryByTestId("daily-pull-review-details")).toBeNull();
+    expect(screen.queryByText("Review Details")).toBeNull();
+    expect(screen.queryByText("Review Critical")).toBeNull();
+    expect(screen.queryByText("Review Readiness")).toBeNull();
+    expect(within(glance).queryByText("No review-critical blockers for this date.")).toBeNull();
+    expect(within(glance).queryByRole("heading", { name: "Trade, SPX, and replay outputs" })).toBeNull();
+    const pipelineActions = screen.getByRole("region", { name: "Daily pipeline actions" });
+    expect(within(pipelineActions).getByRole("button", { name: "Run Daily Pipeline" })).toBeTruthy();
+    expect(within(pipelineActions).getByRole("button", { name: "Preflight Pipeline" })).toBeTruthy();
+    expect(within(pipelineActions).getByText("Ready to run")).toBeTruthy();
+    expect(within(pipelineActions).getByText("0 / 14 steps")).toBeTruthy();
+    expect(within(pipelineActions).getByRole("progressbar", { name: "Daily sync progress" }).getAttribute("aria-valuenow")).toBe("0");
+  });
+
+  it("shows one manual option retry control for failed or missing pulls", async () => {
+    fetchReplayMock.mockResolvedValue(replayPayloadFixture("2026-06-02"));
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("tab", { name: "Replay" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Daily Pull" }));
+
+    const optionRepull = await screen.findByRole("region", { name: "Option data retry" });
+    expect(within(optionRepull).getByText("Retries failed or missing option pulls for 2026-06-02")).toBeTruthy();
+    expect(within(optionRepull).queryByRole("button", { name: "SPX Spread Legs" })).toBeNull();
+    expect(within(optionRepull).queryByRole("button", { name: "SPX Chain Band" })).toBeNull();
+    expect(within(optionRepull).queryByRole("button", { name: "Owned Options" })).toBeNull();
+    fireEvent.click(within(optionRepull).getByRole("button", { name: "Retry Missing Option Data" }));
+
+    await waitFor(() => expect(runDailyOptionPullMock).toHaveBeenCalledWith("2026-06-02"));
+  });
+
+  it("keeps coverage percentage out of Daily Pull details", async () => {
+    fetchReplayMock.mockResolvedValue(replayPayloadFixture("2026-06-02"));
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("tab", { name: "Replay" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Daily Pull" }));
+
+    await screen.findByRole("heading", { name: "Everything important is complete" });
+    expect(screen.queryByText("Coverage")).toBeNull();
+
+    fireEvent.click(screen.getByText("Diagnostics / Context"));
+    const diagnostics = screen.getByTestId("daily-pull-diagnostics");
+    expect(diagnostics.hasAttribute("open")).toBe(true);
+    expect(within(diagnostics).getByRole("columnheader", { name: "Needed" })).toBeTruthy();
+    expect(within(diagnostics).getByRole("columnheader", { name: "Pulled" })).toBeTruthy();
+    expect(within(diagnostics).getByRole("columnheader", { name: "Missing" })).toBeTruthy();
+    expect(within(diagnostics).queryByRole("columnheader", { name: "Coverage" })).toBeNull();
+    expect(within(diagnostics).queryByText(/\d+\.\d%/)).toBeNull();
+  });
+
+  it("shows the running daily sync step and count in the top progress bar", async () => {
+    fetchDailySyncStatusMock.mockResolvedValue(
+      dailySyncStatusFixture({
+        message: "Pulling SPX bars.",
+        state: "running",
+        steps: pipelineSteps({
+          "sync-started": "complete",
+          "core-sync": "running",
+        }).map((step) =>
+          step.id === "core-sync"
+            ? { ...step, detail: "Pulling SPX bars and IBKR execution files." }
+            : step,
+        ),
+      }),
+    );
+    fetchReplayMock.mockResolvedValue(replayPayloadFixture("2026-06-02"));
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("tab", { name: "Replay" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Daily Pull" }));
+
+    const pipelineActions = await screen.findByRole("region", { name: "Daily pipeline actions" });
+    await waitFor(() => expect(within(pipelineActions).getByText("Running: Data Collection")).toBeTruthy());
+    expect(within(pipelineActions).getByText("1 / 14 steps")).toBeTruthy();
+    expect(within(pipelineActions).getByText("Pulling SPX bars and IBKR execution files. Waiting for data update.")).toBeTruthy();
+    expect(Number(within(pipelineActions).getByRole("progressbar", { name: "Daily sync progress" }).getAttribute("aria-valuenow"))).toBeGreaterThan(0);
+  });
+
+  it("shows running daily sync sub-progress in the top progress bar", async () => {
+    fetchDailySyncStatusMock.mockResolvedValue(
+      dailySyncStatusFixture({
+        message: "Running bounded SPX spread-leg option pull.",
+        state: "running",
+        steps: pipelineSteps({
+          "sync-started": "complete",
+          "core-sync": "complete",
+          "rubicon-ingest": "complete",
+          "sheet-payload": "complete",
+          "google-upload": "complete",
+          "tc2000-open": "complete",
+          "tc2000-export": "warning",
+          "qullamaggie-report": "warning",
+          "tc2000-bars": "complete",
+          "option-spx-spread-legs": "running",
+        }).map((step) =>
+          step.id === "option-spx-spread-legs"
+            ? {
+                ...step,
+                detail: "Running bounded SPX spread-leg option pull.",
+                progress: {
+                  current: 7,
+                  total: 24,
+                  unit: "contracts" as const,
+                  detail: "SPXW 260605P07450: 4,860 bars; spread marks updating",
+                },
+              }
+            : step,
+        ),
+      }),
+    );
+    fetchReplayMock.mockResolvedValue(replayPayloadFixture("2026-06-02"));
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("tab", { name: "Replay" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Daily Pull" }));
+
+    const pipelineActions = await screen.findByRole("region", { name: "Daily pipeline actions" });
+    await waitFor(() => expect(within(pipelineActions).getByText("Running: Option SPX spread legs")).toBeTruthy());
+    expect(within(pipelineActions).getByText("7 / 24 contracts")).toBeTruthy();
+    expect(within(pipelineActions).getByText("SPXW 260605P07450: 4,860 bars; spread marks updating")).toBeTruthy();
+  });
+
+  it("shows failed daily sync step detail visibly in the top progress bar", async () => {
+    fetchDailySyncStatusMock.mockResolvedValue(
+      dailySyncStatusFixture({
+        message: "Daily pipeline completed with stage errors.",
+        pipelineState: "failed-with-stage-errors",
+        state: "completed",
+        steps: pipelineSteps({
+          "sync-started": "complete",
+          "core-sync": "complete",
+          "rubicon-ingest": "complete",
+          "sheet-payload": "complete",
+          "google-upload": "failed",
+        }).map((step) =>
+          step.id === "google-upload"
+            ? { ...step, detail: "Google tracker update failed; local review is still usable." }
+            : step,
+        ),
+      }),
+    );
+    fetchReplayMock.mockResolvedValue(replayPayloadFixture("2026-06-02"));
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("tab", { name: "Replay" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Daily Pull" }));
+
+    const pipelineActions = await screen.findByRole("region", { name: "Daily pipeline actions" });
+    await waitFor(() => expect(within(pipelineActions).getByText("Stopped at Google Upload")).toBeTruthy());
+    expect(within(pipelineActions).getByText("Google tracker update failed; local review is still usable.")).toBeTruthy();
+    expect(Number(within(pipelineActions).getByRole("progressbar", { name: "Daily sync progress" }).getAttribute("aria-valuenow"))).toBeLessThan(100);
+  });
+
+  it("shows completed daily sync progress at 100 percent", async () => {
+    fetchDailySyncStatusMock.mockResolvedValue(
+      dailySyncStatusFixture({
+        message: "Daily pipeline completed.",
+        pipelineState: "completed",
+        state: "completed",
+        steps: pipelineSteps({
+          "sync-started": "complete",
+          "core-sync": "complete",
+          "rubicon-ingest": "complete",
+          "sheet-payload": "complete",
+          "google-upload": "complete",
+          "tc2000-open": "complete",
+          "option-spx-spread-legs": "complete",
+          "option-spx-chain-band": "complete",
+          "option-owned-symbols": "complete",
+          "option-open-interest": "complete",
+          "option-rubicon-refresh": "complete",
+          "tc2000-export": "complete",
+          "qullamaggie-report": "complete",
+          "tc2000-bars": "complete",
+        }),
+      }),
+    );
+    fetchReplayMock.mockResolvedValue(replayPayloadFixture("2026-06-02"));
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("tab", { name: "Replay" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Daily Pull" }));
+
+    const pipelineActions = await screen.findByRole("region", { name: "Daily pipeline actions" });
+    await waitFor(() => expect(within(pipelineActions).getByText("Completed")).toBeTruthy());
+    expect(within(pipelineActions).getByText("14 / 14 steps")).toBeTruthy();
+    expect(within(pipelineActions).getByRole("progressbar", { name: "Daily sync progress" }).getAttribute("aria-valuenow")).toBe("100");
   });
 
   it("keeps archive and pipeline details collapsed by default", async () => {
@@ -177,10 +451,10 @@ describe("App Replay state routing", () => {
           dailySummaryFixture("2026-06-02", 2, {
             issues: [
               {
-                detail: "The local archive has a sheet payload, but no raw_upload_google_sheet_url/upload receipt was found for this date.",
+                detail: "The compact tracker payload exists, but no successful Google tracker update is recorded in the daily summary.",
                 severity: "warning",
                 stage: "upload",
-                title: "Live Google upload not confirmed",
+                title: "Google tracker upload not confirmed",
               },
             ],
             rawUploadGoogleSheetUrl: undefined,
@@ -189,6 +463,40 @@ describe("App Replay state routing", () => {
         ],
       }),
     );
+    fetchDailySyncStatusMock.mockResolvedValue({
+      generatedAt: "2026-06-02T12:00:00.000Z",
+      googleUploaded: true,
+      message: "Daily pipeline completed with sidecar warnings.",
+      ok: true,
+      reviewReady: true,
+      state: "completed",
+      steps: [
+        {
+          id: "tc2000-open",
+          label: "Open TC2000",
+          status: "warning",
+          detail: "TC2000 could not be opened automatically.",
+        },
+        {
+          id: "tc2000-export",
+          label: "TC2000 export",
+          status: "warning",
+          detail: "TC2000 export failed or did not produce a fresh non-empty CSV.",
+        },
+        {
+          id: "qullamaggie-report",
+          label: "Qullamaggie report/email",
+          status: "warning",
+          detail: "Skipped Qullamaggie report/email because TC2000 export did not produce a fresh scanner CSV.",
+        },
+        {
+          id: "tc2000-bars",
+          label: "TC2000 daily bars",
+          status: "complete",
+          detail: "Daily bars refreshed.",
+        },
+      ],
+    });
     fetchReplayMock.mockResolvedValue(replayPayloadFixture("2026-06-02"));
 
     render(<App />);
@@ -199,9 +507,39 @@ describe("App Replay state routing", () => {
     expect(screen.getByTestId("daily-pull-archive").hasAttribute("open")).toBe(false);
     expect(screen.getByTestId("daily-pull-diagnostics").hasAttribute("open")).toBe(false);
 
-    fireEvent.click(screen.getByText("Pipeline / Archive Details"));
+    fireEvent.click(screen.getByText("Pipeline / Upload Details"));
     expect(screen.getByTestId("daily-pull-archive").hasAttribute("open")).toBe(true);
-    expect(screen.getByText("Live Google upload not confirmed")).toBeTruthy();
+    expect(screen.getByTestId("daily-pull-audit").hasAttribute("open")).toBe(false);
+    expect(screen.getAllByText("Google tracker upload not confirmed").length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByText("Run audit"));
+    expect(screen.getByTestId("daily-pull-audit").hasAttribute("open")).toBe(true);
+    expect(screen.getByText("Open TC2000")).toBeTruthy();
+    expect(screen.getByText("TC2000 export")).toBeTruthy();
+    expect(screen.getByText("Qullamaggie report/email")).toBeTruthy();
+    expect(screen.getByText("TC2000 daily bars")).toBeTruthy();
+  });
+
+  it("does not duplicate Daily Pull pipeline controls inside expanded details", async () => {
+    fetchDailySyncStatusMock.mockResolvedValue(
+      dailySyncStatusFixture({
+        steps: pipelineSteps({
+          "sync-started": "complete",
+          "core-sync": "complete",
+        }),
+      }),
+    );
+    fetchReplayMock.mockResolvedValue(replayPayloadFixture("2026-06-02"));
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("tab", { name: "Replay" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Daily Pull" }));
+
+    await screen.findByRole("heading", { name: "Ready for review" });
+    fireEvent.click(screen.getByText("Pipeline / Upload Details"));
+
+    expect(screen.getAllByRole("button", { name: "Run Daily Pipeline" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Preflight Pipeline" })).toHaveLength(1);
   });
 
   it("shows a today-empty banner with a latest usable date action", async () => {
@@ -273,7 +611,7 @@ describe("App Replay state routing", () => {
     fireEvent.click(issueDateButton);
 
     await screen.findByRole("heading", { name: "2026-06-01" });
-    expect(screen.getByText("SPX pull missing or failed")).toBeTruthy();
+    expect(screen.getAllByText("SPX pull missing or failed").length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole("button", { name: /Mark 2026-06-01 pull-date issues as fine/i }));
     expect(screen.getByRole("button", { name: /2026-06-01, 1 trade, issues accepted/i })).toBeTruthy();
@@ -303,6 +641,26 @@ describe("App Replay state routing", () => {
   });
 
   it("keeps Daily Review focused on sequence and composition without flags or notes", async () => {
+    const date = "2026-06-02";
+    const trades = [
+      tradeFixture("trade-new-a", date, "09:45", "Call"),
+      tradeFixture("trade-new-b", date, "10:15", "Put"),
+      {
+        ...tradeFixture("expired-eod", date, "11:00", "Call"),
+        exitPrice: null,
+        exitTime: `${date}T16:00:00-04:00`,
+        pnl: -875,
+        status: "Expired",
+        winLoss: "Loss" as const,
+      },
+    ];
+    fetchTrackerMock.mockResolvedValue(snapshotFixture({
+      availableDates: [date],
+      dailySummaries: [dailySummaryFixture(date, trades.length)],
+      latestTradeDate: date,
+      today: date,
+      trades,
+    }));
     fetchReplayMock.mockResolvedValue(replayPayloadFixture("2026-06-02"));
 
     render(<App />);
@@ -315,6 +673,9 @@ describe("App Replay state routing", () => {
     expect(screen.queryByRole("heading", { name: "Daily Note" })).toBeNull();
     expect(screen.queryByText(/Mistake/i)).toBeNull();
     expect(screen.queryByText(/Lesson/i)).toBeNull();
+    expect(screen.queryByText(/expir/i)).toBeNull();
+    expect(screen.queryByText(/Expiry/i)).toBeNull();
+    expect(screen.getByText("5 events")).toBeTruthy();
     expect(screen.getByRole("button", { name: /Open Replay/i }).className).toContain("review-action-button");
     expect(screen.getAllByText(/Entry 09:45 @ 1\.25/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Exit 15:45 @ 0\.25 - Held 6h - P\/L/i).length).toBeGreaterThan(0);
@@ -386,10 +747,14 @@ function dailySummaryFixture(
     issueCount: 0,
     issues: [],
     optionContractCount: tradeCount * 4,
+    optionIntradayBarSize: "5s",
     optionIntradayStatus: "ok",
     optionIntradayExpectedRows: tradeCount * 4860,
     optionIntradayExpectedRowsPerContract: 4860,
     optionIntradayRowCount: tradeCount * 4860,
+    openInterestExpectedRows: tradeCount * 4,
+    openInterestRowCount: tradeCount * 4,
+    openInterestValidRowCount: tradeCount * 4,
     payloadRows: 10,
     rawUploadGoogleSheetUrl: "https://example.test/raw",
     spxIntradayBarSize: "5s",
@@ -405,6 +770,8 @@ function dailySummaryFixture(
     tradeStatus: "ok",
     uploadStatus: "uploaded",
     uploadTabCount: 1,
+    volumeProfileExpectedRows: tradeCount * 4860,
+    volumeProfileRowCount: tradeCount * 4860,
     ...overrides,
   };
 }
@@ -441,6 +808,35 @@ function spreadSpeedFixture(): SpreadSpeedPayload {
     note: "ok",
     targetNetDelta: 0.05,
   };
+}
+
+function dailySyncStatusFixture(overrides: Partial<DailySyncStatusResult> = {}): DailySyncStatusResult {
+  return {
+    generatedAt: "2026-06-03T12:00:00.000Z",
+    message: "Daily pipeline status.",
+    ok: true,
+    state: "idle",
+    ...overrides,
+  };
+}
+
+function pipelineSteps(statuses: Partial<Record<string, DailySyncStep["status"]>> = {}): DailySyncStep[] {
+  return [
+    { id: "sync-started", label: "Sync started", status: statuses["sync-started"] ?? "pending" },
+    { id: "core-sync", label: "Data Collection", status: statuses["core-sync"] ?? "pending" },
+    { id: "rubicon-ingest", label: "Rubicon Ingest", status: statuses["rubicon-ingest"] ?? "pending" },
+    { id: "sheet-payload", label: "Sheet payload", status: statuses["sheet-payload"] ?? "pending" },
+    { id: "google-upload", label: "Google Upload", status: statuses["google-upload"] ?? "pending" },
+    { id: "tc2000-open", label: "Open TC2000", status: statuses["tc2000-open"] ?? "pending" },
+    { id: "tc2000-export", label: "TC2000 export", status: statuses["tc2000-export"] ?? "pending" },
+    { id: "qullamaggie-report", label: "Qullamaggie report/email", status: statuses["qullamaggie-report"] ?? "pending" },
+    { id: "tc2000-bars", label: "TC2000 daily bars", status: statuses["tc2000-bars"] ?? "pending" },
+    { id: "option-spx-spread-legs", label: "Option SPX spread legs", status: statuses["option-spx-spread-legs"] ?? "pending" },
+    { id: "option-spx-chain-band", label: "Option SPX chain band", status: statuses["option-spx-chain-band"] ?? "pending" },
+    { id: "option-owned-symbols", label: "Option owned symbols", status: statuses["option-owned-symbols"] ?? "pending" },
+    { id: "option-open-interest", label: "Option open interest", status: statuses["option-open-interest"] ?? "pending" },
+    { id: "option-rubicon-refresh", label: "Option Rubicon refresh", status: statuses["option-rubicon-refresh"] ?? "pending" },
+  ];
 }
 
 function tradeFixture(id: string, date: string, time: string, side: "Call" | "Put"): TradeRecord {

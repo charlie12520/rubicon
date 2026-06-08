@@ -25,8 +25,11 @@ function sanitizeBar(value: unknown): MorningDailyBar | null {
   return { close, date, high, low, open, volume: finiteNumber(record.volume) };
 }
 
-export async function loadRrgBars(appRoot: string): Promise<RrgBarsPayload> {
-  const filePath = path.join(appRoot, "data", "tc2000-daily-bars.json");
+export async function loadRrgBars(
+  appRoot: string,
+  fileName = "tc2000-daily-bars.json",
+): Promise<RrgBarsPayload> {
+  const filePath = path.join(appRoot, "data", fileName);
   try {
     const parsed = JSON.parse(await fs.readFile(filePath, "utf8")) as {
       barsBySymbol?: unknown;
@@ -57,12 +60,16 @@ export async function loadRrgBars(appRoot: string): Promise<RrgBarsPayload> {
       note: typeof parsed.note === "string" ? parsed.note : undefined,
     };
   } catch {
+    const isSectors = fileName.includes("sector");
+    const note = isSectors
+      ? "No sector RRG bars yet. Run the daily sync (or npm run rrg:sectors) to populate them."
+      : "No TC2000 daily bars exported yet. Run the daily sync (or npm run tc2000:daily-bars) to populate them.";
     return {
       barsBySymbol: {},
       symbols: [],
       generatedAt: null,
       source: null,
-      note: "No TC2000 daily bars exported yet. Run the daily sync (or npm run tc2000:daily-bars) to populate them.",
+      note,
     };
   }
 }

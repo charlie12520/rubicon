@@ -163,13 +163,13 @@ Accepted
 
 ---
 
-### D013: Daily trade import sync is launched through the existing AI STUFF wrapper
+### D013: Daily trade import runs as a three-stage daily pipeline
 
 Decision:
-The desktop app exposes a guarded `Run Daily Sync` action that calls the existing `run_daily_spx_ibkr_sync_with_sheet_payload.ps1` wrapper, plus `/api/daily-sync/status` for launch state, latest log tail, and latest daily summary.
+The desktop app exposes a guarded `Run Daily Pipeline` action that calls `run_daily_spx_ibkr_sync_with_sheet_payload.ps1`, with `/api/daily-sync/status` reporting separate Data Collection, Rubicon Ingest, and Google Upload stages.
 
 Reason:
-The AI STUFF wrapper already owns the correct sequencing: SPX bars, IBKR executions, spread summaries, option fallback data, open interest, volume profiles, and staged Google Sheet payload generation. Wrapping that workflow keeps the desktop app aligned with the proven data pipeline instead of duplicating broker and sheet-payload logic.
+Data Collection decides local review readiness, Rubicon Ingest publishes local summaries and replay-safe state even when the app server is closed, and Google Upload is archive/receipt hygiene. Splitting the status model prevents Google failures from making usable local review data look broken.
 
 Status:
 Accepted
@@ -179,10 +179,10 @@ Accepted
 ### D014: Daily sync auto target is surfaced before launch
 
 Decision:
-The desktop app shows an estimated `auto` target date, current New York time, and 16:25 ET cutoff note before the trader launches the daily sync. The AI STUFF wrapper remains the final market-calendar authority.
+The desktop app shows an estimated `auto` target date, current New York time, and 07:00 ET cutoff note before the trader launches the daily pipeline. The AI STUFF collector remains the final market-calendar authority.
 
 Reason:
-Before 16:25 ET, the existing wrapper intentionally targets the prior trading session in `auto` mode to avoid same-day execution-report timing risk. Surfacing that target plan makes the desktop launch action safer and easier to audit without duplicating the full sync pipeline.
+After 07:00 ET, the trader expects same-day collection to target today. Surfacing that target plan makes the desktop launch action safer and easier to audit without duplicating the full market-calendar logic.
 
 Status:
 Accepted

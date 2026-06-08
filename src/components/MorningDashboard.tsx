@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MutableRefObject, ReactNode } from "react";
 import {
   AlertTriangle,
+  ArrowLeftRight,
   Bell,
   BellRing,
   BriefcaseBusiness,
@@ -38,6 +39,7 @@ import type {
   TradeRecord,
 } from "../../shared/types";
 import {
+  type HeatmapIndex,
   fetchIbkrHoldings,
   fetchGodelAlertBridgeStatus,
   fetchMorningAiNotes,
@@ -53,10 +55,10 @@ import {
   triggerLiveUpdateDesktopAlert,
 } from "../api";
 import {
-  calendarAlertTargets,
+  calendarAlertGroups,
   formatCalendarAlertStatus,
-  nextCalendarAlertTarget,
-  type CalendarAlertTarget,
+  nextCalendarAlertGroup,
+  type CalendarAlertGroup,
 } from "../calendarAlerts";
 import {
   alertableNewLiveUpdatesCompiled,
@@ -78,11 +80,22 @@ import { LiveSpreadEstimatorPanel } from "./LiveSpreadEstimatorPanel";
 import { SpreadResponsePanel } from "./SpreadResponsePanel";
 import { SpxHeatmapPanel } from "./SpxHeatmapPanel";
 
+type MorningLiveFeedControl = {
+  status: SpxLiveBarsLiveStatus | null;
+  busy: boolean;
+  tracksToday: boolean;
+  onStart: () => void;
+  onStop: () => void;
+};
+
 type Props = {
   onOpenReplay: () => void;
   onSelectDate: (date: string) => void;
   selectedDate: string;
   spreadSpeed: SpreadSpeedPayload | null;
+  // Live SPXW 0DTE Signal-Stack feed controls (start/stop + status). Present only
+  // for the Morning cockpit; absent renders the Signal Stack without live controls.
+  liveFeed?: MorningLiveFeedControl;
   // Today's tracker trades (passed down from App.tsx — TrackerSnapshot.trades is
   // the source for closed-spread chips in the Estimator). May be empty before
   // the tracker fetch lands.
@@ -92,7 +105,7 @@ type Props = {
 type MorningScreen = "brief" | "signal" | "estimator" | "heatmap";
 
 type CalendarAlertPopup = {
-  event: MorningCalendarEvent;
+  events: MorningCalendarEvent[];
   eventAt: Date;
   firedAt: Date;
 };
@@ -102,6 +115,7 @@ const LIVE_UPDATE_FILTER_STORAGE_KEY = "rubicon-live-update-word-filter";
 export function MorningDashboard({
   selectedDate,
   spreadSpeed,
+  liveFeed,
   trades,
 }: Props) {
   const [brief, setBrief] = useState<MorningBriefPayload | null>(null);
@@ -133,6 +147,7 @@ export function MorningDashboard({
   const [godelBridge, setGodelBridge] = useState<GodelAlertBridgeStatus | null>(null);
   const [godelBridgeMessage, setGodelBridgeMessage] = useState("");
   const [screen, setScreen] = useState<MorningScreen>("brief");
+  const [heatmapIndex, setHeatmapIndex] = useState<HeatmapIndex>("spx");
   const autoArmLastDate = useRef<string | null>(null);
   const autoRefreshLastDate = useRef<string | null>(null);
   const autoRefreshInFlight = useRef(false);
@@ -553,7 +568,7 @@ export function MorningDashboard({
   const dateAiNotes = aiNotes?.date === selectedDate ? aiNotes : null;
   const calendarEvents = dateBrief?.combinedEvents ?? [];
   const nextCalendarAlert = useMemo(
-    () => nextCalendarAlertTarget(calendarEvents, new Date(calendarClockTick)),
+    () => nextCalendarAlertGroup(calendarEvents, new Date(calendarClockTick)),
     [calendarClockTick, calendarEvents],
   );
   const calendarAlertStatus = calendarAlertsArmed
@@ -561,11 +576,10 @@ export function MorningDashboard({
     : "Arm calendar alerts to get a sound and popup 1 minute before timed events.";
 
   const fireCalendarAlert = useCallback(
-    (target: CalendarAlertTarget) => {
+    (group: CalendarAlertGroup) => {
       playCalendarAlert(audioContext);
-      setCalendarAlertPopup({ event: target.event, eventAt: target.eventAt, firedAt: new Date() });
-      void showWindowsCalendarAlert(target.event, target.eventAt);
-      showBrowserNotification(target.event, target.eventAt);
+      setCalendarAlertPopup({ events: group.events, eventAt: group.eventAt, firedAt: new Date() });
+      void showWindowsCalendarAlert(group.events, group.eventAt);
     },
     [],
   );
@@ -576,19 +590,20 @@ export function MorningDashboard({
     if (!calendarAlertsArmed || !calendarEvents.length) {
       return;
     }
-    const targets = calendarAlertTargets(calendarEvents, new Date(calendarClockTick));
-    for (const target of targets) {
-      if (notifiedCalendarEventIds.current.has(target.event.id)) {
+    const groups = calendarAlertGroups(calendarEvents, new Date(calendarClockTick));
+    for (const group of groups) {
+      const stillPending = () => group.events.some((event) => !notifiedCalendarEventIds.current.has(event.id));
+      if (!stillPending()) {
         continue;
       }
       const timer = window.setTimeout(() => {
-        if (notifiedCalendarEventIds.current.has(target.event.id)) {
+        if (!stillPending()) {
           return;
         }
-        notifiedCalendarEventIds.current.add(target.event.id);
-        fireCalendarAlert(target);
+        group.events.forEach((event) => notifiedCalendarEventIds.current.add(event.id));
+        fireCalendarAlert(group);
         setCalendarClockTick(Date.now());
-      }, Math.min(target.millisUntilAlert, 2_147_483_647));
+      }, Math.min(group.millisUntilAlert, 2_147_483_647));
       calendarTimers.current.push(timer);
     }
     return () => {
@@ -603,7 +618,6 @@ export function MorningDashboard({
     setCalendarAlertsArmed(next);
     if (next) {
       playAlert(audioContext);
-      void requestBrowserNotificationPermission();
     } else {
       setCalendarAlertPopup(null);
     }
@@ -672,16 +686,26 @@ export function MorningDashboard({
 
       {screen === "brief" ? (
         <div className="morning-grid">
-          <MorningAgendaSection
-            alertsArmed={calendarAlertsArmed}
-            alertStatus={calendarAlertStatus}
-            events={dateBrief?.combinedEvents ?? []}
-            macroSource={sourceByLabel(dateSources, "US macro")}
-            majorEvents={dateBrief?.majorEvents ?? []}
-            majorEventsSource={sourceByLabel(dateSources, "Major events")}
-            onToggleAlerts={toggleCalendarAlerts}
-            rollcallSource={sourceByLabel(dateSources, "RollCall")}
-          />
+          {/* Calendar + AI Notes stack together on the left (see App.css mid-width
+              rule) so AI Notes sits directly under the calendar, matching the
+              Live Updates column height. */}
+          <div className="morning-brief-stack">
+            <MorningAgendaSection
+              alertsArmed={calendarAlertsArmed}
+              alertStatus={calendarAlertStatus}
+              events={dateBrief?.combinedEvents ?? []}
+              macroSource={sourceByLabel(dateSources, "US macro")}
+              majorEvents={dateBrief?.majorEvents ?? []}
+              majorEventsSource={sourceByLabel(dateSources, "Major events")}
+              onToggleAlerts={toggleCalendarAlerts}
+              rollcallSource={sourceByLabel(dateSources, "RollCall")}
+            />
+
+            <section className="morning-panel morning-ainotes-panel">
+              <MorningPanelHeading icon={<Sparkles size={16} />} label="AI Notes" title="Codex automation diary notes" />
+              <AiNotesPanel error={aiNotesError} notes={dateAiNotes} />
+            </section>
+          </div>
 
           <section className="morning-panel morning-live-panel">
             <MorningPanelHeading icon={<Radio size={16} />} label="Live Updates" title="Market tape" />
@@ -763,12 +787,7 @@ export function MorningDashboard({
               </button>
             </div>
             {holdingsMessage && <div className="morning-holdings-message">{holdingsMessage}</div>}
-            <HoldingsList snapshot={holdings} todayYmd={selectedDate.replace(/-/g, "")} />
-          </section>
-
-          <section className="morning-panel morning-ainotes-panel">
-            <MorningPanelHeading icon={<Sparkles size={16} />} label="AI Notes" title="Codex automation diary notes" />
-            <AiNotesPanel error={aiNotesError} notes={dateAiNotes} />
+            <HoldingsList snapshot={holdings} />
           </section>
 
           <section className="morning-panel morning-tc2000-panel">
@@ -780,10 +799,29 @@ export function MorningDashboard({
         <SignalStackSection
           selectedDate={selectedDate}
           signalFrame={signalFrame}
+          frameDate={spreadSpeed?.date ?? null}
+          isFallback={spreadSpeed?.fallback ?? false}
+          isLive={spreadSpeed?.live ?? false}
+          liveFeed={liveFeed}
           targetNetDelta={spreadSpeed?.targetNetDelta ?? 0.05}
         />
       ) : screen === "heatmap" ? (
-        <SpxHeatmapPanel />
+        <>
+          <div className="heatmap-index-toggle">
+            <button
+              type="button"
+              className="heatmap-index-toggle-btn"
+              onClick={() => setHeatmapIndex((ix) => (ix === "spx" ? "qqq" : "spx"))}
+              aria-label={`Heatmap index ${heatmapIndex === "spx" ? "SPY" : "QQQ"}; click to switch to ${heatmapIndex === "spx" ? "QQQ" : "SPY"}`}
+              title={`Showing ${heatmapIndex === "spx" ? "S&P 500 (SPY)" : "Nasdaq-100 (QQQ)"} — click to switch`}
+            >
+              <span className={heatmapIndex === "spx" ? "current" : "next"}>SPY</span>
+              <ArrowLeftRight size={13} aria-hidden />
+              <span className={heatmapIndex === "qqq" ? "current" : "next"}>QQQ</span>
+            </button>
+          </div>
+          <SpxHeatmapPanel index={heatmapIndex} />
+        </>
       ) : (
         <section className="morning-panel morning-estimator-panel">
           <MorningPanelHeading icon={<Sparkles size={16} />} label="Estimator" title="0DTE SPX spread estimator" />
@@ -827,29 +865,92 @@ export function MorningDashboard({
   );
 }
 
-function SignalStackSection({
+export function SignalStackSection({
   selectedDate,
   signalFrame,
+  frameDate,
+  isFallback,
+  isLive,
+  liveFeed,
   targetNetDelta,
 }: {
   selectedDate: string;
   signalFrame: SpreadSpeedFrame | null;
+  // The session date the displayed frame actually came from, and whether it is
+  // an earlier session shown because the requested date had no frame yet.
+  frameDate: string | null;
+  isFallback: boolean;
+  // True when the frame came from the real-time SPXW 0DTE feed (not EOD CSVs).
+  isLive: boolean;
+  liveFeed?: MorningLiveFeedControl;
   targetNetDelta: number;
 }) {
+  const isToday = selectedDate === easternDateKey();
+  const showLiveBadge = isLive && Boolean(signalFrame);
+  const showStaleBadge = !showLiveBadge && isFallback && Boolean(frameDate) && frameDate !== selectedDate;
+  // When there is no frame at all, the hint depends on whether the user is on
+  // today (chain not pulled yet) versus a past date with genuinely no data.
+  const noFrameHint = isToday
+    ? "Today's 0DTE chain hasn't been pulled yet — start the live feed below, or picks post after the daily pull (after close)."
+    : "Spread-speed data is unavailable for this date.";
+  const mutedText = showLiveBadge
+    ? `Net-delta target ${targetNetDelta}; live SPXW 0DTE snapshot at ${signalFrame?.label ?? "now"} ET.`
+    : showStaleBadge
+      ? `Net-delta target ${targetNetDelta}; today's chain isn't pulled yet, showing the last completed session (${frameDate}).`
+      : `Net-delta target ${targetNetDelta}; using the newest available frame from the selected session.`;
   return (
     <section className="morning-panel morning-signal-panel">
       <MorningPanelHeading icon={<Target size={16} />} label="Signal Stack" title="Recommended spread and FPL" />
+      {showLiveBadge ? (
+        <div className="morning-signal-source-badge live" data-testid="signal-stack-live-badge">
+          LIVE · {signalFrame?.label}
+        </div>
+      ) : showStaleBadge ? (
+        <div className="morning-signal-source-badge" data-testid="signal-stack-stale-badge">
+          EOD · as of {frameDate}
+        </div>
+      ) : null}
+      {liveFeed?.tracksToday && <SignalStackLiveControl isLive={showLiveBadge} liveFeed={liveFeed} />}
       <div className="morning-signal-grid">
-        <RecommendedSpreadCard side="PCS" pick={signalFrame?.recommendPcs ?? null} frame={signalFrame} />
-        <RecommendedSpreadCard side="CCS" pick={signalFrame?.recommendCcs ?? null} frame={signalFrame} />
+        <RecommendedSpreadCard side="PCS" pick={signalFrame?.recommendPcs ?? null} frame={signalFrame} noFrameHint={noFrameHint} />
+        <RecommendedSpreadCard side="CCS" pick={signalFrame?.recommendCcs ?? null} frame={signalFrame} noFrameHint={noFrameHint} />
       </div>
-      <p className="morning-muted">
-        Net-delta target {targetNetDelta}; using the newest available frame from the selected session.
-      </p>
+      <p className="morning-muted">{mutedText}</p>
       <div className="morning-fpl-wrap">
         <FplIndicatorPanel key={selectedDate} initialDate={selectedDate} />
       </div>
     </section>
+  );
+}
+
+function SignalStackLiveControl({ isLive, liveFeed }: { isLive: boolean; liveFeed: MorningLiveFeedControl }) {
+  const { status, busy } = liveFeed;
+  const running = Boolean(status?.running);
+  // Off-hours the feed refuses to start (RTH only), so disable the button then
+  // unless it's already running (so a stop is always possible).
+  const offHours = status ? !status.marketOpen : false;
+  const disabled = busy || (offHours && !running);
+  const label = busy ? "Working…" : running ? "Stop live" : "Go live";
+  const statusText = isLive
+    ? "Live picks streaming."
+    : running
+      ? "Live feed running — waiting for the first snapshot…"
+      : offHours
+        ? "Live feed pulls 09:25–16:00 ET, Mon–Fri."
+        : "Live picks off — start the SPXW 0DTE feed.";
+  return (
+    <div className="morning-signal-live-control">
+      <button
+        className="morning-alert-button"
+        disabled={disabled}
+        onClick={() => (running ? liveFeed.onStop() : liveFeed.onStart())}
+        type="button"
+      >
+        <Radio size={14} />
+        {label}
+      </button>
+      <span className="morning-muted">{statusText}</span>
+    </div>
   );
 }
 
@@ -1063,15 +1164,36 @@ function MajorEventRow({ event }: { event: MorningMajorEvent }) {
 }
 
 function CalendarAlertOverlay({ alert, onDismiss }: { alert: CalendarAlertPopup; onDismiss: () => void }) {
+  const [first] = alert.events;
+  if (!first) {
+    return null;
+  }
+  const multiple = alert.events.length > 1;
   return (
     <div className="calendar-alert-overlay" role="alertdialog" aria-label="Calendar event alert" aria-live="assertive">
       <div className="calendar-alert-card">
-        <span>Starts in 1 minute</span>
-        <strong>{alert.event.title}</strong>
-        <small>
-          {alert.event.timeLabel}
-          {alert.event.location ? ` - ${alert.event.location}` : ""}
-        </small>
+        <span>{multiple ? `${alert.events.length} events start in 1 minute` : "Starts in 1 minute"}</span>
+        {multiple ? (
+          <>
+            <strong>{first.timeLabel}</strong>
+            <ul className="calendar-alert-list">
+              {alert.events.map((event) => (
+                <li key={event.id}>
+                  {event.title}
+                  {event.location ? ` - ${event.location}` : ""}
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : (
+          <>
+            <strong>{first.title}</strong>
+            <small>
+              {first.timeLabel}
+              {first.location ? ` - ${first.location}` : ""}
+            </small>
+          </>
+        )}
         <button className="review-action-button" onClick={onDismiss} type="button">
           Dismiss
         </button>
@@ -1178,25 +1300,29 @@ function liveUpdateMetaLabel(update: MorningLiveUpdate): string | null {
   return update.author && update.author !== `@${update.trackedAccount}` ? update.author : null;
 }
 
-function isSpxZeroDte(position: IbkrHoldingPosition, todayYmd: string): boolean {
-  if (position.securityType !== "OPT") {
+function isSpxOrSpxwOption(position: IbkrHoldingPosition): boolean {
+  if ((position.securityType ?? "").toUpperCase() !== "OPT") {
     return false;
   }
-  const isSpx = position.symbol === "SPX" || position.tradingClass === "SPXW" || position.tradingClass === "SPX";
-  if (!isSpx) {
-    return false;
-  }
-  const expiration = (position.expiration ?? "").replace(/-/g, "");
-  return expiration.length === 8 && expiration === todayYmd;
+  return isSpxOrSpxwRoot(position.symbol) || isSpxOrSpxwRoot(position.tradingClass) || isSpxOrSpxwLocalSymbol(position.localSymbol);
 }
 
-function HoldingsList({ snapshot, todayYmd }: { snapshot: IbkrHoldingsSnapshot | null; todayYmd: string }) {
+function isSpxOrSpxwRoot(value?: string | null): boolean {
+  const root = (value ?? "").trim().toUpperCase();
+  return root === "SPX" || root === "SPXW";
+}
+
+function isSpxOrSpxwLocalSymbol(value?: string | null): boolean {
+  return /^SPXW?(?:\s|$)/.test((value ?? "").trim().toUpperCase());
+}
+
+function HoldingsList({ snapshot }: { snapshot: IbkrHoldingsSnapshot | null }) {
   if (!snapshot || snapshot.status !== "ok") {
     return <div className="review-empty">Live holdings will appear after the next IBKR pull.</div>;
   }
-  // Exclude SPX 0DTE option legs (e.g. SPXW spreads expiring today) from the
-  // holdings panel — they are tracked separately and otherwise flood this list.
-  const positions = snapshot.positions.filter((position) => !isSpxZeroDte(position, todayYmd));
+  // Exclude SPX/SPXW option legs from the Brief holdings panel; the Estimator
+  // still receives the raw snapshot for live spread pairing.
+  const positions = snapshot.positions.filter((position) => !isSpxOrSpxwOption(position));
   if (!positions.length) {
     return <div className="review-empty">No open IBKR positions were reported.</div>;
   }
@@ -1314,10 +1440,14 @@ function RecommendedSpreadCard({
   frame,
   pick,
   side,
+  noFrameHint,
 }: {
   frame: SpreadSpeedFrame | null | undefined;
   pick: SpreadSpeedPick;
   side: "PCS" | "CCS";
+  // Shown when there is no frame at all; varies by today-vs-past so the empty
+  // state explains *why* (chain not pulled yet) instead of a flat "unavailable".
+  noFrameHint?: string;
 }) {
   return (
     <div className={`morning-rec-card ${side.toLowerCase()} ${pick ? "recommended" : ""}`}>
@@ -1337,7 +1467,7 @@ function RecommendedSpreadCard({
       ) : (
         <>
           <strong>No live pick</strong>
-          <small>{frame ? "No OTM spread met the frame rules." : "Spread-speed data is unavailable."}</small>
+          <small>{frame ? "No OTM spread met the frame rules." : noFrameHint ?? "Spread-speed data is unavailable."}</small>
         </>
       )}
     </div>
@@ -1809,42 +1939,30 @@ function playCalendarAlert(audioContext: MutableRefObject<AudioContext | null>) 
   window.setTimeout(() => playAlert(audioContext), 360);
 }
 
-async function requestBrowserNotificationPermission() {
-  if (!("Notification" in window) || Notification.permission !== "default") {
+async function showWindowsCalendarAlert(events: MorningCalendarEvent[], eventAt: Date) {
+  if (!events.length) {
     return;
   }
   try {
-    await Notification.requestPermission();
+    if (events.length === 1) {
+      const [event] = events;
+      await triggerCalendarDesktopAlert({
+        title: "Calendar event starts in 1 minute",
+        body: event.title,
+        detail: [event.timeLabel, event.source, event.location, event.coverage, formatEventStart(eventAt)]
+          .filter(Boolean)
+          .join(" - "),
+      });
+    } else {
+      // Multiple events share this minute — coalesce them into one toast.
+      await triggerCalendarDesktopAlert({
+        title: `${events.length} calendar events start in 1 minute`,
+        body: events.map((event) => event.title).join(" • "),
+        detail: [events[0].timeLabel, formatEventStart(eventAt)].filter(Boolean).join(" - "),
+      });
+    }
   } catch {
-    // Browser notification permission is optional; the in-app popup and sound remain active.
-  }
-}
-
-function showBrowserNotification(event: MorningCalendarEvent, eventAt: Date) {
-  if (!("Notification" in window) || Notification.permission !== "granted") {
-    return;
-  }
-  try {
-    new Notification("Rubicon calendar alert", {
-      body: `${event.timeLabel} starts in 1 minute: ${event.title}`,
-      tag: `rubicon-calendar-${event.id}-${eventAt.getTime()}`,
-    });
-  } catch {
-    // Some desktop shells suppress notifications; Rubicon still renders its own popup.
-  }
-}
-
-async function showWindowsCalendarAlert(event: MorningCalendarEvent, eventAt: Date) {
-  try {
-    await triggerCalendarDesktopAlert({
-      title: "Calendar event starts in 1 minute",
-      body: event.title,
-      detail: [event.timeLabel, event.source, event.location, event.coverage, formatEventStart(eventAt)]
-        .filter(Boolean)
-        .join(" - "),
-    });
-  } catch {
-    // The browser/in-app popup still fires if the local Windows popup helper is unavailable.
+    // The in-app popup still fires if the local Windows toast helper is unavailable.
   }
 }
 

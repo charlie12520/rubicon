@@ -231,14 +231,15 @@
 .heatmap-tooltip {
   position: fixed;
   z-index: 30;
-  min-width: 168px;
-  max-width: 240px;
+  min-width: 178px;
+  max-width: 256px;
   padding: 8px 10px;
   background: rgba(8, 13, 22, 0.97);
   border: 1px solid #2b3a52;
   border-radius: 8px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
   pointer-events: none;
+  overflow: hidden;
   font-variant-numeric: tabular-nums;
 }
 
@@ -280,6 +281,74 @@
   margin-top: 4px;
   font-size: 11px;
   color: #8f9bad;
+}
+
+.heatmap-tooltip-industry {
+  margin-top: 6px;
+  padding-top: 5px;
+  border-top: 1px solid #243047;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.heatmap-tooltip-peers {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow: hidden;
+}
+
+.heatmap-peer {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 1px 3px;
+  font-size: 11px;
+  color: #cbd5e1;
+  border-radius: 3px;
+}
+
+.heatmap-peer.current {
+  background: rgba(56, 189, 248, 0.16);
+  font-weight: 700;
+}
+
+.heatmap-peer-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.heatmap-peer-sym {
+  flex: 1 1 auto;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.heatmap-peer-last {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: #7c8aa0;
+  font-variant-numeric: tabular-nums;
+}
+
+.heatmap-peer-pct {
+  flex: 0 0 auto;
+  min-width: 50px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.heatmap-peer-pct.up {
+  color: #22c55e;
+}
+
+.heatmap-peer-pct.down {
+  color: #ef4444;
 }
 
 .heatmap-controls {
@@ -363,6 +432,109 @@
   height: 9px;
   border-radius: 999px;
   background: linear-gradient(90deg, #e63a36 0%, #3e424c 50%, #28ae54 100%);
+}
+
+.heatmap-metric-toggle {
+  display: inline-flex;
+  border: 1px solid #29384f;
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+.heatmap-metric-toggle button {
+  appearance: none;
+  border: none;
+  background: #0d1626;
+  color: #93a4bd;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 4px 11px;
+  cursor: pointer;
+}
+
+.heatmap-metric-toggle button + button {
+  border-left: 1px solid #29384f;
+}
+
+.heatmap-metric-toggle button.active {
+  background: #1d3b63;
+  color: #e8f0fb;
+}
+
+.heatmap-metric-toggle button:disabled {
+  color: #46505f;
+  cursor: not-allowed;
+}
+
+/* Day / 1H / 30M / 5M trailing-window selector — same segmented look as the
+   %/σ metric toggle, sitting in the same controls row. */
+.heatmap-timeframe-toggle {
+  display: inline-flex;
+  border: 1px solid #29384f;
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+.heatmap-timeframe-toggle button {
+  appearance: none;
+  border: none;
+  background: #0d1626;
+  color: #93a4bd;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.heatmap-timeframe-toggle button + button {
+  border-left: 1px solid #29384f;
+}
+
+.heatmap-timeframe-toggle button.active {
+  background: #1d3b63;
+  color: #e8f0fb;
+}
+
+.heatmap-overlay-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  appearance: none;
+  background: #0d1626;
+  border: 1px solid #29384f;
+  border-radius: 7px;
+  color: #93a4bd;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 4px 11px;
+  cursor: pointer;
+}
+
+.heatmap-overlay-toggle.active {
+  background: rgba(96, 165, 250, 0.18);
+  border-color: #3f6fb0;
+  color: #cfe1fb;
+}
+
+.heatmap-overlay-toggle:disabled {
+  color: #46505f;
+  cursor: not-allowed;
+}
+
+.heatmap-overlay-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  border: 1.5px solid #60a5fa;
+  background: rgba(96, 165, 250, 0.22);
+}
+
+.heatmap-earn-flag {
+  color: #60a5fa;
+  font-weight: 600;
 }
 
 .heatmap-caption {
@@ -489,4 +661,37 @@
   .heatmap-live-meta {
     margin-left: 0;
   }
+}
+
+/* Single SPY ⇄ QQQ index toggle above the heatmap: one button showing both
+   tickers, the active one bright and the other dimmed; click flips the index. */
+.heatmap-index-toggle {
+  margin: 0 0 8px;
+}
+.heatmap-index-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.heatmap-index-toggle-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+.heatmap-index-toggle-btn .current {
+  color: #4fd1ff;
+}
+.heatmap-index-toggle-btn .next {
+  color: #69707e;
+}
+.heatmap-index-toggle-btn svg {
+  color: #8a93a6;
 }

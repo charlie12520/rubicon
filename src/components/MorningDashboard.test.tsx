@@ -3,8 +3,10 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ComponentType } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { MorningBriefPayload, MorningBriefSource, MorningCalendarEvent, MorningMajorEvent } from "../../shared/types";
+import type { IbkrHoldingPosition, MorningBriefPayload, MorningBriefSource, MorningCalendarEvent, MorningMajorEvent } from "../../shared/types";
+import type { SpreadSpeedFrame, SpxLiveBarsLiveStatus } from "../../shared/types";
 import { fetchGodelAlertBridgeStatus, fetchIbkrHoldings, fetchMorningAiNotes, fetchMorningBrief, fetchMorningLiveUpdates, refreshIbkrHoldings } from "../api";
+import { easternDateKey } from "../easternDate";
 import * as MorningDashboardModule from "./MorningDashboard";
 
 vi.mock("../api", () => ({
@@ -15,13 +17,36 @@ vi.mock("../api", () => ({
   fetchMorningLiveUpdates: vi.fn(),
   refreshIbkrHoldings: vi.fn(),
   triggerCalendarDesktopAlert: vi.fn(),
+  triggerLiveUpdateDesktopAlert: vi.fn(),
 }));
+
+// The Signal Stack embeds the FPL panel, which runs its own fetches on mount;
+// stub it so these are focused unit tests of the stale-badge / empty-state copy.
+vi.mock("./FplIndicatorPanel", () => ({ FplIndicatorPanel: () => null }));
+
+const SignalStackSection = (MorningDashboardModule as {
+  SignalStackSection?: ComponentType<{
+    selectedDate: string;
+    signalFrame: SpreadSpeedFrame | null;
+    frameDate: string | null;
+    isFallback: boolean;
+    isLive: boolean;
+    liveFeed?: {
+      status: SpxLiveBarsLiveStatus | null;
+      busy: boolean;
+      tracksToday: boolean;
+      onStart: () => void;
+      onStop: () => void;
+    };
+    targetNetDelta: number;
+  }>;
+}).SignalStackSection;
 
 type MorningAgendaSectionProps = {
   alertsArmed: boolean;
   alertStatus: string;
-  dailyFxSource?: MorningBriefSource;
   events: MorningCalendarEvent[];
+  macroSource?: MorningBriefSource;
   majorEvents: MorningMajorEvent[];
   majorEventsSource?: MorningBriefSource;
   onTestAlert: () => void;
@@ -62,7 +87,7 @@ describe("MorningAgendaSection", () => {
         date: "2026-06-12",
         id: "daily-cpi",
         impact: "high",
-        source: "DailyFX",
+        source: "BLS",
         sortMinute: 510,
         timeLabel: "8:30 AM",
         title: "CPI",
@@ -110,7 +135,7 @@ describe("MorningAgendaSection", () => {
         date: "2026-06-12",
         id: "daily-cpi",
         impact: "high",
-        source: "DailyFX",
+        source: "BLS",
         sortMinute: 510,
         timeLabel: "8:30 AM",
         title: "CPI",
@@ -122,7 +147,7 @@ describe("MorningAgendaSection", () => {
         id: "major-cpi",
         impact: "high",
         kind: "macro",
-        source: "DailyFX",
+        source: "BLS",
         sortMinute: 510,
         timeLabel: "8:30 AM",
         title: "CPI",
@@ -134,19 +159,19 @@ describe("MorningAgendaSection", () => {
       <MorningAgendaSection
         alertsArmed={true}
         alertStatus="Calendar alerts armed."
-        dailyFxSource={{ detail: "Pulled CPI from DailyFX.", label: "DailyFX economic calendar", status: "ok" }}
         events={events}
+        macroSource={{ detail: "Pulled CPI from US macro calendar.", label: "US macro calendar", status: "ok" }}
         majorEvents={majorEvents}
-        majorEventsSource={{ detail: "Pulled high-importance DailyFX rows.", label: "Major events outlook", status: "ok" }}
+        majorEventsSource={{ detail: "Pulled high-importance official macro rows.", label: "Major events outlook", status: "ok" }}
         onTestAlert={() => undefined}
         onToggleAlerts={() => undefined}
       />,
     );
 
     expect(screen.queryByText(/Economic \+ presidential agenda/i)).toBeNull();
-    expect(screen.queryByText(/Pulled CPI from DailyFX/i)).toBeNull();
-    expect(screen.queryByText(/Pulled high-importance DailyFX rows/i)).toBeNull();
-    expect(screen.queryByText(/8:30 AM - DailyFX/i)).toBeNull();
+    expect(screen.queryByText(/Pulled CPI from US macro/i)).toBeNull();
+    expect(screen.queryByText(/Pulled high-importance official macro/i)).toBeNull();
+    expect(screen.queryByText(/8:30 AM - BLS/i)).toBeNull();
   });
 
   it("keeps calendar failure details visible", () => {
@@ -159,15 +184,15 @@ describe("MorningAgendaSection", () => {
       <MorningAgendaSection
         alertsArmed={true}
         alertStatus="Calendar alerts armed."
-        dailyFxSource={{ detail: "DailyFX pull failed.", label: "DailyFX economic calendar", status: "warning" }}
         events={[]}
+        macroSource={{ detail: "US macro calendar pull failed.", label: "US macro calendar", status: "warning" }}
         majorEvents={[]}
         onTestAlert={() => undefined}
         onToggleAlerts={() => undefined}
       />,
     );
 
-    expect(screen.getByText("DailyFX pull failed.")).toBeTruthy();
+    expect(screen.getByText("US macro calendar pull failed.")).toBeTruthy();
   });
 });
 
@@ -303,7 +328,7 @@ describe("MorningDashboard copy cleanup", () => {
     expect(screen.queryByText(/Macro calendar/i)).toBeNull();
     expect(screen.queryByText(/FirstSquawk and Godel/i)).toBeNull();
     expect(screen.queryByText(/FirstSquawk 1 \/ Godel 1/i)).toBeNull();
-    expect(screen.queryByText(/Pulled 1 DailyFX event/i)).toBeNull();
+    expect(screen.queryByText(/Pulled 1 US macro event/i)).toBeNull();
     expect(screen.queryByText(/Codex notes ready/i)).toBeNull();
     expect(screen.queryByText(/Event only/i)).toBeNull();
     expect(screen.queryByText(/Oval Office/i)).toBeNull();
@@ -350,6 +375,61 @@ describe("MorningDashboard copy cleanup", () => {
 
     await waitFor(() => expect(refreshButton.hasAttribute("disabled")).toBe(false));
     expect(screen.queryByText(/Refreshed IBKR live holdings/i)).toBeNull();
+  });
+
+  it("hides every SPX and SPXW option contract from Brief holdings regardless of expiration", async () => {
+    mockMorningDashboardFetches({ brief: briefFixture("2026-06-06", []) });
+    fetchIbkrHoldingsMock.mockResolvedValue({
+      ...ibkrHoldingsFixture("ok"),
+      count: 5,
+      positions: [
+        holdingPosition({
+          localSymbol: "MU    260605C00106000",
+          symbol: "MU",
+          tradingClass: "MU",
+        }),
+        holdingPosition({
+          expiration: "20260606",
+          localSymbol: "SPXW  260606C07550000",
+          symbol: "SPX",
+          tradingClass: "SPXW",
+        }),
+        holdingPosition({
+          expiration: "20260605",
+          localSymbol: "SPXW  260605C07555000",
+          symbol: "SPX",
+          tradingClass: "SPXW",
+        }),
+        holdingPosition({
+          expiration: "20260619",
+          localSymbol: "SPX   260619P07400000",
+          symbol: "SPX",
+          tradingClass: "SPX",
+        }),
+        holdingPosition({
+          expiration: "20260619",
+          localSymbol: "SPY   260619P00590000",
+          symbol: "SPY",
+          tradingClass: "SPY",
+        }),
+      ],
+    });
+
+    render(
+      <MorningDashboard
+        onOpenReplay={() => undefined}
+        onSelectDate={() => undefined}
+        selectedDate="2026-06-06"
+        spreadSpeed={null}
+      />,
+    );
+
+    expect(await screen.findByText("2026-06-06")).toBeTruthy();
+    expect(screen.getByText(/MU\s+260605C00106000/)).toBeTruthy();
+    expect(screen.getByText(/SPY\s+260619P00590000/)).toBeTruthy();
+    expect(screen.queryByText(/SPXW\s+260606C07550000/)).toBeNull();
+    expect(screen.queryByText(/SPXW\s+260605C07555000/)).toBeNull();
+    expect(screen.queryByText(/SPX\s+260619P07400000/)).toBeNull();
   });
 });
 
@@ -429,6 +509,157 @@ describe("MorningDashboard brief races", () => {
   });
 });
 
+describe("SignalStackSection", () => {
+  it("shows an EOD 'as of' badge and explainer when today falls back to a prior session", () => {
+    expect(SignalStackSection).toBeTypeOf("function");
+    if (!SignalStackSection) {
+      throw new Error("SignalStackSection is not exported");
+    }
+
+    render(
+      <SignalStackSection
+        frameDate="2026-06-04"
+        isFallback={true}
+        isLive={false}
+        selectedDate="2026-06-05"
+        signalFrame={null}
+        targetNetDelta={0.05}
+      />,
+    );
+
+    expect(screen.getByTestId("signal-stack-stale-badge").textContent).toContain("as of 2026-06-04");
+    expect(screen.getByText(/last completed session \(2026-06-04\)/i)).toBeTruthy();
+  });
+
+  it("shows a green LIVE pill when the frame comes from the live feed", () => {
+    if (!SignalStackSection) {
+      throw new Error("SignalStackSection is not exported");
+    }
+
+    render(
+      <SignalStackSection
+        frameDate={easternDateKey()}
+        isFallback={false}
+        isLive={true}
+        selectedDate={easternDateKey()}
+        signalFrame={signalFrameFixture("10:14")}
+        targetNetDelta={0.05}
+      />,
+    );
+
+    expect(screen.getByTestId("signal-stack-live-badge").textContent).toContain("LIVE · 10:14");
+    expect(screen.queryByTestId("signal-stack-stale-badge")).toBeNull();
+    expect(screen.getByText(/live SPXW 0DTE snapshot at 10:14 ET/i)).toBeTruthy();
+  });
+
+  it("renders a Go live control that starts the feed when tracking today and stopped", () => {
+    if (!SignalStackSection) {
+      throw new Error("SignalStackSection is not exported");
+    }
+    const onStart = vi.fn();
+
+    render(
+      <SignalStackSection
+        frameDate={null}
+        isFallback={false}
+        isLive={false}
+        liveFeed={{
+          busy: false,
+          onStart,
+          onStop: () => undefined,
+          status: liveStatusFixture({ running: false, marketOpen: true }),
+          tracksToday: true,
+        }}
+        selectedDate={easternDateKey()}
+        signalFrame={null}
+        targetNetDelta={0.05}
+      />,
+    );
+
+    const button = screen.getByRole("button", { name: /Go live/i });
+    fireEvent.click(button);
+    expect(onStart).toHaveBeenCalledTimes(1);
+  });
+
+  it("explains today's chain is not pulled yet when there is no frame for today", () => {
+    if (!SignalStackSection) {
+      throw new Error("SignalStackSection is not exported");
+    }
+
+    render(
+      <SignalStackSection
+        frameDate={null}
+        isFallback={false}
+        isLive={false}
+        selectedDate={easternDateKey()}
+        signalFrame={null}
+        targetNetDelta={0.05}
+      />,
+    );
+
+    expect(screen.getAllByText(/hasn't been pulled yet/i).length).toBeGreaterThan(0);
+    expect(screen.queryByTestId("signal-stack-stale-badge")).toBeNull();
+  });
+
+  it("uses a plain unavailable message for a past date with no data and no badge", () => {
+    if (!SignalStackSection) {
+      throw new Error("SignalStackSection is not exported");
+    }
+
+    render(
+      <SignalStackSection
+        frameDate={null}
+        isFallback={false}
+        isLive={false}
+        selectedDate="2024-01-02"
+        signalFrame={null}
+        targetNetDelta={0.05}
+      />,
+    );
+
+    expect(screen.getAllByText(/unavailable for this date/i).length).toBeGreaterThan(0);
+    expect(screen.queryByTestId("signal-stack-stale-badge")).toBeNull();
+  });
+});
+
+function signalFrameFixture(label: string): SpreadSpeedFrame {
+  return {
+    label,
+    minutesToClose: 300,
+    spot: 5900,
+    atmStraddle: 30,
+    em: 37.6,
+    speedCeiling: 0.053,
+    pcs: [],
+    ccs: [],
+    recommendPcs: null,
+    recommendCcs: null,
+    fastestPcs: null,
+    fastestCcs: null,
+    pcsFastLow: null,
+    pcsFastHigh: null,
+    ccsFastLow: null,
+    ccsFastHigh: null,
+  };
+}
+
+function liveStatusFixture(overrides: Partial<SpxLiveBarsLiveStatus>): SpxLiveBarsLiveStatus {
+  return {
+    running: false,
+    pid: null,
+    startedAt: null,
+    lastExit: null,
+    logTail: [],
+    script: "scripts/refresh-spx-0dte-chain.py",
+    python: "python",
+    available: true,
+    autoStartEt: "09:28",
+    autoStartLastFiredDate: null,
+    marketOpen: true,
+    ...overrides,
+  };
+}
+
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   let resolve: (value: T) => void = () => undefined;
   const promise = new Promise<T>((nextResolve) => {
@@ -479,7 +710,7 @@ function noisyBriefFixture(date: string): MorningBriefPayload {
         id: "daily-cpi",
         impact: "high",
         location: "Oval Office",
-        source: "DailyFX",
+        source: "BLS",
         sortMinute: 510,
         timeLabel: "8:30 AM",
         title: "CPI",
@@ -515,7 +746,7 @@ function noisyBriefFixture(date: string): MorningBriefPayload {
         id: "major-cpi",
         impact: "high",
         kind: "macro",
-        source: "DailyFX",
+        source: "BLS",
         sortMinute: 510,
         timeLabel: "8:30 AM",
         title: "CPI",
@@ -523,7 +754,7 @@ function noisyBriefFixture(date: string): MorningBriefPayload {
       },
     ],
     sources: [
-      { detail: "Pulled 1 DailyFX event.", label: "DailyFX economic calendar", status: "ok" },
+      { detail: "Pulled 1 US macro event.", label: "US macro calendar", status: "ok" },
       {
         detail:
           "Pulled 16 items from FirstSquawk timeline; latest item 22m old; 1 repost included. Rubicon polls this timeline every 10s while Morning is open; configure X API filtered stream for true push delivery.",
@@ -603,6 +834,22 @@ function ibkrHoldingsFixture(status: "ok" | "missing" | "error") {
     positions: [],
     source: "test",
     status,
+  };
+}
+
+function holdingPosition(overrides: Partial<IbkrHoldingPosition>): IbkrHoldingPosition {
+  return {
+    account: "U1",
+    averageCost: 1.25,
+    expiration: "20260605",
+    localSymbol: "AAPL  260605C00200000",
+    position: 1,
+    right: "C",
+    securityType: "OPT",
+    strike: 200,
+    symbol: "AAPL",
+    tradingClass: "AAPL",
+    ...overrides,
   };
 }
 

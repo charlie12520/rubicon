@@ -19,9 +19,8 @@ import type {
 } from "../shared/types.ts";
 import { readGodelLiveNewsSource } from "./godelLiveNews.ts";
 import { writeJsonAtomic } from "./jsonStore.ts";
+import { isUsMacroMajorEvent, readUsMacroCalendar, usMacroEventKind } from "./morningMacroCalendar.ts";
 
-const DAILYFX_URL = "https://www.dailyfx.com/economic-calendar#next-seven-days";
-const IG_ECONOMIC_EVENTS_URL = "https://api.ig.com/explore/events";
 const ROLLCALL_URL = "https://rollcall.com/factbase/trump/calendar/";
 const FIRSTSQUAWK_TIMELINE_URL = "https://nitter.net/FirstSquawk";
 const FIRSTSQUAWK_TIMELINE_URLS = ["https://xcancel.com/FirstSquawk", FIRSTSQUAWK_TIMELINE_URL];
@@ -53,19 +52,6 @@ let lastGoodLiveUpdatesAt: string | null = null;
 type FetchResult = {
   text: string;
   status: number;
-};
-
-type IgEconomicCalendarRow = {
-  actual?: unknown;
-  category?: unknown;
-  country?: unknown;
-  currency?: unknown;
-  date?: unknown;
-  event?: unknown;
-  forecast?: unknown;
-  id?: unknown;
-  importance?: unknown;
-  previous?: unknown;
 };
 
 type LiveUpdateCachePayload = {
@@ -102,16 +88,6 @@ function cleanText(value: string): string {
     .replace(/[\uE000-\uF8FF]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-}
-
-function firstText(...values: unknown[]): string {
-  for (const value of values) {
-    const text = String(value ?? "").trim();
-    if (text) {
-      return text;
-    }
-  }
-  return "";
 }
 
 function decodeHtml(value: string): string {
@@ -196,37 +172,6 @@ function windowForDate(date: string, nextWeekStart: string): MorningMajorEvent["
   return compareIsoDate(date, nextWeekStart) < 0 ? "thisWeek" : "nextWeek";
 }
 
-function etDateKey(value: string): string | null {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return null;
-  }
-  const parts = new Intl.DateTimeFormat("en-US", {
-    day: "2-digit",
-    month: "2-digit",
-    timeZone: "America/New_York",
-    year: "numeric",
-  })
-    .formatToParts(date)
-    .reduce<Record<string, string>>((result, part) => {
-      result[part.type] = part.value;
-      return result;
-    }, {});
-  return `${parts.year}-${parts.month}-${parts.day}`;
-}
-
-function etTimeLabel(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "Time TBD";
-  }
-  return new Intl.DateTimeFormat("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    timeZone: "America/New_York",
-  }).format(date);
-}
-
 function etTimestampLabel(value: string | null): string {
   if (!value) {
     return "an earlier check";
@@ -243,37 +188,6 @@ function etTimestampLabel(value: string | null): string {
     timeZone: "America/New_York",
     timeZoneName: "short",
   }).format(date);
-}
-
-function igCalendarAuthHeaders(): Record<string, string> {
-  const user = process.env.RUBICON_IG_CALENDAR_USER?.trim() || "calendar";
-  const password = process.env.RUBICON_IG_CALENDAR_PASSWORD?.trim();
-  return password ? { Authorization: `Basic ${Buffer.from(`${user}:${password}`).toString("base64")}` } : {};
-}
-
-async function fetchJson<T>(url: string, headers: Record<string, string> = {}): Promise<T> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  try {
-    const response = await fetch(url, {
-      headers: {
-        "Accept": "application/json,*/*;q=0.8",
-        "Cache-Control": "no-cache",
-        "Pragma": "no-cache",
-        "User-Agent": "Mozilla/5.0 Rubicon Morning Brief/1.0",
-        ...headers,
-      },
-      cache: "no-store",
-      signal: controller.signal,
-    });
-    const text = await response.text();
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status} ${response.statusText}`);
-    }
-    return JSON.parse(text) as T;
-  } finally {
-    clearTimeout(timeout);
-  }
 }
 
 async function fetchText(url: string, timeoutMs = FETCH_TIMEOUT_MS): Promise<FetchResult> {
@@ -335,161 +249,6 @@ async function fetchTextWithHttps(url: string, timeoutMs = FETCH_TIMEOUT_MS): Pr
     });
     request.on("error", reject);
   });
-}
-
-export function parseDailyFxCalendar(html: string, date: string): MorningCalendarEvent[] {
-  const events: MorningCalendarEvent[] = [];
-  const rowMatches = html.matchAll(/<tr\b[\s\S]*?<\/tr>/gi);
-  for (const rowMatch of rowMatches) {
-    const row = rowMatch[0];
-    const rowText = cleanText(row);
-    if (!/\b(USD|United States|US)\b/i.test(rowText)) {
-      continue;
-    }
-
-    const impactMatch = rowText.match(/\b(High|Medium)\b/i);
-    if (!impactMatch) {
-      continue;
-    }
-
-    const cells = [...row.matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi)].map((cell) => cleanText(cell[1])).filter(Boolean);
-    const timeMatch = rowText.match(/\b(\d{1,2}:\d{2}\s*(?:AM|PM)|All Day|Tentative)\b/i);
-    const timeLabel = timeMatch ? timeMatch[1].replace(/\s+/g, " ").toUpperCase() : "Time TBD";
-    const title =
-      cells
-        .filter((cell) => !/^(USD|US|United States|High|Medium|Low|Actual|Forecast|Previous)$/i.test(cell))
-        .filter((cell) => !/^\d{1,2}:\d{2}/.test(cell))
-        .sort((a, b) => b.length - a.length)[0] ?? rowText;
-
-    events.push({
-      id: `dailyfx-${date}-${slug(`${timeLabel}-${title}`)}`,
-      source: "DailyFX",
-      date,
-      timeLabel,
-      sortMinute: parseTimeMinute(timeLabel),
-      title,
-      impact: impactMatch[1].toLowerCase() as "medium" | "high",
-      country: "US",
-      url: DAILYFX_URL,
-    });
-  }
-
-  return uniqueCalendarEvents(events);
-}
-
-export function parseIgEconomicCalendarEvents(rows: unknown, date: string): MorningCalendarEvent[] {
-  if (!Array.isArray(rows)) {
-    return [];
-  }
-  const events: MorningCalendarEvent[] = [];
-  rows.forEach((raw, index) => {
-    const row = (raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) as IgEconomicCalendarRow;
-    const country = firstText(row.country);
-    const currency = firstText(row.currency);
-    if (!/^(United States|US|USA)$/i.test(country) && !/^USD$/i.test(currency)) {
-      return;
-    }
-
-    const importance = Number(row.importance);
-    if (!Number.isFinite(importance) || importance < 2) {
-      return;
-    }
-
-    const isoDate = firstText(row.date);
-    if (!isoDate || etDateKey(isoDate) !== date) {
-      return;
-    }
-
-    const title = firstText(row.event, row.category);
-    if (!title) {
-      return;
-    }
-
-    const timeLabel = etTimeLabel(isoDate);
-    const actual = firstText(row.actual);
-    const forecast = firstText(row.forecast);
-    const previous = firstText(row.previous);
-    const category = firstText(row.category);
-    const hasReleaseValues = Boolean(actual || forecast || previous);
-    const coverage = [
-      actual && `Actual ${actual}`,
-      forecast && `Forecast ${forecast}`,
-      previous && `Previous ${previous}`,
-    ]
-      .filter(Boolean)
-      .join(" / ");
-    events.push({
-      id: `dailyfx-${date}-${firstText(row.id) || index}-${slug(`${timeLabel}-${title}`)}`,
-      source: "DailyFX",
-      date,
-      timeLabel,
-      sortMinute: parseTimeMinute(timeLabel),
-      title,
-      impact: importance >= 3 ? "high" : "medium",
-      country: "US",
-      coverage: coverage || `Event only${category ? ` - ${category}` : ""}`,
-      detail: hasReleaseValues ? category || "Data release" : `Event only${category ? ` - ${category}` : ""}`,
-      url: DAILYFX_URL,
-    });
-  });
-  return uniqueCalendarEvents(events);
-}
-
-export function parseIgMajorCalendarEvents(rows: unknown, selectedDate: string): MorningMajorEvent[] {
-  if (!Array.isArray(rows)) {
-    return monthlyOpexEvents(selectedDate);
-  }
-  const window = majorEventWindow(selectedDate);
-  const events: MorningMajorEvent[] = [];
-  rows.forEach((raw, index) => {
-    const row = (raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) as IgEconomicCalendarRow;
-    const country = firstText(row.country);
-    const currency = firstText(row.currency);
-    if (!/^(United States|US|USA)$/i.test(country) && !/^USD$/i.test(currency)) {
-      return;
-    }
-
-    const isoDate = firstText(row.date);
-    const eventDate = isoDate ? etDateKey(isoDate) : null;
-    if (!eventDate || compareIsoDate(eventDate, window.start) < 0 || compareIsoDate(eventDate, window.endExclusive) >= 0) {
-      return;
-    }
-
-    const title = firstText(row.event, row.category);
-    const category = firstText(row.category);
-    const text = `${title} ${category}`;
-    const importance = Number(row.importance);
-    if (!title || !Number.isFinite(importance) || importance < 3) {
-      return;
-    }
-
-    const actual = firstText(row.actual);
-    const forecast = firstText(row.forecast);
-    const previous = firstText(row.previous);
-    const coverage = [
-      actual && `Actual ${actual}`,
-      forecast && `Forecast ${forecast}`,
-      previous && `Previous ${previous}`,
-    ]
-      .filter(Boolean)
-      .join(" / ");
-    const timeLabel = etTimeLabel(isoDate);
-    events.push({
-      coverage: coverage || (category ? `Event only - ${category}` : undefined),
-      date: eventDate,
-      detail: category || undefined,
-      id: `major-dailyfx-${eventDate}-${firstText(row.id) || index}-${slug(`${timeLabel}-${title}`)}`,
-      impact: "high",
-      kind: majorEventKind(text),
-      source: "DailyFX",
-      sortMinute: parseTimeMinute(timeLabel),
-      timeLabel,
-      title,
-      url: DAILYFX_URL,
-      window: windowForDate(eventDate, window.nextWeekStart),
-    });
-  });
-  return sortMajorEvents(uniqueMajorEvents([...clusterMajorMacroEvents(events), ...monthlyOpexEvents(selectedDate)]));
 }
 
 export function parseRollcallCalendar(html: string, date: string): MorningCalendarEvent[] {
@@ -720,20 +479,6 @@ function parseLiveUpdateTitle(title: string): {
   return { kind: "post", text: title };
 }
 
-function uniqueCalendarEvents(events: MorningCalendarEvent[]): MorningCalendarEvent[] {
-  const seen = new Set<string>();
-  const result: MorningCalendarEvent[] = [];
-  for (const event of events) {
-    const key = `${event.source}|${event.date}|${event.timeLabel}|${event.title}`.toLowerCase();
-    if (seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    result.push(event);
-  }
-  return result;
-}
-
 function uniqueMajorEvents(events: MorningMajorEvent[]): MorningMajorEvent[] {
   const seen = new Set<string>();
   const result: MorningMajorEvent[] = [];
@@ -790,7 +535,7 @@ function clusterMajorMacroEvents(events: MorningMajorEvent[]): MorningMajorEvent
           : `${group.length} rows - ${compactMajorEventComponents(group.map((event) => event.detail || event.title))}`,
       detail: detailRows.join(" | "),
       impact: group.some((event) => event.impact === "high") ? "high" : first.impact,
-      id: `major-dailyfx-cluster-${first.date}-${slug(`${first.timeLabel}-${title}`)}`,
+      id: `major-macro-cluster-${first.date}-${slug(`${first.timeLabel}-${title}`)}`,
       title,
     };
   });
@@ -922,134 +667,75 @@ function thirdFriday(year: number, zeroBasedMonth: number): string {
   return new Date(Date.UTC(year, zeroBasedMonth, thirdFridayDate, 12)).toISOString().slice(0, 10);
 }
 
-async function readSource<T>(
-  label: string,
-  url: string,
-  parser: (text: string) => T[],
-  emptyDetail: string,
-): Promise<{ items: T[]; source: MorningBriefSource }> {
-  try {
-    const result = await fetchText(url);
-    const items = parser(result.text);
-    return {
-      items,
-      source: sourceStatus(
-        label,
-        items.length ? "ok" : "warning",
-        items.length ? `Pulled ${items.length} items from source.` : emptyDetail,
-        url,
-      ),
-    };
-  } catch (error) {
-    return {
-      items: [],
-      source: sourceStatus(label, "warning", error instanceof Error ? error.message : String(error), url),
-    };
-  }
-}
-
-async function readDailyFxSource(date: string): Promise<{ items: MorningCalendarEvent[]; source: MorningBriefSource }> {
-  const endpoint = `${IG_ECONOMIC_EVENTS_URL}?from=${date}&to=${addDays(date, 1)}&lang=en`;
-  try {
-    const rows = await fetchJson<unknown>(endpoint, igCalendarAuthHeaders());
-    const items = parseIgEconomicCalendarEvents(rows, date);
-    if (items.length) {
-      const dataReleaseCount = items.filter(isDailyFxDataRelease).length;
-      const eventOnlyCount = items.length - dataReleaseCount;
-      return {
-        items,
-        source: sourceStatus(
-          "DailyFX economic calendar",
-          "ok",
-          `Pulled ${dataReleaseCount} hard-data release${dataReleaseCount === 1 ? "" : "s"} and ${eventOnlyCount} event-only row${eventOnlyCount === 1 ? "" : "s"} from DailyFX/IG medium/high US rows.`,
-          DAILYFX_URL,
-        ),
-      };
-    }
-
-    const fallback = await readSource(
-      "DailyFX economic calendar",
-      DAILYFX_URL,
-      (html) => parseDailyFxCalendar(html, date),
-      "DailyFX/IG calendar endpoint returned no medium/high US rows, and the page HTML fallback had no parseable table rows.",
-    );
-    return {
-      items: fallback.items,
-      source:
-        fallback.items.length > 0
-          ? sourceStatus(
-              "DailyFX economic calendar",
-              "ok",
-              `Pulled ${fallback.items.length} medium/high US events from DailyFX page HTML fallback.`,
-              DAILYFX_URL,
-            )
-          : sourceStatus(
-              "DailyFX economic calendar",
-              "warning",
-              "DailyFX/IG calendar endpoint returned no medium/high US events for this date.",
-              DAILYFX_URL,
-            ),
-    };
-  } catch (error) {
-    const fallback = await readSource(
-      "DailyFX economic calendar",
-      DAILYFX_URL,
-      (html) => parseDailyFxCalendar(html, date),
-      "DailyFX endpoint failed and page HTML had no parseable table rows.",
-    );
-    if (fallback.items.length) {
-      return {
-        items: fallback.items,
-        source: sourceStatus(
-          "DailyFX economic calendar",
-          "warning",
-          `DailyFX/IG endpoint failed (${error instanceof Error ? error.message : String(error)}); used ${fallback.items.length} rows from HTML fallback.`,
-          DAILYFX_URL,
-        ),
-      };
-    }
-    return {
-      items: [],
-      source: sourceStatus("DailyFX economic calendar", "warning", error instanceof Error ? error.message : String(error), DAILYFX_URL),
-    };
-  }
-}
-
-async function readMajorEventsSource(date: string): Promise<{ items: MorningMajorEvent[]; source: MorningBriefSource }> {
+async function readUsMacroBundle(date: string): Promise<{
+  dailyItems: MorningCalendarEvent[];
+  majorItems: MorningMajorEvent[];
+  sources: MorningBriefSource[];
+}> {
   const window = majorEventWindow(date);
-  const endpoint = `${IG_ECONOMIC_EVENTS_URL}?from=${window.start}&to=${window.endExclusive}&lang=en`;
-  try {
-    const rows = await fetchJson<unknown>(endpoint, igCalendarAuthHeaders());
-    const items = parseIgMajorCalendarEvents(rows, date);
-    const opexCount = items.filter((event) => event.kind === "opex").length;
-    const macroCount = items.length - opexCount;
+  if (process.env.RUBICON_US_MACRO_CALENDAR_DISABLED === "1") {
+    const major = buildMajorEventsSource(date, []);
     return {
-      items,
-      source: sourceStatus(
-        "Major events outlook",
-        items.length ? "ok" : "warning",
-        items.length
-          ? `Pulled ${macroCount} high-importance DailyFX/IG cluster${macroCount === 1 ? "" : "s"} and ${opexCount} native OPEX marker${opexCount === 1 ? "" : "s"} for this week and next week.`
-          : "No high-importance DailyFX/IG rows or monthly OPEX markers found for this week and next week.",
-        DAILYFX_URL,
-      ),
-    };
-  } catch (error) {
-    const opex = monthlyOpexEvents(date);
-    return {
-      items: opex,
-      source: sourceStatus(
-        "Major events outlook",
-        opex.length ? "warning" : "warning",
-        `DailyFX/IG major-event pull failed (${error instanceof Error ? error.message : String(error)}); ${opex.length ? "showing native OPEX marker only." : "no native OPEX marker falls inside this two-week window."}`,
-        DAILYFX_URL,
-      ),
+      dailyItems: [],
+      majorItems: major.items,
+      sources: [
+        sourceStatus("US macro calendar", "warning", "US macro calendar is disabled by RUBICON_US_MACRO_CALENDAR_DISABLED."),
+        major.source,
+      ],
     };
   }
+
+  const calendar = await readUsMacroCalendar(fetchText, window.start, window.endExclusive);
+  const dailyItems = calendar.items.filter((event) => event.date === date);
+  const major = buildMajorEventsSource(date, calendar.items);
+  const todayDetail = dailyItems.length
+    ? ` Selected date ${date} has ${dailyItems.length} rated event${dailyItems.length === 1 ? "" : "s"}.`
+    : ` Selected date ${date} has no rated SPX macro events.`;
+  return {
+    dailyItems,
+    majorItems: major.items,
+    sources: [
+      {
+        ...calendar.source,
+        detail: `${calendar.source.detail}${todayDetail}`,
+      },
+      major.source,
+    ],
+  };
 }
 
-function isDailyFxDataRelease(event: MorningCalendarEvent): boolean {
-  return event.source === "DailyFX" && !event.detail?.toLowerCase().startsWith("event only");
+function buildMajorEventsSource(date: string, macroEvents: MorningCalendarEvent[]): { items: MorningMajorEvent[]; source: MorningBriefSource } {
+  const window = majorEventWindow(date);
+  const macroMajorEvents = macroEvents
+    .filter((event) => isUsMacroMajorEvent(event))
+    .filter((event) => compareIsoDate(event.date, window.start) >= 0 && compareIsoDate(event.date, window.endExclusive) < 0)
+    .map((event): MorningMajorEvent => ({
+      coverage: event.coverage,
+      date: event.date,
+      detail: event.detail,
+      id: `major-macro-${event.source.toLowerCase()}-${event.date}-${slug(`${event.timeLabel}-${event.title}`)}`,
+      impact: "high",
+      kind: usMacroEventKind(event),
+      source: event.source,
+      sortMinute: event.sortMinute,
+      timeLabel: event.timeLabel,
+      title: event.title,
+      url: event.url,
+      window: windowForDate(event.date, window.nextWeekStart),
+    }));
+  const items = sortMajorEvents(uniqueMajorEvents([...clusterMajorMacroEvents(macroMajorEvents), ...monthlyOpexEvents(date)]));
+  const opexCount = items.filter((event) => event.kind === "opex").length;
+  const macroCount = items.length - opexCount;
+  return {
+    items,
+    source: sourceStatus(
+      "Major events outlook",
+      items.length ? "ok" : "warning",
+      items.length
+        ? `Pulled ${macroCount} high-importance official macro marker${macroCount === 1 ? "" : "s"} and ${opexCount} native OPEX marker${opexCount === 1 ? "" : "s"} for this week and next week.`
+        : "No high-importance official macro rows or monthly OPEX markers found for this week and next week.",
+    ),
+  };
 }
 
 async function readFirstSquawkSource(): Promise<{ items: MorningLiveUpdate[]; source: MorningBriefSource }> {
@@ -1682,20 +1368,18 @@ export async function loadMorningBrief(date: string, appRoot = defaultAppRoot, o
 }
 
 async function buildLiveMorningBrief(date: string, appRoot = defaultAppRoot): Promise<MorningBriefPayload> {
-  const [dailyFx, majorEvents, rollcall, liveCache, tc2000] = await Promise.all([
-    readDailyFxSource(date),
-    readMajorEventsSource(date),
+  const [macro, rollcall, liveCache, tc2000] = await Promise.all([
+    readUsMacroBundle(date),
     readRollcallSource(date),
     readCachedLiveUpdatesForBrief(),
     loadTc2000Pulls(appRoot),
   ]);
 
-  const economicEvents = sortCalendarEvents(dailyFx.items);
+  const economicEvents = sortCalendarEvents(macro.dailyItems);
   const trumpEvents = sortCalendarEvents(rollcall.items);
   const combinedEvents = sortCalendarEvents([...economicEvents, ...trumpEvents]);
   const sources: MorningBriefSource[] = [
-    dailyFx.source,
-    majorEvents.source,
+    ...macro.sources,
     rollcall.source,
     ...liveCache.sources,
     sourceStatus(
@@ -1712,7 +1396,7 @@ async function buildLiveMorningBrief(date: string, appRoot = defaultAppRoot): Pr
     economicEvents,
     trumpEvents,
     combinedEvents,
-    majorEvents: majorEvents.items,
+    majorEvents: macro.majorItems,
     liveUpdates: liveCache.items,
     tc2000,
     sources,
@@ -1824,7 +1508,7 @@ async function readMorningBriefState(date: string, appRoot = defaultAppRoot): Pr
   try {
     const parsed = JSON.parse(await fs.readFile(morningBriefStatePath(date, appRoot), "utf8")) as MorningBriefStatePayload;
     const savedAt = typeof parsed.savedAt === "string" ? parsed.savedAt : null;
-    if (!savedAt || !isMorningBriefPayload(parsed.payload) || parsed.payload.date !== date) {
+    if (!savedAt || !isMorningBriefPayload(parsed.payload) || parsed.payload.date !== date || hasLegacyDailyFxCalendar(parsed.payload)) {
       return null;
     }
     return { payload: withoutMorningBriefStateSource(parsed.payload), savedAt };
@@ -1888,6 +1572,14 @@ function isMorningBriefPayload(value: unknown): value is MorningBriefPayload {
     typeof record.tc2000 === "object" &&
     !Array.isArray(record.tc2000) &&
     Array.isArray(record.sources)
+  );
+}
+
+function hasLegacyDailyFxCalendar(payload: MorningBriefPayload): boolean {
+  return (
+    payload.sources.some((source) => /DailyFX/i.test(source.label)) ||
+    payload.economicEvents.some((event) => String(event.source) === "DailyFX") ||
+    payload.majorEvents.some((event) => String(event.source) === "DailyFX")
   );
 }
 

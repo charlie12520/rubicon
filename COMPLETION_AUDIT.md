@@ -1,5 +1,7 @@
 # Completion Audit
 
+> Point-in-time artifact. This audit records the app state at the audit time below and is not the current status source. For current Rubicon status, read `WORKLOG.md`, `naive_acceptance.md`, and `naive_validation.md`.
+
 Audit time: 2026-05-29T18:13:30-04:00.
 
 ## Status

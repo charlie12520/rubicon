@@ -18,7 +18,7 @@ function status(overrides: Partial<DailySyncStatusResult> = {}): DailySyncStatus
     state: "idle",
     targetPlan: {
       afterCutoff: false,
-      cutoffTimeEt: "16:25",
+      cutoffTimeEt: "07:00",
       estimatedTargetDate: "2026-05-28",
       mode: "auto",
       note: "Auto mode is estimated to target the previous session.",
@@ -37,8 +37,8 @@ describe("daily sync diagnostics", () => {
     expect(diagnostics.tone).toBe("ok");
     expect(diagnostics.badge).toBe("No flagged tail lines");
     expect(diagnostics.logPath).toContain("daily_spx_ibkr_sync.log");
-    expect(diagnostics.facts).toContainEqual({ label: "Target", value: "2026-05-28 (auto, cutoff 16:25 ET)" });
-    expect(diagnostics.facts).toContainEqual({ label: "Latest summary", value: "2026-05-28: partial, 21 entries" });
+    expect(diagnostics.facts).toContainEqual({ label: "Target", value: "2026-05-28 (auto, cutoff 07:00 ET)" });
+    expect(diagnostics.facts).toContainEqual({ label: "Current summary", value: "2026-05-28: partial, 21 entries" });
   });
 
   it("labels a different-date summary as the latest pipeline run", () => {
@@ -71,7 +71,7 @@ describe("daily sync diagnostics", () => {
     );
 
     expect(diagnostics.tone).toBe("error");
-    expect(diagnostics.badge).toBe("Sync failed");
+    expect(diagnostics.badge).toBe("Pipeline failed");
   });
 
   it("surfaces wrapper step progress and warning messages", () => {
@@ -116,5 +116,46 @@ describe("daily sync diagnostics", () => {
         updatedAt: "2026-05-29T19:16:00.000Z",
       },
     ]);
+  });
+
+  it("keeps TC2000 sidecar warnings diagnostic instead of failed", () => {
+    const diagnostics = buildDailySyncDiagnostics(
+      status({
+        googleUploaded: true,
+        reviewReady: true,
+        steps: [
+          {
+            id: "tc2000-open",
+            label: "Open TC2000",
+            status: "warning",
+            detail: "TC2000 could not be opened automatically.",
+          },
+          {
+            id: "tc2000-export",
+            label: "TC2000 export",
+            status: "warning",
+            detail: "TC2000 export failed or did not produce a fresh non-empty CSV.",
+          },
+          {
+            id: "qullamaggie-report",
+            label: "Qullamaggie report/email",
+            status: "warning",
+            detail: "Skipped Qullamaggie report/email because TC2000 export did not produce a fresh scanner CSV.",
+          },
+          {
+            id: "tc2000-bars",
+            label: "TC2000 daily bars",
+            status: "complete",
+            detail: "Daily bars refreshed.",
+          },
+        ],
+      } as Partial<DailySyncStatusResult>),
+    );
+
+    expect(diagnostics.tone).toBe("warning");
+    expect(diagnostics.badge).toBe("3 warnings");
+    expect(diagnostics.facts).toContainEqual({ label: "Review", value: "ready" });
+    expect(diagnostics.facts).toContainEqual({ label: "Google", value: "uploaded" });
+    expect(diagnostics.steps.map((step) => step.id)).toEqual(["tc2000-open", "tc2000-export", "qullamaggie-report", "tc2000-bars"]);
   });
 });

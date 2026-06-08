@@ -8,6 +8,8 @@ import {
   predictSpreadResponse,
   signedDistanceToLoss,
   spreadDelta,
+  spreadThetaAt,
+  spreadVega,
 } from "./spreadResponse";
 
 describe("normCdf", () => {
@@ -114,6 +116,63 @@ describe("predictSpreadResponse", () => {
     const early = predictSpreadResponse({ ...base, level: 6010, minutesToCloseAtLevel: 180 });
     const late = predictSpreadResponse({ ...base, level: 6010, minutesToCloseAtLevel: 20 });
     expect(late.creditAtLevel).toBeLessThan(early.creditAtLevel);
+  });
+});
+
+describe("spreadVega", () => {
+  it("is >0 for an OTM credit spread and → 0 far from the strikes", () => {
+    expect(spreadVega(-8, 12, 5)).toBeGreaterThan(0); // short strike OTM
+    expect(spreadVega(-200, 12, 5)).toBeCloseTo(0, 4); // far OTM
+    expect(spreadVega(205, 12, 5)).toBeCloseTo(0, 4); // far ITM
+  });
+  it("is 0 when s → 0", () => {
+    expect(spreadVega(-8, 0, 5)).toBe(0);
+  });
+});
+
+describe("theta (predictSpreadResponse)", () => {
+  // OTM call credit spread: short 6020, spot 6005 (15pt OTM), small credit.
+  const otm = { side: "call_credit" as const, shortStrike: 6020, width: 5, spot: 6005, credit: 0.6 };
+
+  it("decays in the seller's favor when OTM (>0) and tracks the instantaneous rate", () => {
+    const r = predictSpreadResponse({ ...otm, minutesToClose: 180, level: otm.spot });
+    expect(r.decayNextHourDollars).toBeGreaterThan(0);
+    expect(r.thetaDollarsPerHourNow).toBeGreaterThan(0);
+    // never decays more than the whole credit in an hour
+    expect(r.decayNextHourDollars).toBeLessThanOrEqual(otm.credit * 100 + 1e-6);
+  });
+
+  it("accelerates into the close (same spread bleeds faster later in the day)", () => {
+    const early = predictSpreadResponse({ ...otm, minutesToClose: 300, level: otm.spot });
+    const late = predictSpreadResponse({ ...otm, minutesToClose: 90, level: otm.spot });
+    expect(late.decayNextHourDollars).toBeGreaterThan(early.decayNextHourDollars);
+  });
+
+  it("clamps at the close: with <60m left, the next-hour decay is the full remaining credit", () => {
+    const r = predictSpreadResponse({ ...otm, minutesToClose: 30, level: otm.spot });
+    const vNow = bachelierVertical(signedDistanceToLoss("call_credit", otm.spot, otm.shortStrike), r.scaleNow, 5);
+    expect(r.decayNextHourDollars).toBeCloseTo(vNow * 100, 4);
+    expect(Number.isFinite(r.thetaDollarsPerHourNow)).toBe(true);
+  });
+
+  it("edge ratio θ/speed is higher further OTM than near the money", () => {
+    const far = predictSpreadResponse({ side: "call_credit", shortStrike: 6045, width: 5, spot: 6005, credit: 0.15, minutesToClose: 180, level: 6005 });
+    const near = predictSpreadResponse({ side: "call_credit", shortStrike: 6010, width: 5, spot: 6005, credit: 1.8, minutesToClose: 180, level: 6005 });
+    expect(far.thetaPerSpeed).toBeGreaterThan(near.thetaPerSpeed);
+  });
+
+  it("puts behave the same way (OTM PCS decays favorably)", () => {
+    const pcs = predictSpreadResponse({ side: "put_credit", shortStrike: 5990, width: 5, spot: 6005, credit: 0.6, minutesToClose: 180, level: 6005 });
+    expect(pcs.decayNextHourDollars).toBeGreaterThan(0);
+  });
+
+  it("spreadThetaAt is the single source of truth behind predictSpreadResponse", () => {
+    const r = predictSpreadResponse({ ...otm, minutesToClose: 180, level: otm.spot });
+    const t = spreadThetaAt(r.distanceNow, r.scaleNow, 180, otm.width);
+    expect(t.dollarsPerPoint).toBeCloseTo(r.dollarsPerPointNow, 9);
+    expect(t.decayNextHourDollars).toBeCloseTo(r.decayNextHourDollars, 9);
+    expect(t.thetaDollarsPerHourNow).toBeCloseTo(r.thetaDollarsPerHourNow, 9);
+    expect(t.thetaPerSpeed).toBeCloseTo(r.thetaPerSpeed, 9);
   });
 });
 

@@ -6,8 +6,8 @@ import { asArray, asRecord, firstNumber, firstString, type JsonRecord } from "./
 export const RUBICON_TRACKER_SUMMARY_FILE = "rubicon_tracker_summary.json";
 
 const RUBICON_TRACKER_SUMMARY_SCHEMA = "rubicon-tracker-summary";
-const RUBICON_TRACKER_SUMMARY_VERSION = 3;
-const REQUIRED_PAYLOAD_TAB_COUNT = 11;
+const RUBICON_TRACKER_SUMMARY_VERSION = 4;
+const REQUIRED_PAYLOAD_TAB_COUNT = 1;
 
 type SummaryBuildContext = {
   date: string;
@@ -72,30 +72,8 @@ function normalizeBarSize(value?: string): string | undefined {
   return value;
 }
 
-function estimatePayloadRows(input: {
-  entryCount: number;
-  fillCount: number;
-  openInterestRows: number;
-  optionContractCount: number;
-  optionIntradayRows: number;
-  spreadCount: number;
-  spreadMarkRows: number;
-  spxRows: number;
-  underlyingRows: number;
-  volumeProfileRows: number;
-}): number {
-  return [
-    input.spxRows,
-    input.fillCount,
-    input.spreadCount,
-    input.entryCount,
-    input.optionContractCount,
-    input.optionIntradayRows,
-    input.spreadMarkRows,
-    input.volumeProfileRows,
-    input.openInterestRows,
-    input.underlyingRows,
-  ].reduce((total, value) => total + Math.max(0, value), 0);
+function estimateTrackerPayloadRows(input: { entryCount: number }): number {
+  return 1 + Math.max(0, input.entryCount);
 }
 
 export function buildRubiconDailySummaryFromSyncSummary(local: JsonRecord, context: SummaryBuildContext): DailySummary {
@@ -117,6 +95,7 @@ export function buildRubiconDailySummaryFromSyncSummary(local: JsonRecord, conte
   const tradeConnections = asArray(trades.connections).map(asRecord);
   const tradeErrors = asArray(trades.errors);
   const optionErrors = asArray(optionIntraday.errors);
+  const googleUpload = asRecord(local.googleUpload);
 
   const date = firstString(local.target_trade_date_et, optionIntraday.date, availability.date, context.date) ?? context.date;
   const fillCount = firstNumber(trades.trade_count, trades.fill_count, availabilityTradeCounts.trade_count, availabilityTradeCounts.fill_count);
@@ -137,17 +116,10 @@ export function buildRubiconDailySummaryFromSyncSummary(local: JsonRecord, conte
   const spxRows = firstNumber(spxPartition.rows, spx.rows, availabilitySpx.rows);
   const spxExpectedRows = firstNumber(spxPartition.expected_rows, availabilitySpx.expected_rows, spxRows);
   const rawUploadGoogleSheetUrl = firstString(local.raw_upload_google_sheet_url, local.rawUploadGoogleSheetUrl);
-  const payloadRows = estimatePayloadRows({
+  const googleUploadStatus = firstString(local.google_upload_status, googleUpload.status);
+  const googleUploaded = Boolean(rawUploadGoogleSheetUrl) || googleUploadStatus === "complete" || googleUploadStatus === "uploaded";
+  const payloadRows = estimateTrackerPayloadRows({
     entryCount,
-    fillCount,
-    openInterestRows,
-    optionContractCount,
-    optionIntradayRows,
-    spreadCount,
-    spreadMarkRows,
-    spxRows,
-    underlyingRows,
-    volumeProfileRows,
   });
   const issues: DataIssue[] = [
     issue(
@@ -233,20 +205,16 @@ export function buildRubiconDailySummaryFromSyncSummary(local: JsonRecord, conte
   if (!context.payloadExists) {
     issues.push(issue("upload", "error", "Google Sheet upload payload missing", `No payload found for ${date} at ${context.payloadPath}.`));
   } else {
-    issues.push(issue("upload", "info", "Google Sheet payload ready", `Payload is staged at ${context.payloadPath}.`));
+    issues.push(issue("upload", "info", "Google tracker payload ready", `Compact tracker payload is staged at ${context.payloadPath}.`));
   }
 
-  if (!context.workbookExists) {
-    issues.push(issue("upload", "warning", "Raw upload workbook missing", `No daily workbook found at ${context.workbookPath}.`));
-  }
-
-  if (!rawUploadGoogleSheetUrl) {
+  if (!googleUploaded) {
     issues.push(
       issue(
         "upload",
         "warning",
-        "Live Google upload not confirmed",
-        "The validated local archive has a sheet payload, but no raw_upload_google_sheet_url/upload receipt was found in the compact summary.",
+        "Google tracker upload not confirmed",
+        "The compact tracker payload exists, but no successful Google tracker update is recorded in the daily summary.",
       ),
     );
   }
@@ -290,10 +258,9 @@ export function buildRubiconDailySummaryFromSyncSummary(local: JsonRecord, conte
     underlyingIntradayRowCount: underlyingRows,
     underlyingIntradayPath: firstString(asRecord(asRecord(underlyingIntraday).outputs).csv),
     availabilityStatus,
-    uploadStatus: rawUploadGoogleSheetUrl ? "uploaded" : context.payloadExists ? "payload_ready_unconfirmed" : "missing_payload",
+    uploadStatus: googleUploaded ? "uploaded" : context.payloadExists ? "payload_ready_unconfirmed" : "missing_payload",
     logPath: firstString(local.log_path),
     payloadPath: context.payloadExists ? context.payloadPath : undefined,
-    workbookPath: context.workbookExists ? context.workbookPath : undefined,
     generatedAtLocal: firstString(local.generated_at_local, trades.pulled_at_et, optionIntraday.pulled_at_utc),
     issueCount: issues.filter((nextIssue) => nextIssue.severity !== "info").length,
     issues,
@@ -305,7 +272,6 @@ export function buildRubiconDailySummaryFromSyncSummary(local: JsonRecord, conte
 
 function buildCache(dayDir: string, summary: DailySummary, dailySyncSummaryPath: string, dailySyncSummaryMtimeMs?: number): RubiconTrackerSummaryCache {
   const payloadPath = path.join(dayDir, "google_sheet_upload_payload.json");
-  const workbookPath = path.join(dayDir, `spx_daily_upload_${summary.date}.xlsx`);
   return {
     schema: RUBICON_TRACKER_SUMMARY_SCHEMA,
     version: RUBICON_TRACKER_SUMMARY_VERSION,
@@ -327,14 +293,8 @@ function buildCache(dayDir: string, summary: DailySummary, dailySyncSummaryPath:
         {
           name: "google_sheet_upload_payload.json",
           path: payloadPath,
-          role: "Large reproducible Google Sheets upload payload.",
-          loadPolicy: "Audit/rebuild only; not read by /api/tracker.",
-        },
-        {
-          name: `spx_daily_upload_${summary.date}.xlsx`,
-          path: workbookPath,
-          role: "Local raw workbook staged for Google upload.",
-          loadPolicy: "Receipt/path evidence only on dashboard; workbook contents are not opened.",
+          role: "Compact Google tracker upload payload.",
+          loadPolicy: "Small tracker-only payload; row-level IBKR artifacts stay in the local archive.",
         },
       ],
     },
@@ -356,8 +316,7 @@ export async function loadMissingRubiconDailySummary(dayDir: string): Promise<Da
   const date = path.basename(dayDir);
   const dailySyncSummaryPath = path.join(dayDir, "daily_sync_summary.json");
   const payloadPath = path.join(dayDir, "google_sheet_upload_payload.json");
-  const workbookPath = path.join(dayDir, `spx_daily_upload_${date}.xlsx`);
-  const [payloadExists, workbookExists] = await Promise.all([pathExists(payloadPath), pathExists(workbookPath)]);
+  const payloadExists = await pathExists(payloadPath);
   const issues: DataIssue[] = [
     issue("pull", "error", "Daily sync summary missing", `No daily_sync_summary.json found for ${date} at ${dailySyncSummaryPath}.`),
   ];
@@ -365,19 +324,15 @@ export async function loadMissingRubiconDailySummary(dayDir: string): Promise<Da
   if (!payloadExists) {
     issues.push(issue("upload", "error", "Google Sheet upload payload missing", `No payload found for ${date} at ${payloadPath}.`));
   } else {
-    issues.push(issue("upload", "info", "Google Sheet payload ready", `Payload is staged at ${payloadPath}; row-level contents are not parsed on dashboard load.`));
-  }
-
-  if (!workbookExists) {
-    issues.push(issue("upload", "warning", "Raw upload workbook missing", `No daily workbook found at ${workbookPath}.`));
+    issues.push(issue("upload", "info", "Google tracker payload ready", `Compact tracker payload is staged at ${payloadPath}.`));
   }
 
   issues.push(
     issue(
       "upload",
       "warning",
-      "Live Google upload not confirmed",
-      "No compact daily sync summary/upload receipt was found for this date.",
+      "Google tracker upload not confirmed",
+      "No compact daily sync summary/tracker upload receipt was found for this date.",
     ),
   );
 
@@ -394,7 +349,6 @@ export async function loadMissingRubiconDailySummary(dayDir: string): Promise<Da
     availabilityStatus: "missing",
     uploadStatus: payloadExists ? "payload_ready_unconfirmed" : "missing_payload",
     payloadPath: payloadExists ? payloadPath : undefined,
-    workbookPath: workbookExists ? workbookPath : undefined,
     issueCount: issues.filter((nextIssue) => nextIssue.severity !== "info").length,
     issues,
     uploadTabCount: 0,
@@ -418,14 +372,11 @@ export async function loadOrBuildRubiconDailySummary(dayDir: string): Promise<Da
   }
 
   const payloadPath = path.join(dayDir, "google_sheet_upload_payload.json");
-  const workbookPath = path.join(dayDir, `spx_daily_upload_${date}.xlsx`);
-  const [payloadExists, workbookExists] = await Promise.all([pathExists(payloadPath), pathExists(workbookPath)]);
+  const payloadExists = await pathExists(payloadPath);
   const summary = buildRubiconDailySummaryFromSyncSummary(local, {
     date,
     payloadExists,
     payloadPath,
-    workbookExists,
-    workbookPath,
   });
   const cache = buildCache(dayDir, summary, dailySyncSummaryPath, dailySyncSummaryMtimeMs);
   await writeJsonAtomic(cachePath, cache);

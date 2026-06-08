@@ -80,18 +80,29 @@ Do not build these until the core loop is green unless the user explicitly makes
 
 Stubs are acceptable when they clarify future direction.
 
+## Concurrent Agents
+
+Multiple agents often work in this codebase at the same time (and the user edits it live). Treat every file as liable to change under you:
+
+- Re-read a file immediately before editing it; do not trust an earlier read. Expect "file modified since read" and reconcile rather than overwrite.
+- Preserve other agents' and the user's in-flight changes. Make small, targeted patches and never revert edits you did not make.
+- High-contention shared files (WORKLOG.md, codebase.md, MINIOS_CHANGELOG.md, `data/` status + snapshot JSON, daily-sync artifacts) may be written concurrently — append/merge carefully instead of clobbering.
+- Assume another agent may be running the same kind of job. Use the existing locks and distinct IDs (e.g. the daily-sync lock, unique IBKR client ids) and do not kill processes or TWS connections you did not start.
+
 ## Engineering Behavior
 
 - Reuse the existing stack.
 - Do not rewrite broad architecture unless WORKLOG.md identifies it as the current blocker.
 - Preserve existing user changes.
 - Prefer small, reviewable patches.
+- Prefer small, meaningful commits after verified changes; do not batch unrelated work into one commit, and push only when the user asks or the workflow clearly calls for it.
 - Every meaningful change must map to one acceptance criterion.
 - After each run, perform a meta-review of whether the goals improved app reality or merely added surfaces; write the lesson into the next goal set.
 - For completed phases, include the manual ten-point productivity meta-review before claiming the next goals are ready.
 - If the review suggests a better operating rule, update the relevant MiniOS docs and record the datetime/reason in `MINIOS_CHANGELOG.md`.
 - Add or update tests when behavior changes.
 - Run the narrowest relevant validation first.
+- Keep GitHub Actions CI aligned with local validation. CI should at minimum run `npm ci`, `npm run typecheck`, and `npm run test` on push/PR; before pushing, run the relevant local checks so CI is confirming rather than discovering obvious failures.
 - Update WORKLOG.md after each meaningful change.
 - If a task takes more than five minutes, include a short completion note naming what took very long or cost an unreasonable amount of tokens, plus any obvious optimization for the next run. For tasks under five minutes, skip this note.
 

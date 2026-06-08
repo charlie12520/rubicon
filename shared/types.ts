@@ -123,13 +123,24 @@ export type DailySyncState = "idle" | "running" | "completed" | "failed" | "miss
 
 export type DailySyncStepStatus = "pending" | "running" | "complete" | "warning" | "failed";
 
+export type DailySyncStepProgress = {
+  current: number;
+  total: number;
+  unit: "contracts" | "symbols" | "rows" | "cells" | "phases";
+  label?: string;
+  detail?: string;
+};
+
 export type DailySyncStep = {
   id: string;
   label: string;
   status: DailySyncStepStatus;
   detail?: string;
+  progress?: DailySyncStepProgress;
   updatedAt?: string;
 };
+
+export type DailyOptionPullScope = "failed-or-missing";
 
 export type DailyPipelineStageId = "dataCollection" | "rubiconIngest" | "googleUpload";
 
@@ -163,6 +174,7 @@ export type DailySyncLatestSummary = {
   googleUploadStatus?: string;
   googleUploaded?: boolean;
   googleUploadedAt?: string;
+  logPath?: string;
 };
 
 export type DailySyncTargetPlan = {
@@ -454,6 +466,16 @@ export type ReplayPayload = {
   quickTrades: TradeRecord[];
 };
 
+// Trailing-window SPX closes (prior sessions, strictly before `date`) resampled to
+// each chart timeframe, so the cheat-code 50/200 EMA & SMA overlays can be warmed to
+// a true full period instead of a partial average of one short session. Keyed by
+// interval-minutes string ("1" | "2" | "5" | "15" | "30") → oldest→newest closes.
+export type SpxMaContextPayload = {
+  date: string;
+  throughDate: string | null;
+  byInterval: Record<string, number[]>;
+};
+
 // Live SPX intraday bars written by scripts/refresh-spx-live-bars.py during the
 // session (a dedicated IBKR sidecar). The Estimator's 2-minute chart prefers
 // these over the post-close replay bars so the target-level line has a live SPX
@@ -535,6 +557,14 @@ export type SpreadSpeedPayload = {
   targetNetDelta: number;
   fastThreshold: number;
   frames: SpreadSpeedFrame[];
+  // Set by the fallback walk (/api/spread-speed?fallback=1): the date originally
+  // requested, and whether `frames`/`date` come from an earlier session because
+  // the requested day had no assembled frame yet (the live-morning case).
+  requestedDate?: string;
+  fallback?: boolean;
+  // Set by the live feed (/api/spread-speed/live): the single frame was built
+  // from a real-time SPXW 0DTE snapshot, not the EOD CSV sidecars.
+  live?: boolean;
 };
 
 export type MorningBriefSourceStatus = "ok" | "warning" | "error" | "stub";

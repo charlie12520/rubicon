@@ -9,6 +9,15 @@ export type CalendarAlertTarget = {
   millisUntilAlert: number;
 };
 
+// One alert "moment": every event sharing the same start time is coalesced into a
+// single group so Rubicon fires ONE notification for the cluster, not one per event.
+export type CalendarAlertGroup = {
+  alertAt: Date;
+  eventAt: Date;
+  events: MorningCalendarEvent[];
+  millisUntilAlert: number;
+};
+
 export function calendarEventStartAt(event: MorningCalendarEvent): Date | null {
   if (event.sortMinute == null) {
     return null;
@@ -52,12 +61,50 @@ export function nextCalendarAlertTarget(
   return calendarAlertTargets(events, now, leadMs)[0] ?? null;
 }
 
-export function formatCalendarAlertStatus(target: CalendarAlertTarget | null): string {
-  if (!target) {
+// Coalesce per-event targets that share the same start time into one group, so a
+// cluster like CPI + Retail Sales + Jobless Claims all at 8:30 fires a single alert.
+export function calendarAlertGroups(
+  events: MorningCalendarEvent[],
+  now = new Date(),
+  leadMs = CALENDAR_ALERT_LEAD_MS,
+): CalendarAlertGroup[] {
+  const byMoment = new Map<number, CalendarAlertGroup>();
+  const order: number[] = [];
+  for (const target of calendarAlertTargets(events, now, leadMs)) {
+    const key = target.eventAt.getTime();
+    let group = byMoment.get(key);
+    if (!group) {
+      group = {
+        alertAt: target.alertAt,
+        eventAt: target.eventAt,
+        events: [],
+        millisUntilAlert: target.millisUntilAlert,
+      };
+      byMoment.set(key, group);
+      order.push(key);
+    }
+    group.events.push(target.event);
+  }
+  return order.map((key) => byMoment.get(key) as CalendarAlertGroup);
+}
+
+export function nextCalendarAlertGroup(
+  events: MorningCalendarEvent[],
+  now = new Date(),
+  leadMs = CALENDAR_ALERT_LEAD_MS,
+): CalendarAlertGroup | null {
+  return calendarAlertGroups(events, now, leadMs)[0] ?? null;
+}
+
+export function formatCalendarAlertStatus(group: CalendarAlertGroup | null): string {
+  if (!group || !group.events.length) {
     return "No future timed events for this date.";
   }
-  const minutes = Math.floor(target.millisUntilAlert / 60_000);
-  const seconds = Math.ceil((target.millisUntilAlert % 60_000) / 1000);
-  const countdown = target.millisUntilAlert === 0 ? "now" : minutes ? `in ${minutes}m ${seconds}s` : `in ${seconds}s`;
-  return `Next alert ${countdown}: ${target.event.timeLabel} - ${target.event.title}`;
+  const minutes = Math.floor(group.millisUntilAlert / 60_000);
+  const seconds = Math.ceil((group.millisUntilAlert % 60_000) / 1000);
+  const countdown = group.millisUntilAlert === 0 ? "now" : minutes ? `in ${minutes}m ${seconds}s` : `in ${seconds}s`;
+  const [first] = group.events;
+  const headline =
+    group.events.length > 1 ? `${first.timeLabel} - ${group.events.length} events` : `${first.timeLabel} - ${first.title}`;
+  return `Next alert ${countdown}: ${headline}`;
 }

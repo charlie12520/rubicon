@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { IbkrHoldingEarningsEvent, IbkrHoldingPosition, IbkrHoldingsSnapshot } from "../shared/types.ts";
-import { shouldFireDailyWindow } from "./easternClock.ts";
+import { easternClock, shouldFireDailyWindow } from "./easternClock.ts";
 import { parseIbkrPorts } from "./ibkrWalletRefresh.ts";
 import { asArray, asRecord, firstString, toNullableNumber, toNullablePositiveNumber } from "./normalize.ts";
 
@@ -18,6 +18,12 @@ const DEFAULT_REFRESH_TIMEOUT_MS = 60_000;
 const AUTO_REFRESH_ENABLED = String(process.env.IBKR_HOLDINGS_AUTO_REFRESH ?? "true").toLowerCase() !== "false";
 const AUTO_REFRESH_TIME = process.env.IBKR_HOLDINGS_AUTO_REFRESH_TIME ?? "08:30";
 const AUTO_REFRESH_CATCHUP_MINUTES = Number(process.env.IBKR_HOLDINGS_AUTO_REFRESH_CATCHUP_MINUTES ?? "15");
+// Intraday live pull: re-pull positions from IBKR every N minutes during market hours
+// so the estimator reflects current spreads, not just the 08:30 snapshot.
+const INTRADAY_REFRESH_ENABLED = String(process.env.IBKR_HOLDINGS_INTRADAY_REFRESH ?? "true").toLowerCase() !== "false";
+const INTRADAY_REFRESH_INTERVAL_MS = Math.max(1, Number(process.env.IBKR_HOLDINGS_INTRADAY_INTERVAL_MIN ?? "5")) * 60_000;
+const INTRADAY_WINDOW_START = process.env.IBKR_HOLDINGS_INTRADAY_WINDOW_START ?? "09:30";
+const INTRADAY_WINDOW_END = process.env.IBKR_HOLDINGS_INTRADAY_WINDOW_END ?? "16:15";
 
 type PythonHoldingsRefreshResult = {
   account?: string;
@@ -35,6 +41,7 @@ type PythonHoldingsRefreshResult = {
 let autoRefreshLastFiredDate: string | null = null;
 let autoRefreshTimer: ReturnType<typeof setInterval> | null = null;
 let activeRefresh: Promise<PythonHoldingsRefreshResult> | null = null;
+let intradayLastFiredMs: number | null = null;
 
 export function ibkrHoldingsSnapshotPath(): string {
   return process.env.IBKR_HOLDINGS_SNAPSHOT_OUT_PATH || path.join(IBKR_ROOT, "data", "ibkr_holdings_snapshot.json");
@@ -119,6 +126,27 @@ export function shouldFireIbkrHoldingsAutoRefresh(
   });
 }
 
+/**
+ * Decide whether to re-pull positions on the intraday cadence: enabled, a weekday,
+ * inside the ET market window, and at least the configured interval since the last pull.
+ * Pure + injectable for tests.
+ */
+export function shouldFireIntradayHoldingsRefresh(
+  now: Date = new Date(),
+  lastFiredMs: number | null = intradayLastFiredMs,
+  options: { enabled?: boolean; intervalMs?: number; windowStart?: string; windowEnd?: string } = {},
+): { shouldFire: boolean; time: string; nowMs: number } {
+  const enabled = options.enabled ?? INTRADAY_REFRESH_ENABLED;
+  const intervalMs = options.intervalMs ?? INTRADAY_REFRESH_INTERVAL_MS;
+  const windowStart = options.windowStart ?? INTRADAY_WINDOW_START;
+  const windowEnd = options.windowEnd ?? INTRADAY_WINDOW_END;
+  const clock = easternClock(now);
+  const isWeekday = clock.weekday >= 1 && clock.weekday <= 5;
+  const inWindow = clock.time >= windowStart && clock.time <= windowEnd;
+  const dueByInterval = lastFiredMs === null || now.getTime() - lastFiredMs >= intervalMs;
+  return { shouldFire: enabled && isWeekday && inWindow && dueByInterval, time: clock.time, nowMs: now.getTime() };
+}
+
 export function armIbkrHoldingsAutoRefresh(): void {
   if (!AUTO_REFRESH_ENABLED || autoRefreshTimer) {
     return;
@@ -132,11 +160,17 @@ export function armIbkrHoldingsAutoRefresh(): void {
 }
 
 async function maybeAutoRefreshIbkrHoldings(): Promise<void> {
-  const decision = shouldFireIbkrHoldingsAutoRefresh();
-  if (!decision.shouldFire) {
+  const daily = shouldFireIbkrHoldingsAutoRefresh();
+  const intraday = shouldFireIntradayHoldingsRefresh();
+  if (!daily.shouldFire && !intraday.shouldFire) {
     return;
   }
-  autoRefreshLastFiredDate = decision.date;
+  if (daily.shouldFire) {
+    autoRefreshLastFiredDate = daily.date;
+  }
+  if (intraday.shouldFire) {
+    intradayLastFiredMs = intraday.nowMs;
+  }
   try {
     await refreshIbkrHoldingsSnapshot();
   } catch (error) {

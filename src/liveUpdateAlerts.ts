@@ -21,19 +21,14 @@ export function buildLiveUpdateDesktopAlertPayload(
 
   const matchedTerms = matchingCompiledLiveUpdateFilters(update, filters).map((filter) => filter.term);
   const matchedLabel = matchedTerms.length ? `Matched ${matchedTerms.join(", ")}` : "Matched live update";
-  const detail = [
-    matchedLabel,
-    update.source,
-    update.timeLabel,
-    updates.length > 1 ? `${updates.length} matching updates` : null,
-  ]
+  const detail = [matchedLabel, update.timeLabel, updates.length > 1 ? `${updates.length} matching updates` : null]
     .filter(Boolean)
     .join(" - ");
 
   return {
     body: formatLiveUpdateDisplayText(update.text),
     detail,
-    title: "Live update matched your word filter",
+    title: `${update.source} word-filter alert`,
   };
 }
 
@@ -49,6 +44,6 @@ export async function triggerLiveUpdateDesktopAlertBatch(
   try {
     await sendDesktopAlert(payload);
   } catch {
-    // Sound and row highlighting still run if the local Windows popup helper is unavailable.
+    // Sound and row highlighting still run if the local Windows toast helper is unavailable.
   }
 }

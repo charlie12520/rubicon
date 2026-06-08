@@ -6,7 +6,7 @@ A local-first morning intelligence, trade tracker, and SPX spread replay cockpit
 
 - Imports SPX spread trades from `..\IBKR Equity History Pull\data\ibkr_trades`.
 - Reads mirrored Google Sheet tabs or staged upload payload tabs for SPX 5-second bars, spread marks, 0DTE open interest, and 0DTE volume profile, with legacy 1-minute fallback for older archives.
-- Splits the app into top-level Morning and Replay portions. Morning shows macro/political calendar pulls, FirstSquawk live updates, alert arming, net-delta recommended spreads, FPL, prior-session diary notes, and TC2000 pulls.
+- Splits the app into top-level Morning and Replay portions. Morning shows the Rubicon-owned SPX macro calendar, political calendar pulls, FirstSquawk live updates, alert arming, SPX Heatmap, net-delta recommended spreads, FPL, prior-session diary notes, and TC2000 pulls.
 - Shows today/date/range stats: net P/L, average P/L, win rate, trade count, max call-side position, max put-side position, and IBKR wallet size.
 - Replays a selected session with a scrubber/autoplay cockpit: SPX chart, selected spread chart with OHLC/Line modes, static OI profile, and volume profile with both/calls/puts modes.
 - Lists every selected-date trade in the replay quick-access strip so late-day entries can be opened directly.
@@ -18,8 +18,11 @@ A local-first morning intelligence, trade tracker, and SPX spread replay cockpit
 - Opens as a local desktop app window through `npm run desktop` or the installed `Rubicon` shortcut.
 - Automatically re-checks the local AI STUFF/SPX tracker mirrors while the app is open and re-fetches replay data after import refresh.
 - Shows a `Today pending` freshness banner when today's archive is not imported yet and the app is displaying the latest imported session instead.
-- Exposes Source State `Preflight Sync` and `Run Daily Sync` actions so the trader can dry-run the exact AI STUFF daily SPX/IBKR command before launching the staged Google Sheet payload wrapper.
-- Shows same-day sync readiness in Source State, including whether `auto` is still targeting the prior session before the 16:25 ET cutoff, roughly how many minutes remain, and locks `Run Daily Sync` until the auto target is safely today's session.
+- Exposes Source State `Preflight Pipeline` and `Run Daily Pipeline` actions so the trader can dry-run the exact AI STUFF daily SPX/IBKR wrapper before launching the local daily pipeline.
+- Shows same-day pipeline readiness in Source State, including whether `auto` is still targeting the prior session before the 07:00 ET cutoff, roughly how many minutes remain, and locks `Run Daily Pipeline` until the auto target is safely today's session.
+- Runs the daily pipeline as Data Collection -> Rubicon Ingest -> Google Upload, with TC2000/Qullamaggie report/email sidecar failures reported as warning-only diagnostics.
+- Lets Morning's SPX Heatmap start a per-minute IBKR snapshot feed; `Start feed` immediately writes a Yahoo session backfill so the map is not blank while the first live sweep starts.
+- Sends FirstSquawk word-filter matches through a native Windows toast endpoint instead of reusing the calendar popup path.
 - Probes the configured SPX Spread Trade Tracker Google Sheet CSV export and surfaces whether direct import is public-readable or blocked by Google auth.
 - Reads a Google Drive connector snapshot from `data/google-drive-tracker-snapshot.json` when present, using connector-confirmed `Daily Sync Runs` raw workbook URLs to mark live Google upload receipts accurately and warn when the snapshot is stale or predates the latest staged payload.
 - Keeps the connector snapshot warning active when a refreshed connector read is newer than the staged payload but still lacks that date's `raw_upload_google_sheet_url`, so a fresh-but-missing receipt cannot look confirmed.
@@ -84,15 +87,24 @@ The desktop app also exposes the same refresh path in Source State through `Refr
 
 While the desktop app is open, `/api/tracker` also checks this same credential-gated refresh path automatically. It waits quietly when no credential is configured, reports failures in Source State, and throttles retries to 30 minutes by default. Override with `SPX_GOOGLE_AUTO_REFRESH_MINUTES`, or disable with `SPX_GOOGLE_AUTO_REFRESH=0`.
 
-## Run Daily SPX/IBKR Sync
+## Run Daily SPX/IBKR Pipeline
 
-The desktop app's Source State panel exposes `Run Daily Sync`, which calls the existing AI STUFF wrapper:
+The desktop app's Source State panel exposes `Preflight Pipeline` and `Run Daily Pipeline`, which call the existing AI STUFF wrapper:
 
 ```text
 ..\IBKR Equity History Pull\run_daily_spx_ibkr_sync_with_sheet_payload.ps1 --no-popup --date auto
 ```
 
-The API also exposes `/api/daily-sync/status` for the latest launch state, log tail, daily summary, and the estimated `auto` target date. Before the 16:25 ET cutoff, Source State warns when `auto` is still expected to target the prior session, shows a minute countdown to the same-day sync window, and disables `Run Daily Sync`; after the cutoff it updates while the app is open and unlocks the action for today's archive. It also shows a latest sync diagnostics drawer with flagged log-tail lines and the current log path. The wrapper remains the final market-calendar authority. The sync script pulls local SPX/IBKR data and builds the staged Google Sheet payload; it does not place orders.
+The API also exposes `/api/daily-sync/status` for the latest launch state, log tail, daily summary, three stage rows, Google-uploaded verdict, review-ready verdict, lock status, catch-up status, and the estimated `auto` target date. Before the 07:00 ET cutoff, Source State warns when `auto` is still expected to target the prior session, shows a minute countdown to the same-day pipeline window, and disables `Run Daily Pipeline`; after the cutoff it updates while the app is open and unlocks the action for today's archive.
+
+The pipeline stages are:
+
+- Data Collection: pulls local SPX 5s bars, IBKR executions, option data, OI, underlying bars, spread marks, and summary files.
+- Rubicon Ingest: publishes local summaries and replay-safe state so Rubicon can review the session even if Google upload fails.
+- Google Upload: builds/uploads the raw workbook, updates tracker receipt rows, and refreshes the Google snapshot.
+- TC2000/Qullamaggie sidecar: runs after Google Upload and before TC2000 daily bars; failures stay warning-only diagnostics.
+
+The wrapper remains the final market-calendar authority. It pulls local SPX/IBKR data and updates archive/upload artifacts; it does not place orders.
 
 ## Refresh IBKR Wallet Snapshot
 
@@ -116,7 +128,7 @@ That runs TypeScript, importer tests, and a production build.
 
 ## Completion Audit
 
-See `COMPLETION_AUDIT.md` for the current requirement-by-requirement audit. The local desktop MVP is validated, the Google snapshot refresh path is automatic when credentials exist, and the 2026-05-29 Google upload receipt is now connector-confirmed in `Daily Sync Runs` row 5 with raw workbook URL `https://docs.google.com/spreadsheets/d/1oPFgKIyBbny3qjbqw73Sqr-_uaYVJw0AD9v3FP7eE7g`.
+`COMPLETION_AUDIT.md` is a point-in-time audit from 2026-05-29. Current acceptance and validation status live in `WORKLOG.md`, `naive_acceptance.md`, and `naive_validation.md`.
 
 ## Data Sources
 
@@ -126,7 +138,7 @@ See `COMPLETION_AUDIT.md` for the current requirement-by-requirement audit. The 
 - Direct Google CSV probe: the app checks the `Daily Sync Runs` tab export endpoint; if Google returns 401/auth or non-CSV content, Source State reports the exact auth gate and keeps using local mirrors.
 - Google Drive connector bridge: create or refresh `data/google-drive-tracker-snapshot.json` from a connected Google Drive/Sheets read or `npm run google:snapshot`; the app merges connector-backed upload receipts into daily summaries, labels their source/read time in the Upload health metric, and warns when the connector read is older than the newest staged payload it would need to confirm. The current connector snapshot confirms receipts through 2026-05-29.
 - Google receipt row-search evidence: `data/google-drive-receipt-checks.json` records bounded connector searches for selected dates; when a staged upload still has no receipt row, the selected-date health panel shows the search status, scanned range, and matching-row count. For 2026-05-29, the latest stored row-search evidence is `found`.
-- Daily local sync: use Source State `Run Daily Sync` to start the existing AI STUFF SPX/IBKR sync wrapper after the cutoff guard unlocks, then the app's auto-refresh picks up newly written local mirror files and staged sheet payload summaries. Same-day replay filters to SPXW multi-leg spreads so non-SPX single-option executions do not pollute SPX charts, OI, or volume.
+- Daily local pipeline: use Source State `Run Daily Pipeline` to start the existing AI STUFF SPX/IBKR wrapper after the 07:00 ET cutoff guard unlocks, then the app's auto-refresh picks up newly written local mirror files, replay-safe state, staged sheet payload summaries, Google upload receipts, and warning-only TC2000/Qullamaggie sidecar diagnostics. Same-day replay filters to SPXW multi-leg spreads so non-SPX single-option executions do not pollute SPX charts, OI, or volume.
 - Market-date freshness: when `today` is missing from imported dates, the app labels the visible fallback session so the Today view is not mistaken for a completed same-day import.
 - Date-specific data quality: Replay and Daily Review date rails show issue badges with pull/upload/availability counts when a date's imported summary needs review.
 - Wallet/account import: set `IBKR_ACCOUNT_SNAPSHOT_PATH` to a JSON/CSV account snapshot with `NetLiquidation`, place an account snapshot at one of the recognized AI STUFF latest-account paths, or use `npm run ibkr:wallet` / the in-app `IBKR` button to produce one from read-only TWS/Gateway account summary.

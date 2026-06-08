@@ -8,8 +8,11 @@ import {
   todayClosedSpxSpreads,
 } from "../spreadEstimator";
 import { minutesToCloseFromLabel } from "../spreadResponse";
+import { coneScaleFromSpreads, expectedMoveCone, type ExpectedMoveCone } from "../expectedMoveCone";
+import { buildThetaSpeedCurve, resolveMoveScale } from "../thetaSpeedCurve";
 import type { EstimatorLiveState } from "../estimatorLiveState";
 import { EstimatorSpxChart } from "./EstimatorSpxChart";
+import { ThetaSpeedCurvePanel, type ThetaSpeedMarker } from "./ThetaSpeedCurvePanel";
 
 type Props = {
   holdings: IbkrHoldingsSnapshot | null;
@@ -103,6 +106,7 @@ export function LiveSpreadEstimatorPanel({ holdings, todayEt, refreshing, onRefr
   );
 
   const [focusedSpreadId, setFocusedSpreadId] = useState<string | null>(null);
+  const [coneEnabled, setConeEnabled] = useState(true);
   // Auto-clear focus if the focused spread leaves the available set (e.g. a live
   // pull removes the open spread, or the user changes the selected date).
   useEffect(() => {
@@ -124,6 +128,40 @@ export function LiveSpreadEstimatorPanel({ holdings, todayEt, refreshing, onRefr
     if (spot == null || activeSpreads.length === 0) return null;
     return buildPortfolioResponse(activeSpreads, { spot, minutesToClose });
   }, [activeSpreads, spot, minutesToClose]);
+
+  // Forward expected-move cone (now → 16:00 ET). Width comes from the live spreads'
+  // implied move-scale (same vol as the P/L curve), falling back to a typical-day
+  // prior; in replay the horizon anchors to the last bar's clock, not wall-clock now.
+  const coneMinutesToClose = useMemo(() => {
+    if (spxBarsLive === false && bars.length > 0) {
+      const m = minutesToCloseFromLabel(bars[bars.length - 1].label);
+      if (m != null) return m;
+    }
+    return minutesToClose;
+  }, [spxBarsLive, bars, minutesToClose]);
+  const coneScale = useMemo(
+    () => coneScaleFromSpreads(activeSpreads, spot ?? 0, coneMinutesToClose),
+    [activeSpreads, spot, coneMinutesToClose],
+  );
+  const cone = useMemo<ExpectedMoveCone | null>(() => {
+    if (!coneEnabled || spot == null) return null;
+    return expectedMoveCone({
+      anchorSpot: spot,
+      anchorMinutesToClose: coneMinutesToClose,
+      scale: coneScale,
+      levels: [1, 1.645, 2],
+      stepMinutes: 2,
+    });
+  }, [coneEnabled, spot, coneMinutesToClose, coneScale]);
+
+  // θ/speed-across-strikes curve: structural edge-ratio curve using the portfolio's
+  // shared move-scale (same coneScale the expected-move cone uses), independent of the
+  // target-level slider. Marks each active spread's short strike on the curve.
+  const thetaCurve = useMemo(() => {
+    if (spot == null) return null;
+    const moveScale = resolveMoveScale(coneScale, minutesToClose);
+    return buildThetaSpeedCurve({ spot, minutesToClose, moveScale });
+  }, [spot, minutesToClose, coneScale]);
 
   const [level, setLevel] = useState<number | null>(null);
   useEffect(() => setLevel(spot), [spot]);
@@ -187,6 +225,17 @@ export function LiveSpreadEstimatorPanel({ holdings, todayEt, refreshing, onRefr
   const sliderMax = Math.max(response.levelMax, activeLevel);
   const portfolioMode = focusedOption == null;
 
+  // Theta totals across the active rows (portfolio in portfolio mode, the one spread
+  // in focus mode). θ/hr scales by contracts; the edge ratio is the contract-weighted blend.
+  const decayPerHourTotal = response.rows.reduce((sum, r) => sum + r.decayNextHourDollars * r.spread.contracts, 0);
+  const speedTotal = response.rows.reduce((sum, r) => sum + r.dollarsPerPointNow * r.spread.contracts, 0);
+  const portfolioThetaPerSpeed = speedTotal > 1e-9 ? decayPerHourTotal / speedTotal : 0;
+  const thetaMarkers: ThetaSpeedMarker[] = response.rows.map((r) => ({
+    strike: r.spread.shortStrike,
+    side: r.spread.side,
+    label: `${r.spread.side === "call_credit" ? "CCS" : "PCS"} ${r.spread.shortStrike}`,
+  }));
+
   return (
     <section style={wrap}>
       <Header asOf={holdings?.fetchedAt} openCount={openOptions.length} totalContracts={portfolioMode ? response.totalContracts : openOptions.reduce((sum, option) => sum + option.spread.contracts, 0)} spot={spot} refreshBtn={refreshBtn} live={live} focusedOption={focusedOption} onClearFocus={() => setFocusedSpreadId(null)} />
@@ -210,9 +259,35 @@ export function LiveSpreadEstimatorPanel({ holdings, todayEt, refreshing, onRefr
             <span style={{ color: "#ef4444" }}>{fmtUsd(worst)}</span> · <span style={{ color: "#22c55e" }}>{fmtUsd(best)}</span>
           </div>
         </div>
+        <div title="Credit that decays in your favor over the next hour if SPX holds (Bachelier theta, clamps into the close). θ/speed = $-to-time per $-at-risk per point.">
+          <div style={muted}>{portfolioMode ? "portfolio" : "spread"} θ/hr · θ/speed</div>
+          <div style={{ fontSize: 13, fontWeight: 600, fontVariantNumeric: "tabular-nums", color: "#86efac" }}>
+            {fmtUsd(decayPerHourTotal)}/hr · {portfolioThetaPerSpeed.toFixed(1)}x
+          </div>
+        </div>
       </div>
 
-      <AggregateChart response={response} level={activeLevel} pnlAtLevel={pnlAtLevel} />
+      {/* The P/L-vs-SPX curve and the SPX 2-min intraday chart sit side by side
+          (they wrap on narrow widths); the target-level slider below drives both. */}
+      <div style={{ display: "flex", gap: 12, marginTop: 10, flexWrap: "wrap", alignItems: "flex-start" }}>
+        <div style={{ flex: "1 1 340px", minWidth: 300 }}>
+          <div style={{ ...muted, fontWeight: 600, marginBottom: 4 }}>{portfolioMode ? "portfolio" : "spread"} P/L vs SPX level</div>
+          <AggregateChart response={response} level={activeLevel} pnlAtLevel={pnlAtLevel} />
+        </div>
+        <div style={{ flex: "1 1 340px", minWidth: 300 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
+            <span style={{ ...muted, fontWeight: 600 }}>SPX intraday · 2m</span>
+            {bars.length > 0 && (
+              <span style={sourceBadge(spxBarsLive ? "#22c55e" : "#9ca3af")}>{spxBarsLive ? "LIVE" : "replay"}</span>
+            )}
+            <SpxFeedButton feed={spxFeed} />
+          </div>
+          {bars.length > 0 && (
+            <ConeControls enabled={coneEnabled} onToggle={() => setConeEnabled((v) => !v)} cone={cone} />
+          )}
+          <EstimatorSpxChart bars={bars} targetLevel={activeLevel} spot={spot} pnlSign={pnlSign} emptyNote={spxBarsEmptyNote(spxFeed)} cone={cone} />
+        </div>
+      </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
         <span style={muted}>target level</span>
@@ -232,18 +307,6 @@ export function LiveSpreadEstimatorPanel({ holdings, todayEt, refreshing, onRefr
         </div>
       </div>
 
-      {/* SPX 2-min chart with a horizontal price line at the slider's target. */}
-      <div style={{ marginTop: 12 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
-          <span style={{ ...muted, fontWeight: 600 }}>SPX intraday · 2m</span>
-          {bars.length > 0 && (
-            <span style={sourceBadge(spxBarsLive ? "#22c55e" : "#9ca3af")}>{spxBarsLive ? "LIVE" : "replay"}</span>
-          )}
-          <SpxFeedButton feed={spxFeed} />
-        </div>
-        <EstimatorSpxChart bars={bars} targetLevel={activeLevel} spot={spot} pnlSign={pnlSign} emptyNote={spxBarsEmptyNote(spxFeed)} />
-      </div>
-
       {/* Per-spread list — shows all openOptions in portfolio mode, or just the focused row in focus mode. */}
       <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
         <div style={{ ...muted, fontWeight: 600 }}>{portfolioMode ? "spreads" : "focused spread"}</div>
@@ -251,12 +314,12 @@ export function LiveSpreadEstimatorPanel({ holdings, todayEt, refreshing, onRefr
           const pnl = interpPnl(row.curve, activeLevel);
           const s = row.spread;
           return (
-            <div key={s.id} style={{ display: "grid", gridTemplateColumns: "1fr auto auto auto", gap: 10, alignItems: "center", padding: "6px 8px", background: "#0a0f1a", border: "1px solid #1f2937", borderRadius: 8 }}>
+            <div key={s.id} style={{ display: "grid", gridTemplateColumns: "1fr auto auto auto auto", gap: 10, alignItems: "center", padding: "6px 8px", background: "#0a0f1a", border: "1px solid #1f2937", borderRadius: 8 }}>
               <div>
                 <div style={{ fontSize: 12, fontWeight: 600, color: s.side === "call_credit" ? "#fca5a5" : "#93c5fd" }}>
                   {s.side === "call_credit" ? "CCS" : "PCS"} {s.shortStrike}/{s.longStrike}
                 </div>
-                <div style={muted}>{s.contracts}x · w{s.width} · credit {s.creditNow != null ? `$${s.creditNow.toFixed(2)}` : "—"}</div>
+                <div style={muted}>{s.contracts}x · w{s.width} · credit {s.creditNow != null ? `$${s.creditNow.toFixed(2)}` : "—"} · θ/spd {row.thetaPerSpeed.toFixed(1)}x</div>
               </div>
               <Sparkline curve={row.curve} level={activeLevel} />
               <div style={{ textAlign: "right" }}>
@@ -267,15 +330,31 @@ export function LiveSpreadEstimatorPanel({ holdings, todayEt, refreshing, onRefr
                 <div style={muted}>$/pt</div>
                 <div style={{ fontSize: 12, fontVariantNumeric: "tabular-nums", color: "#cbd5e1" }}>${Math.round(row.dollarsPerPointNow * s.contracts)}</div>
               </div>
+              <div style={{ textAlign: "right" }} title="Credit that decays in your favor over the next hour if SPX holds (Bachelier theta; clamps into the close)">
+                <div style={muted}>θ/hr</div>
+                <div style={{ fontSize: 12, fontVariantNumeric: "tabular-nums", color: "#86efac" }}>${Math.round(row.decayNextHourDollars * s.contracts)}</div>
+              </div>
             </div>
           );
         })}
       </div>
 
+      {/* θ/speed across strikes — the structural edge-ratio curve, with the active
+          spreads dotted onto it. A graph of where each strike sits, not a per-spread list. */}
+      {thetaCurve && thetaCurve.points.length > 1 && (
+        <div style={{ marginTop: 14 }}>
+          <div style={{ ...muted, fontWeight: 600 }}>θ decay per unit speed across strikes</div>
+          <div style={{ ...muted, marginTop: 2 }}>
+            time-edge ÷ directional risk — higher = more credit decay per $ at risk to a 1pt move. Rises the further OTM the short strike sits.
+          </div>
+          <ThetaSpeedCurvePanel curve={thetaCurve} markers={thetaMarkers} />
+        </div>
+      )}
+
       {selection.unpaired.length > 0 && <UnpairedNote count={selection.unpaired.length} />}
 
       <p style={{ ...muted, marginTop: 8, marginBottom: 0 }}>
-        Self-calibrated from each spread's live credit (Bachelier model), held to ~{Math.round(minutesToClose)}m to close. Aggregate sums all legs and is exact regardless of how legs were paired.
+        Self-calibrated from each spread's live credit (Bachelier model), held to ~{Math.round(minutesToClose)}m to close. Aggregate sums all legs and is exact regardless of how legs were paired. θ/hr = credit decaying in your favor over the next hour if SPX holds — the typical outcome; an adverse move can erase it.
       </p>
     </section>
   );
@@ -499,6 +578,53 @@ function SpxFeedButton({ feed }: { feed?: SpxFeedControl }) {
     >
       {feed.busy ? "Starting…" : "▶ Start SPX feed"}
     </button>
+  );
+}
+
+// Cone on/off pill + legend. The ±1.645σ band is the credit-seller's ~0.05Δ frontier.
+function ConeControls({ enabled, onToggle, cone }: { enabled: boolean; onToggle: () => void; cone: ExpectedMoveCone | null }) {
+  const pill: CSSProperties = {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 5,
+    padding: "2px 8px",
+    borderRadius: 999,
+    border: `1px solid ${enabled ? "#38bdf8" : "#334155"}`,
+    background: enabled ? "#0f243a" : "#0a0f1a",
+    color: enabled ? "#7dd3fc" : "#9ca3af",
+    fontSize: 10.5,
+    fontWeight: 700,
+    cursor: "pointer",
+  };
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4, flexWrap: "wrap" }}>
+      <button type="button" aria-pressed={enabled} onClick={onToggle} style={pill} title="Forward expected-move band from spot to 16:00 ET">
+        <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 2, background: enabled ? "#38bdf8" : "#475569" }} />
+        Expected-move cone
+      </button>
+      {enabled && cone && (
+        <span
+          style={{ ...muted, display: "inline-flex", gap: 9, alignItems: "center", flexWrap: "wrap" }}
+          title={`Gaussian expected move from spot to 16:00 ET (s = r·√t). ±1.645σ ≈ the ~0.05Δ short strike a credit seller targets (one-sided ~5% tail). Width is scaled to ${cone.scaleKind === "implied" ? "today's implied vol, backed out of your live spreads" : "a typical day (no live spreads on screen)"}. Jumps and fat tails breach it more than the nominal rate.`}
+        >
+          <ConeKey color="#38bdf8" label="1σ" />
+          <ConeKey color="#f59e0b" label="1.6σ · 0.05Δ" dashed />
+          <ConeKey color="#94a3b8" label="2σ" />
+          <span style={{ color: "#64748b" }}>
+            ±{Math.round(cone.sAtClose)}pt → close · {cone.scaleKind === "implied" ? "live IV" : "typical day"}
+          </span>
+        </span>
+      )}
+    </div>
+  );
+}
+
+function ConeKey({ color, label, dashed }: { color: string; label: string; dashed?: boolean }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+      <span aria-hidden="true" style={{ width: 14, borderTop: `2px ${dashed ? "dashed" : "solid"} ${color}`, display: "inline-block" }} />
+      <span style={{ color: "#cbd5e1" }}>{label}</span>
+    </span>
   );
 }
 

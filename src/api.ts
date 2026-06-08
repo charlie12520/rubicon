@@ -1,5 +1,6 @@
 import type {
   DesktopAlertResult,
+  DailyOptionPullScope,
   DailySyncStatusResult,
   DailyReviewNote,
   FplIndicatorManifest,
@@ -20,6 +21,7 @@ import type {
   SpxHeatmapPayload,
   SpxLiveBarsLiveStatus,
   SpxLiveBarsPayload,
+  SpxMaContextPayload,
   TrackerSnapshot,
   TradeJournalSnapshotSaveResult,
   TradeReviewFlag,
@@ -82,6 +84,14 @@ export function runDailySync(date = "auto", options: { dryRun?: boolean } = {}):
   });
 }
 
+export function runDailyOptionPull(date: string, scope: DailyOptionPullScope = "failed-or-missing"): Promise<DailySyncStatusResult> {
+  return readJson<DailySyncStatusResult>("/api/daily-sync/options/run", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ date, scope }),
+  });
+}
+
 export function fetchReplay(date: string, tradeId?: string, signal?: AbortSignal): Promise<ReplayPayload> {
   const params = new URLSearchParams({ date });
   if (tradeId) {
@@ -90,8 +100,40 @@ export function fetchReplay(date: string, tradeId?: string, signal?: AbortSignal
   return readJson<ReplayPayload>(`/api/replay?${params.toString()}`, { signal });
 }
 
-export function fetchSpreadSpeed(date: string, signal?: AbortSignal): Promise<SpreadSpeedPayload> {
-  return readJson<SpreadSpeedPayload>(`/api/spread-speed?${new URLSearchParams({ date }).toString()}`, { signal });
+export function fetchSpreadSpeed(
+  date: string,
+  signal?: AbortSignal,
+  options: { fallback?: boolean } = {},
+): Promise<SpreadSpeedPayload> {
+  const params = new URLSearchParams({ date });
+  if (options.fallback) {
+    params.set("fallback", "1");
+  }
+  return readJson<SpreadSpeedPayload>(`/api/spread-speed?${params.toString()}`, { signal });
+}
+
+export function fetchLiveSpreadSpeed(signal?: AbortSignal): Promise<SpreadSpeedPayload> {
+  return readJson<SpreadSpeedPayload>("/api/spread-speed/live", { signal });
+}
+
+export function fetchLiveSpreadSpeedStatus(signal?: AbortSignal): Promise<SpxLiveBarsLiveStatus> {
+  return readJson<SpxLiveBarsLiveStatus>("/api/spread-speed/live/status", { signal });
+}
+
+export function startLiveSpreadSpeed(): Promise<SpxLiveBarsLiveStatus> {
+  return readJson<SpxLiveBarsLiveStatus>("/api/spread-speed/live/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+}
+
+export function stopLiveSpreadSpeed(): Promise<SpxLiveBarsLiveStatus> {
+  return readJson<SpxLiveBarsLiveStatus>("/api/spread-speed/live/stop", { method: "POST" });
+}
+
+export function fetchSpxMaContext(date: string, signal?: AbortSignal): Promise<SpxMaContextPayload> {
+  return readJson<SpxMaContextPayload>(`/api/spx-ma-context?${new URLSearchParams({ date }).toString()}`, { signal });
 }
 
 export function fetchRrgBars(signal?: AbortSignal): Promise<RrgBarsPayload> {
@@ -102,24 +144,45 @@ export function fetchSectorRrgBars(signal?: AbortSignal): Promise<RrgBarsPayload
   return readJson<RrgBarsPayload>("/api/rrg/sectors", { signal });
 }
 
-export function fetchSpxHeatmap(signal?: AbortSignal): Promise<SpxHeatmapPayload> {
-  return readJson<SpxHeatmapPayload>("/api/spx-heatmap", { signal });
+export type HeatmapIndex = "spx" | "qqq";
+
+// Generic per-index heatmap fetchers (/api/{index}-heatmap…). SPX and QQQ share the
+// same payload shape; QQQ's live controls drive the same large-cap feed as SPX.
+export function fetchHeatmap(index: HeatmapIndex, signal?: AbortSignal): Promise<SpxHeatmapPayload> {
+  return readJson<SpxHeatmapPayload>(`/api/${index}-heatmap`, { signal });
 }
 
-export function fetchSpxHeatmapLiveStatus(signal?: AbortSignal): Promise<SpxHeatmapLiveStatus> {
-  return readJson<SpxHeatmapLiveStatus>("/api/spx-heatmap/live/status", { signal });
+export function fetchHeatmapLiveStatus(index: HeatmapIndex, signal?: AbortSignal): Promise<SpxHeatmapLiveStatus> {
+  return readJson<SpxHeatmapLiveStatus>(`/api/${index}-heatmap/live/status`, { signal });
 }
 
-export function startSpxHeatmapLive(): Promise<SpxHeatmapLiveStatus> {
-  return readJson<SpxHeatmapLiveStatus>("/api/spx-heatmap/live/start", {
+export function startHeatmapLive(index: HeatmapIndex): Promise<SpxHeatmapLiveStatus> {
+  return readJson<SpxHeatmapLiveStatus>(`/api/${index}-heatmap/live/start`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({}),
   });
 }
 
+export function stopHeatmapLive(index: HeatmapIndex): Promise<SpxHeatmapLiveStatus> {
+  return readJson<SpxHeatmapLiveStatus>(`/api/${index}-heatmap/live/stop`, { method: "POST" });
+}
+
+// Back-compat SPX-specific wrappers (existing callers).
+export function fetchSpxHeatmap(signal?: AbortSignal): Promise<SpxHeatmapPayload> {
+  return fetchHeatmap("spx", signal);
+}
+
+export function fetchSpxHeatmapLiveStatus(signal?: AbortSignal): Promise<SpxHeatmapLiveStatus> {
+  return fetchHeatmapLiveStatus("spx", signal);
+}
+
+export function startSpxHeatmapLive(): Promise<SpxHeatmapLiveStatus> {
+  return startHeatmapLive("spx");
+}
+
 export function stopSpxHeatmapLive(): Promise<SpxHeatmapLiveStatus> {
-  return readJson<SpxHeatmapLiveStatus>("/api/spx-heatmap/live/stop", { method: "POST" });
+  return stopHeatmapLive("spx");
 }
 
 export function fetchSpxLiveBars(signal?: AbortSignal): Promise<SpxLiveBarsPayload> {

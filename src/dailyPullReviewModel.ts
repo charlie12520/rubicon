@@ -54,8 +54,8 @@ export type DailyPullReviewModelInput = {
   tradeCountsByDate?: Map<string, number>;
 };
 
-const REVIEW_OUTPUT_IDS = new Set(["trade-artifacts", "spx-bars", "spread-marks"]);
-const ARCHIVE_OUTPUT_IDS = new Set(["payload-tabs", "raw-workbook", "upload-receipt"]);
+const REVIEW_OUTPUT_IDS = new Set(["trade-artifacts", "spx-bars", "spread-marks", "option-bars", "open-interest", "volume-profile"]);
+const ARCHIVE_OUTPUT_IDS = new Set(["payload-tabs", "upload-receipt"]);
 
 export function buildDailyPullReviewModel({
   availableDates,
@@ -125,10 +125,10 @@ function buildIssueBuckets(
 ): Record<DailyPullIssueBucketId, DailyPullIssueBucket> {
   const buckets: Record<DailyPullIssueBucketId, DailyPullIssueBucket> = {
     archive: {
-      emptyText: "No archive or upload items need attention.",
+      emptyText: "No upload items need attention.",
       entries: [],
       id: "archive",
-      label: "Archive / Upload",
+      label: "Pipeline / Upload",
       tone: "ok",
     },
     diagnostic: {
@@ -139,7 +139,7 @@ function buildIssueBuckets(
       tone: "ok",
     },
     review: {
-      emptyText: "No review-critical blockers for this date.",
+      emptyText: "No important blockers for this date.",
       entries: [],
       id: "review",
       label: "Review Readiness",
@@ -204,8 +204,11 @@ function coverageImpact(item: DailyPullCoverageItem): string {
   if (item.importance === "core") {
     return item.status === "failed" ? "Review blocker: this core output is required before trusting the date." : "Review caution: core output is present but not fully clean.";
   }
+  if (REVIEW_OUTPUT_IDS.has(item.id)) {
+    return "Important context: this check affects option-chain, OI, or volume confidence even when the core replay is usable.";
+  }
   if (ARCHIVE_OUTPUT_IDS.has(item.id)) {
-    return "Archive only: local review can proceed, but upload/archive confirmation needs attention.";
+    return "Upload only: local review can proceed, but Google tracker confirmation needs attention.";
   }
   return "Diagnostic only: this may affect context breadth, not the core trade/SPX replay.";
 }
@@ -248,7 +251,7 @@ function verdictTitle(verdict: DailyPullReviewVerdict): string {
 
 function verdictSubtitle(verdict: DailyPullReviewVerdict, selectedDate: string, blockerCount: number, cautionCount: number): string {
   if (verdict === "blocked") {
-    return `${selectedDate} is missing ${blockerCount} review-critical output${blockerCount === 1 ? "" : "s"}.`;
+    return `${selectedDate} is missing ${blockerCount} important output${blockerCount === 1 ? "" : "s"}.`;
   }
   if (verdict === "usable_with_caution") {
     return `${selectedDate} core review is available; ${cautionCount || 1} diagnostic item${(cautionCount || 1) === 1 ? "" : "s"} may affect context.`;
@@ -256,7 +259,7 @@ function verdictSubtitle(verdict: DailyPullReviewVerdict, selectedDate: string, 
   if (verdict === "today_in_progress") {
     return `${selectedDate} has a local folder, but usable entries/core replay data are not ready.`;
   }
-  return `${selectedDate} has usable trade files, SPX bars, and traded spread replay marks.`;
+  return `${selectedDate} has usable trade files, SPX bars, replay marks, option chain, OI, and option volume.`;
 }
 
 function tradeCountEntries(tradeCountsByDate: Map<string, number> | undefined): Pick<{ date: string }, "date">[] {

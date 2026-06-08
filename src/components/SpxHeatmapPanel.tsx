@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ChevronLeft, ChevronRight, Pause, Play } from "lucide-react";
 import type { SpxHeatmapLiveStatus, SpxHeatmapPayload, SpxHeatmapTile } from "../../shared/types";
-import { fetchSpxHeatmap, fetchSpxHeatmapLiveStatus, startSpxHeatmapLive, stopSpxHeatmapLive } from "../api";
+import { fetchHeatmap, fetchHeatmapLiveStatus, startHeatmapLive, stopHeatmapLive, type HeatmapIndex } from "../api";
 import { heatmapColor, squarifyTreemap, type Rect } from "../spxTreemap";
+import { industryPeers } from "../heatmapPeers";
+import { windowSigma } from "../sigmaMove";
+import { HEATMAP_TIMEFRAMES, openingGapPct, timeframeDef, windowPct, type HeatmapTimeframe, type HeatmapTimeframeDef } from "../heatmapWindow";
+import { earningsHighlight, type EarningsHighlight } from "../earningsOverlay";
 import "./SpxHeatmap.css";
 
 const VIEW_W = 1000;
@@ -10,6 +14,7 @@ const VIEW_H = 620;
 const SECTOR_HEADER_H = 17; // viewBox units reserved for a sector's name band
 const INDUSTRY_HEADER_H = 12; // smaller band for an industry caption nested inside a sector
 const PLAYBACK_MS = 320;
+const SIGMA_CAP = 2; // colour saturates at ±2σ in the IV-normalized view
 
 type PlacedTile = { tile: SpxHeatmapTile; rect: Rect };
 type SectorBlock = { name: string; rect: Rect; showHeader: boolean };
@@ -20,6 +25,31 @@ function tilePctAt(tile: SpxHeatmapTile, index: number, lastIndex: number): numb
   const value = tile.pctByTime[index];
   if (value === undefined) return index >= lastIndex ? tile.pct : null;
   return value;
+}
+
+// The tile's % over a trailing window of `windowMinutes` ending at `index`. Both
+// endpoints come from tilePctAt (so the sample-mode tile.pct fallback is preserved);
+// the start index is clamped forward to the tile's first printed minute, so a name
+// that began trading mid-window still measures from its first quote. windowMinutes
+// 0 = the whole-day move (unchanged behaviour).
+function tileWindowPctAt(tile: SpxHeatmapTile, index: number, lastIndex: number, windowMinutes: number): number | null {
+  const now = tilePctAt(tile, index, lastIndex);
+  if (windowMinutes <= 0) return now;
+  let start = Math.max(0, index - windowMinutes);
+  let startPct = tilePctAt(tile, start, lastIndex);
+  while (start < index && (startPct === null || !Number.isFinite(startPct))) {
+    start += 1;
+    startPct = tilePctAt(tile, start, lastIndex);
+  }
+  return windowPct(now, startPct);
+}
+
+// The value to colour by for the active timeframe: the opening gap (fixed for the
+// day), the whole-day move (windowMinutes 0), or a trailing-window move ending at
+// `index`.
+function tileTfPct(tile: SpxHeatmapTile, index: number, lastIndex: number, tf: HeatmapTimeframeDef): number | null {
+  if (tf.gap) return openingGapPct(tile.pctByTime);
+  return tileWindowPctAt(tile, index, lastIndex, tf.minutes);
 }
 
 // The latest minute that actually has data — a live mid-session map only runs
@@ -38,6 +68,11 @@ function frontierOf(payload: SpxHeatmapPayload): number {
 function formatPct(pct: number | null | undefined): string {
   if (pct === null || pct === undefined || !Number.isFinite(pct)) return "—";
   return `${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%`;
+}
+
+function formatSigma(sigma: number | null | undefined): string {
+  if (sigma === null || sigma === undefined || !Number.isFinite(sigma)) return "—";
+  return `${sigma >= 0 ? "+" : ""}${sigma.toFixed(1)}σ`;
 }
 
 // Per-character advance (font-size units) for the bold tickers, measured from the
@@ -111,7 +146,8 @@ function tileLabel(rect: Rect, symbol: string): TileLabel {
   };
 }
 
-export function SpxHeatmapPanel() {
+export function SpxHeatmapPanel({ index = "spx" }: { index?: HeatmapIndex } = {}) {
+  const indexLabel = index === "qqq" ? "Nasdaq-100" : "S&P 500";
   const [payload, setPayload] = useState<SpxHeatmapPayload | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [timeIndex, setTimeIndex] = useState(0);
@@ -121,6 +157,12 @@ export function SpxHeatmapPanel() {
   const [liveStatus, setLiveStatus] = useState<SpxHeatmapLiveStatus | null>(null);
   const [followLive, setFollowLive] = useState(true);
   const [liveBusy, setLiveBusy] = useState(false);
+  const [metric, setMetric] = useState<"pct" | "sigma">("pct"); // tile colour: raw % or IV-normalized σ
+  const [timeframe, setTimeframe] = useState<HeatmapTimeframe>("day"); // % vs prior close (Day) or a trailing 1h/30m/5m window
+  const tf = timeframeDef(timeframe);
+  const windowMinutes = tf.minutes;
+  const sigmaMinutes = tf.gap ? 0 : windowMinutes; // gap σ uses the daily scale (the gap is an overnight, daily-scale move)
+  const [earningsOverlay, setEarningsOverlay] = useState(true); // outline earnings names — ON by default
   const [size, setSize] = useState({ w: VIEW_W, h: VIEW_H });
   const idxRef = useRef(0);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -157,8 +199,14 @@ export function SpxHeatmapPanel() {
   // The follow-live effect below re-pins the scrubber to each new frontier.
   useEffect(() => {
     let cancelled = false;
+    // Switching index (SPY↔QQQ) clears the old map so we show a loading state
+    // rather than stale tiles while the new payload arrives.
+    setPayload(null);
+    setLoadError(null);
+    setFocusedSector(null);
+    setHover(null);
     const load = (initial: boolean) => {
-      fetchSpxHeatmap()
+      fetchHeatmap(index)
         .then((next) => {
           if (!cancelled) setPayload(next);
         })
@@ -174,13 +222,13 @@ export function SpxHeatmapPanel() {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, []);
+  }, [index]);
 
   // Poll the live-feed process status for the control strip.
   useEffect(() => {
     let cancelled = false;
     const poll = () => {
-      fetchSpxHeatmapLiveStatus()
+      fetchHeatmapLiveStatus(index)
         .then((status) => !cancelled && setLiveStatus(status))
         .catch(() => undefined);
     };
@@ -192,11 +240,11 @@ export function SpxHeatmapPanel() {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, []);
+  }, [index]);
 
   const reloadHeatmap = useCallback(() => {
-    fetchSpxHeatmap().then(setPayload).catch(() => undefined);
-  }, []);
+    fetchHeatmap(index).then(setPayload).catch(() => undefined);
+  }, [index]);
 
   const runLiveAction = useCallback(
     (action: () => Promise<SpxHeatmapLiveStatus>) => {
@@ -287,7 +335,7 @@ export function SpxHeatmapPanel() {
     let indexDen = 0;
     const sectorAcc = new Map<string, { num: number; den: number }>();
     for (const tile of payload?.tiles ?? []) {
-      const pct = tilePctAt(tile, clampedIndex, lastIndex);
+      const pct = tileTfPct(tile, clampedIndex, lastIndex, tf);
       if (pct === null || !Number.isFinite(pct)) continue;
       if (pct > 0.02) advancers += 1;
       else if (pct < -0.02) decliners += 1;
@@ -307,7 +355,41 @@ export function SpxHeatmapPanel() {
       unchanged,
       indexPct: indexDen > 0 ? indexNum / indexDen : null,
     };
-  }, [payload, clampedIndex, lastIndex]);
+  }, [payload, clampedIndex, lastIndex, tf]);
+
+  // The hovered tile's sub-industry peers (Finviz-style hover detail), heaviest
+  // first; recomputed only when the hovered industry changes, not on cursor move.
+  const hoverPeers = useMemo(
+    () => (payload && hover ? industryPeers(payload.tiles, hover.tile.sector, hover.tile.industry) : []),
+    [payload, hover?.tile.sector, hover?.tile.industry],
+  );
+
+  // Whether the live IBKR sweep has populated any implied vols; gates the σ view.
+  const hasIv = useMemo(
+    () => (payload?.tiles ?? []).some((tile) => tile.iv !== null && Number.isFinite(tile.iv)),
+    [payload],
+  );
+
+  // Earnings-this-week highlight per symbol (before-open counts as the prior day);
+  // recomputed when the payload refetches (~30s), which also refreshes "now".
+  const earningsBySymbol = useMemo(() => {
+    const map = new Map<string, EarningsHighlight>();
+    const now = new Date();
+    for (const tile of payload?.tiles ?? []) {
+      const hl = earningsHighlight(tile.earningsDate, tile.earningsTime, now);
+      if (hl) map.set(tile.symbol, hl);
+    }
+    return map;
+  }, [payload]);
+  const hasEarnings = earningsBySymbol.size > 0;
+  // If IV goes away (feed stopped / backfill-only), drop back to % so the map never
+  // silently greys out while stuck in σ mode.
+  useEffect(() => {
+    // σ needs live IV; if it disappears (feed stopped / backfill-only) drop back to %
+    // so the map never silently greys out while stuck in σ. σ now works on every
+    // timeframe — windowSigma scales the IV denominator to the selected window.
+    if (!hasIv && metric === "sigma") setMetric("pct");
+  }, [hasIv, metric]);
 
   // Playback: walk the minute forward one tick at a time until the close.
   useEffect(() => {
@@ -340,15 +422,15 @@ export function SpxHeatmapPanel() {
   }
 
   if (loadError) {
-    return <section className="heatmap-panel"><div className="heatmap-loading">Could not load the S&P 500 heatmap: {loadError}</div></section>;
+    return <section className="heatmap-panel"><div className="heatmap-loading">Could not load the {indexLabel} heatmap: {loadError}</div></section>;
   }
   if (!payload) {
-    return <section className="heatmap-panel"><div className="heatmap-loading">Loading S&P 500 heatmap…</div></section>;
+    return <section className="heatmap-panel"><div className="heatmap-loading">Loading {indexLabel} heatmap…</div></section>;
   }
   if (payload.tiles.length === 0) {
     return (
       <section className="heatmap-panel">
-        <div className="heatmap-loading">{payload.note ?? "No S&P 500 heatmap data is available yet."}</div>
+        <div className="heatmap-loading">{payload.note ?? `No ${indexLabel} heatmap data is available yet.`}</div>
       </section>
     );
   }
@@ -365,7 +447,7 @@ export function SpxHeatmapPanel() {
     <section className="heatmap-panel">
       <div className="heatmap-head">
         <div>
-          <span className="eyeless-label">S&amp;P 500 Market Map</span>
+          <span className="eyeless-label">{indexLabel} Market Map</span>
           <h2>
             Intraday heatmap
             {focusedSector ? <span className="heatmap-focus-name"> · {focusedSector}</span> : null}
@@ -373,7 +455,7 @@ export function SpxHeatmapPanel() {
         </div>
         <div className="heatmap-meta">
           <span className={`heatmap-index ${(frame.indexPct ?? 0) >= 0 ? "up" : "down"}`}>
-            {payload.index?.label ?? "S&P 500"} <b>{formatPct(frame.indexPct)}</b>
+            {payload.index?.label ?? indexLabel} <b>{formatPct(frame.indexPct)}</b>
           </span>
           <span className="heatmap-breadth">
             <b className="up">{frame.advancers}</b> adv · <b className="down">{frame.decliners}</b> dec
@@ -400,7 +482,7 @@ export function SpxHeatmapPanel() {
               onClick={() => setFocusedSector(active ? null : sector.name)}
               title={`${sector.name} · ${sector.count} names · ${sector.weight.toFixed(1)}% of index`}
             >
-              <span className="heatmap-chip-dot" style={{ background: heatmapColor(pct) }} />
+              <span className="heatmap-chip-dot" style={{ background: heatmapColor(pct, tf.cap) }} />
               {sector.name}
               <b className={pct >= 0 ? "up" : "down"}>{formatPct(pct)}</b>
             </button>
@@ -414,7 +496,7 @@ export function SpxHeatmapPanel() {
           IBKR feed: <b>{liveStatus?.running ? "running" : "off"}</b>
         </span>
         {liveStatus?.running ? (
-          <button type="button" className="heatmap-live-btn" disabled={liveBusy} onClick={() => runLiveAction(stopSpxHeatmapLive)}>
+          <button type="button" className="heatmap-live-btn" disabled={liveBusy} onClick={() => runLiveAction(() => stopHeatmapLive(index))}>
             Stop feed
           </button>
         ) : (
@@ -430,7 +512,7 @@ export function SpxHeatmapPanel() {
                     ? "refresh-spx-heatmap.py not found"
                     : "Start the per-minute IBKR snapshot feed (backfills today from Yahoo immediately)"
               }
-              onClick={() => runLiveAction(startSpxHeatmapLive)}
+              onClick={() => runLiveAction(() => startHeatmapLive(index))}
             >
               {liveBusy ? "Starting…" : "Start feed"}
             </button>
@@ -466,7 +548,8 @@ export function SpxHeatmapPanel() {
           onMouseLeave={() => setHover(null)}
         >
           {layout.tiles.map(({ tile, rect }) => {
-            const pct = tilePctAt(tile, clampedIndex, lastIndex);
+            const pct = tileTfPct(tile, clampedIndex, lastIndex, tf);
+            const shade = metric === "sigma" ? windowSigma(pct, tile.iv, sigmaMinutes) : pct;
             const label = tileLabel(rect, tile.symbol);
             const cx = rect.x + rect.w / 2;
             return (
@@ -482,7 +565,7 @@ export function SpxHeatmapPanel() {
                   y={rect.y}
                   width={Math.max(0, rect.w)}
                   height={Math.max(0, rect.h)}
-                  fill={heatmapColor(pct)}
+                  fill={heatmapColor(shade, metric === "sigma" ? SIGMA_CAP : tf.cap)}
                   stroke="#0b0e14"
                   strokeWidth={0.6}
                 />
@@ -493,7 +576,7 @@ export function SpxHeatmapPanel() {
                 )}
                 {label.showPct && (
                   <text x={cx} y={label.pctY} fontSize={label.pf} className="heatmap-tile-pct">
-                    {formatPct(pct)}
+                    {metric === "sigma" ? formatSigma(shade) : formatPct(pct)}
                   </text>
                 )}
               </g>
@@ -554,29 +637,97 @@ export function SpxHeatmapPanel() {
               pointerEvents="none"
             />
           ))}
+
+          {earningsOverlay &&
+            layout.tiles.map(({ tile, rect }) => {
+              const hl = earningsBySymbol.get(tile.symbol);
+              if (!hl?.inWindow) return null;
+              const inset = 0.6;
+              return (
+                <rect
+                  key={`earn-${tile.symbol}`}
+                  x={rect.x + inset}
+                  y={rect.y + inset}
+                  width={Math.max(0, rect.w - inset * 2)}
+                  height={Math.max(0, rect.h - inset * 2)}
+                  fill="#60a5fa"
+                  fillOpacity={0.05 + hl.intensity * 0.12}
+                  stroke="#60a5fa"
+                  strokeWidth={1 + hl.intensity * 2.5}
+                  strokeOpacity={0.45 + hl.intensity * 0.55}
+                  pointerEvents="none"
+                />
+              );
+            })}
         </svg>
 
-        {hover && (
-          <div className="heatmap-tooltip" style={{ left: hover.x + 14, top: hover.y + 14 }}>
-            <div className="heatmap-tooltip-head">
-              <b>{hover.tile.symbol}</b>
-              <span className={(tilePctAt(hover.tile, clampedIndex, lastIndex) ?? 0) >= 0 ? "up" : "down"}>
-                {formatPct(tilePctAt(hover.tile, clampedIndex, lastIndex))}
-              </span>
-            </div>
-            <div className="heatmap-tooltip-name">{hover.tile.name}</div>
-            <div className="heatmap-tooltip-row">
-              <span>{hover.tile.sector} · {hover.tile.industry}</span>
-              <span>{hover.tile.weight.toFixed(2)}% wt</span>
-            </div>
-            {hover.tile.last !== null && (
-              <div className="heatmap-tooltip-row">
-                <span>Last {hover.tile.last.toFixed(2)}</span>
-                {hover.tile.prevClose !== null && <span>Prev {hover.tile.prevClose.toFixed(2)}</span>}
+        {hover && (() => {
+          // Keep the panel on-screen without measuring it: flip left near the
+          // right edge, and anchor it ABOVE the cursor in the lower half of the
+          // screen (growing upward) so a long industry list never runs off the
+          // bottom. Height is capped to the space available in the chosen direction.
+          const TIP_W = 256;
+          const MARGIN = 8;
+          const left = hover.x + 14 + TIP_W > window.innerWidth ? Math.max(MARGIN, hover.x - TIP_W - 14) : hover.x + 14;
+          const flipUp = hover.y > window.innerHeight * 0.5;
+          const vStyle = flipUp
+            ? { bottom: Math.round(window.innerHeight - hover.y + 14) }
+            : { top: Math.round(hover.y + 14) };
+          const maxHeight = Math.max(140, Math.round((flipUp ? hover.y - 14 : window.innerHeight - hover.y - 14) - MARGIN));
+          const headPct = tileTfPct(hover.tile, clampedIndex, lastIndex, tf);
+          return (
+            <div className="heatmap-tooltip" style={{ left, ...vStyle, maxHeight }}>
+              <div className="heatmap-tooltip-head">
+                <b>{hover.tile.symbol}</b>
+                <span className={(headPct ?? 0) >= 0 ? "up" : "down"}>{formatPct(headPct)}</span>
               </div>
-            )}
-          </div>
-        )}
+              <div className="heatmap-tooltip-name">{hover.tile.name}</div>
+              <div className="heatmap-tooltip-row">
+                <span>{hover.tile.sector}</span>
+                {hover.tile.last !== null && <span>Last {hover.tile.last.toFixed(2)}</span>}
+              </div>
+              {hover.tile.iv !== null && (
+                <div className="heatmap-tooltip-row">
+                  <span>IV {Math.round(hover.tile.iv * 100)}%</span>
+                  <span>σ {formatSigma(windowSigma(headPct, hover.tile.iv, sigmaMinutes))}</span>
+                </div>
+              )}
+              {hover.tile.earningsDate && (
+                <div className="heatmap-tooltip-row">
+                  <span>
+                    Earnings {hover.tile.earningsDate}
+                    {hover.tile.earningsTime === "before-open" ? " BMO" : hover.tile.earningsTime === "after-close" ? " AMC" : ""}
+                  </span>
+                  {(() => {
+                    const earn = earningsBySymbol.get(hover.tile.symbol);
+                    return earn?.inWindow ? (
+                      <span className="heatmap-earn-flag">{earn.daysUntil === 0 ? "today" : `in ${earn.daysUntil}d`}</span>
+                    ) : null;
+                  })()}
+                </div>
+              )}
+              <div className="heatmap-tooltip-industry">
+                {hover.tile.industry} · {hoverPeers.length}
+              </div>
+              <div className="heatmap-tooltip-peers">
+                {hoverPeers.map((peer) => {
+                  const pct = tileTfPct(peer, clampedIndex, lastIndex, tf);
+                  const shade = metric === "sigma" ? windowSigma(pct, peer.iv, sigmaMinutes) : pct;
+                  return (
+                    <div key={peer.symbol} className={`heatmap-peer${peer.symbol === hover.tile.symbol ? " current" : ""}`}>
+                      <span className="heatmap-peer-dot" style={{ background: heatmapColor(shade, metric === "sigma" ? SIGMA_CAP : tf.cap) }} />
+                      <span className="heatmap-peer-sym">{peer.symbol}</span>
+                      {peer.last !== null && <span className="heatmap-peer-last">{peer.last.toFixed(2)}</span>}
+                      <span className={`heatmap-peer-pct ${(shade ?? 0) >= 0 ? "up" : "down"}`}>
+                        {metric === "sigma" ? formatSigma(shade) : formatPct(pct)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
         </div>
       </div>
 
@@ -609,10 +760,51 @@ export function SpxHeatmapPanel() {
           {currentTime}
           {times.length > 0 && <small> · {clampedIndex + 1}/{lastIndex + 1}</small>}
         </span>
+        <div className="heatmap-timeframe-toggle" role="group" aria-label="Timeframe">
+          {HEATMAP_TIMEFRAMES.map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              className={timeframe === t.key ? "active" : ""}
+              onClick={() => setTimeframe(t.key)}
+              title={t.gap ? "opening gap — % from the prior close to the open (fixed for the day)" : t.key === "day" ? "% change vs prior close (full day)" : `% change over the last ${t.label}`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <div className="heatmap-metric-toggle" role="group" aria-label="Tile colour metric">
+          <button type="button" className={metric === "pct" ? "active" : ""} onClick={() => setMetric("pct")} title="Colour by raw daily % change">
+            %
+          </button>
+          <button
+            type="button"
+            className={metric === "sigma" ? "active" : ""}
+            onClick={() => setMetric("sigma")}
+            disabled={!hasIv}
+            title={hasIv ? "Colour by IV-normalized move — standard deviations over the selected timeframe" : "σ needs live IV — start the IBKR feed and wait for the first sweep"}
+          >
+            σ
+          </button>
+        </div>
+        <button
+          type="button"
+          className={`heatmap-overlay-toggle${earningsOverlay ? " active" : ""}`}
+          onClick={() => setEarningsOverlay((value) => !value)}
+          disabled={!hasEarnings}
+          aria-pressed={earningsOverlay}
+          title={
+            hasEarnings
+              ? "Outline names with earnings in the next ~2 weeks (brighter = sooner; before-open counts as the prior day)"
+              : "No earnings data yet — it loads with the live feed"
+          }
+        >
+          <span className="heatmap-overlay-dot" aria-hidden="true" /> Earnings
+        </button>
         <div className="heatmap-legend" aria-hidden="true">
-          <span>-3%</span>
+          <span>{metric === "sigma" ? "−2σ" : `-${tf.cap}%`}</span>
           <span className="heatmap-legend-bar" />
-          <span>+3%</span>
+          <span>{metric === "sigma" ? "+2σ" : `+${tf.cap}%`}</span>
         </div>
       </div>
 

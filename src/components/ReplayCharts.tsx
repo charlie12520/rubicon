@@ -1,7 +1,10 @@
 import { useMemo, useState } from "react";
 import type { OpenInterestPoint, ReplayPayload, SpxBar, SpreadMark, SpreadRangeBar, TradeRecord, VolumePoint } from "../../shared/types";
+import { resampleBars } from "../../shared/resampleBars";
 import { MarketChart } from "./MarketChart";
 import { formatNumber } from "../format";
+import { buildWarmedCheatOverlays } from "../movingAverages";
+import { useSpxMaContext } from "../useSpxMaContext";
 import { nearestPoint, pointValue, tradeBoundaryEvents } from "../tradeChartEvents";
 
 type VolumeMode = "both" | "calls" | "puts" | "split";
@@ -10,27 +13,55 @@ type SpreadChartMode = "hl" | "line";
 type ReplayChartsProps = {
   replay: ReplayPayload | null;
   selectedTrade: TradeRecord | null;
+  selectedTrades?: TradeRecord[];
+  selectionLabel?: string;
   replayIndex: number;
   replayMode: boolean;
 };
 
-export function ReplayCharts({ replay, replayIndex, replayMode, selectedTrade }: ReplayChartsProps) {
+const SPX_TIMEFRAME_OPTIONS = [2, 5] as const;
+type SpxTimeframe = (typeof SPX_TIMEFRAME_OPTIONS)[number];
+const DEFAULT_SPX_TIMEFRAME: SpxTimeframe = 2;
+
+export function ReplayCharts({ replay, replayIndex, replayMode, selectedTrade, selectedTrades, selectionLabel }: ReplayChartsProps) {
   const [volumeMode, setVolumeMode] = useState<VolumeMode>("both");
   const [spreadChartMode, setSpreadChartMode] = useState<SpreadChartMode>("line");
+  const [timeframe, setTimeframe] = useState<SpxTimeframe>(DEFAULT_SPX_TIMEFRAME);
+  const [cheatCode, setCheatCode] = useState(false);
 
   const currentTime = replayCutoffTime(replay, replayIndex, replayMode);
+  const chartTrades = useMemo(
+    () => selectedTrades?.length ? selectedTrades : selectedTrade ? [selectedTrade] : [],
+    [selectedTrade, selectedTrades],
+  );
+  const chartTradeIds = useMemo(() => new Set(chartTrades.map((trade) => trade.id)), [chartTrades]);
+  const spreadTitle = chartTrades.length ? selectionLabel ?? selectedTrade?.strategy ?? "Selected Spread" : "Selected Spread";
   const visibleSpx = useMemo(() => takeThrough(replay?.spxBars ?? [], currentTime), [currentTime, replay]);
+  const displaySpx = useMemo(() => aggregateSpxBars(visibleSpx, timeframe), [visibleSpx, timeframe]);
   const visibleSpread = useMemo(
-    () => takeThrough((replay?.spreadMarks ?? []).filter((mark) => mark.tradeId === selectedTrade?.id), currentTime),
-    [currentTime, replay, selectedTrade],
+    () => takeThrough(buildSelectedSpreadMarks(replay?.spreadMarks ?? [], chartTradeIds), currentTime),
+    [chartTradeIds, currentTime, replay],
   );
   const visibleSpreadBars = useMemo(() => buildSpreadRangeBars(visibleSpread), [visibleSpread]);
   const oiData = useMemo(() => buildOiData(replay?.openInterest ?? []), [replay]);
   const volumeData = useMemo(() => buildVolumeProfile(replay?.volume ?? [], currentTime), [currentTime, replay]);
-  const spxEvents = useMemo(() => tradeEvents(selectedTrade, currentTime, "spx", visibleSpx), [currentTime, selectedTrade, visibleSpx]);
+  const spxEvents = useMemo(() => tradeEvents(chartTrades, currentTime, "spx", displaySpx), [chartTrades, currentTime, displaySpx]);
   const spreadEvents = useMemo(
-    () => tradeEvents(selectedTrade, currentTime, "spread", visibleSpread),
-    [currentTime, selectedTrade, visibleSpread],
+    () => tradeEvents(chartTrades, currentTime, "spread", visibleSpread),
+    [chartTrades, currentTime, visibleSpread],
+  );
+  // Multi-day warmup closes (prior sessions) so a 200 EMA/SMA is genuinely full
+  // period on every timeframe instead of a partial average of the visible session.
+  const maContext = useSpxMaContext(replay?.date ?? null, cheatCode);
+  const spxOverlays = useMemo(
+    () =>
+      cheatCode
+        ? buildWarmedCheatOverlays(
+            displaySpx.map((bar) => ({ time: bar.time, close: bar.close })),
+            maContext?.byInterval[String(timeframe)] ?? [],
+          )
+        : [],
+    [cheatCode, displaySpx, maContext, timeframe],
   );
 
   if (!replay) {
@@ -38,46 +69,81 @@ export function ReplayCharts({ replay, replayIndex, replayMode, selectedTrade }:
   }
 
   return (
-    <div className="replay-grid">
-      <MarketChart kind="candles" data={visibleSpx} title="SPX Intraday" accent="#2dd4bf" events={spxEvents} />
-      {spreadChartMode === "hl" ? (
+    <div className="replay-charts">
+      <div className="replay-grid">
         <MarketChart
-          kind="spread-bars"
-          data={visibleSpreadBars}
-          title={selectedTrade ? selectedTrade.strategy : "Selected Spread"}
-          accent="#f59e0b"
-          events={spreadEvents}
-          toolbar={<SpreadChartToggle mode={spreadChartMode} onChange={setSpreadChartMode} />}
+          kind="candles"
+          data={displaySpx}
+          title={`SPX Intraday - ${timeframe}m`}
+          accent="#2dd4bf"
+          events={spxEvents}
+          overlays={spxOverlays}
+          toolbar={<SpxChartControls cheatCode={cheatCode} onTimeframeChange={setTimeframe} onToggleCheat={() => setCheatCode((enabled) => !enabled)} timeframe={timeframe} />}
         />
-      ) : (
-        <MarketChart
-          kind="line"
-          data={visibleSpread}
-          title={selectedTrade ? selectedTrade.strategy : "Selected Spread"}
-          accent="#f59e0b"
-          events={spreadEvents}
-          toolbar={<SpreadChartToggle mode={spreadChartMode} onChange={setSpreadChartMode} />}
-        />
-      )}
-      <section className="chart-panel">
-        <div className="panel-title">
-          <span>0DTE Open Interest</span>
-        </div>
-        <ProfileChart data={oiData} mode="both" label="0DTE open interest by strike" />
-      </section>
-      <section className="chart-panel">
-        <div className="panel-title">
-          <span>Volume Profile</span>
-          <div className="micro-segment" role="group" aria-label="Volume side">
-            {(["both", "split", "calls", "puts"] as VolumeMode[]).map((mode) => (
-              <button className={volumeMode === mode ? "active" : ""} key={mode} onClick={() => setVolumeMode(mode)} type="button">
-                {mode}
-              </button>
-            ))}
+        {spreadChartMode === "hl" ? (
+          <MarketChart
+            kind="spread-bars"
+            data={visibleSpreadBars}
+            title={spreadTitle}
+            accent="#f59e0b"
+            events={spreadEvents}
+            toolbar={<SpreadChartToggle mode={spreadChartMode} onChange={setSpreadChartMode} />}
+          />
+        ) : (
+          <MarketChart
+            kind="line"
+            data={visibleSpread}
+            title={spreadTitle}
+            accent="#f59e0b"
+            events={spreadEvents}
+            toolbar={<SpreadChartToggle mode={spreadChartMode} onChange={setSpreadChartMode} />}
+          />
+        )}
+        <section className="chart-panel">
+          <div className="panel-title">
+            <span>0DTE Open Interest</span>
           </div>
-        </div>
-        <ProfileChart data={volumeData.map((point) => ({ ...point, label: String(point.strike) }))} mode={volumeMode} label="0DTE volume profile by strike" />
-      </section>
+          <ProfileChart data={oiData} mode="both" label="0DTE open interest by strike" />
+        </section>
+        <section className="chart-panel">
+          <div className="panel-title">
+            <span>Volume Profile</span>
+            <div className="micro-segment" role="group" aria-label="Volume side">
+              {(["both", "split", "calls", "puts"] as VolumeMode[]).map((mode) => (
+                <button className={volumeMode === mode ? "active" : ""} key={mode} onClick={() => setVolumeMode(mode)} type="button">
+                  {mode}
+                </button>
+              ))}
+            </div>
+          </div>
+          <ProfileChart data={volumeData.map((point) => ({ ...point, label: String(point.strike) }))} mode={volumeMode} label="0DTE volume profile by strike" />
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function SpxChartControls({
+  cheatCode,
+  onTimeframeChange,
+  onToggleCheat,
+  timeframe,
+}: {
+  cheatCode: boolean;
+  onTimeframeChange: (timeframe: SpxTimeframe) => void;
+  onToggleCheat: () => void;
+  timeframe: SpxTimeframe;
+}) {
+  return (
+    <div className="micro-segment" role="group" aria-label="SPX intraday controls">
+      {SPX_TIMEFRAME_OPTIONS.map((option) => (
+        <button aria-pressed={timeframe === option} className={timeframe === option ? "active" : ""} key={option} onClick={() => onTimeframeChange(option)} type="button">
+          {option}m
+        </button>
+      ))}
+      <button aria-pressed={cheatCode} className={cheatCode ? "active" : ""} onClick={onToggleCheat} title="Toggle cheat-code moving averages" type="button">
+        CC
+      </button>
     </div>
   );
 }
@@ -97,41 +163,71 @@ function SpreadChartToggle({ mode, onChange }: { mode: SpreadChartMode; onChange
 type TradeChartEvent = {
   kind: "entry" | "exit";
   label: string;
+  lane?: number;
   time: number;
   value: number | null;
 };
 
 function tradeEvents(
-  selectedTrade: TradeRecord | null,
+  selectedTrades: TradeRecord[],
   currentTime: number,
   chartKind: "spx" | "spread",
   visibleData: Array<SpxBar | SpreadMark>,
 ): TradeChartEvent[] {
-  if (!selectedTrade) {
+  if (!selectedTrades.length) {
     return [];
   }
   const events: TradeChartEvent[] = [];
+  const grouped = selectedTrades.length > 1;
 
-  for (const boundary of tradeBoundaryEvents(selectedTrade, { includeSyntheticExpirationExit: true })) {
-    if (boundary.time > currentTime) {
-      continue;
+  selectedTrades.forEach((trade, tradeIndex) => {
+    for (const boundary of tradeBoundaryEvents(trade, { includeSyntheticExpirationExit: true })) {
+      if (boundary.time > currentTime) {
+        continue;
+      }
+      const matchedPoint = nearestPoint(visibleData, boundary.time);
+      events.push({
+        kind: boundary.kind,
+        label: replayEventLabel(boundary.kind, boundary.timeLabel, tradeIndex, grouped),
+        lane: grouped ? tradeIndex % 2 : 0,
+        time: matchedPoint?.time ?? boundary.time,
+        value: chartKind === "spx"
+          ? boundary.kind === "entry"
+            ? trade.spxEntry ?? pointValue(matchedPoint)
+            : trade.spxExit ?? pointValue(matchedPoint)
+          : boundary.kind === "entry"
+            ? trade.entryPrice
+            : trade.exitPrice ?? pointValue(matchedPoint),
+      });
     }
-    const matchedPoint = nearestPoint(visibleData, boundary.time);
-    events.push({
-      kind: boundary.kind,
-      label: `${boundary.kind === "entry" ? "Entry" : "Exit"} ${boundary.timeLabel}`,
-      time: matchedPoint?.time ?? boundary.time,
-      value: chartKind === "spx"
-        ? boundary.kind === "entry"
-          ? selectedTrade.spxEntry ?? pointValue(matchedPoint)
-          : selectedTrade.spxExit ?? pointValue(matchedPoint)
-        : boundary.kind === "entry"
-          ? selectedTrade.entryPrice
-          : selectedTrade.exitPrice ?? pointValue(matchedPoint),
-    });
-  }
+  });
 
   return events;
+}
+
+export function replayEventLabel(kind: "entry" | "exit", timeLabel: string, tradeIndex: number, grouped: boolean): string {
+  if (grouped) {
+    return `${kind === "entry" ? "E" : "X"}${tradeIndex + 1} ${timeLabel}`;
+  }
+  return `${kind === "entry" ? "Entry" : "Exit"} ${timeLabel}`;
+}
+
+export function buildSelectedSpreadMarks(spreadMarks: SpreadMark[], selectedTradeIds: Set<string>): SpreadMark[] {
+  if (!selectedTradeIds.size) {
+    return [];
+  }
+  const selectedMarks = spreadMarks.filter((mark) => selectedTradeIds.has(mark.tradeId));
+  if (selectedTradeIds.size <= 1) {
+    return selectedMarks;
+  }
+
+  const marksByTime = new Map<number, SpreadMark>();
+  for (const mark of selectedMarks) {
+    if (!marksByTime.has(mark.time)) {
+      marksByTime.set(mark.time, mark);
+    }
+  }
+  return Array.from(marksByTime.values()).sort((a, b) => a.time - b.time);
 }
 
 export function buildSpreadRangeBars(marks: SpreadMark[]): SpreadRangeBar[] {
@@ -321,6 +417,15 @@ export function replayCutoffTime(replay: ReplayPayload | null, replayIndex: numb
 
 export function takeThrough<T extends { time: number }>(items: T[], time: number): T[] {
   return items.filter((item) => item.time <= time);
+}
+
+/**
+ * Aggregate 1-minute SPX bars into `minutes`-minute OHLC candles for display.
+ * Thin wrapper around the shared resampler (used by the Daily Review chart and the
+ * server warmup feed too) so every surface buckets identically.
+ */
+export function aggregateSpxBars(bars: SpxBar[], minutes: number): SpxBar[] {
+  return resampleBars(bars, minutes);
 }
 
 function buildOiData(points: OpenInterestPoint[]): Array<{ label: string; strike: number; calls: number; puts: number }> {

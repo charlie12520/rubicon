@@ -13,31 +13,35 @@ function status(overrides: Partial<DailySyncStatusResult>): DailySyncStatusResul
 }
 
 describe("daily sync completion refresh decisions", () => {
-  it("keys completed syncs by finish time and latest summary date", () => {
+  it("keys completed pipeline runs by finish time, target date, and run id", () => {
     expect(
       dailySyncCompletionRefreshKey(
         status({
           finishedAt: "2026-06-02T20:30:00.000Z",
           latestSummary: { date: "2026-06-01", entryCount: 22, fillCount: 75, path: "daily_sync_summary.json", spreadCount: 31 },
+          runId: "daily-2026-06-01-a",
           state: "completed",
+          targetDate: "2026-06-01",
         }),
       ),
-    ).toBe("2026-06-02T20:30:00.000Z|2026-06-01");
+    ).toBe("2026-06-02T20:30:00.000Z|2026-06-01|daily-2026-06-01-a");
   });
 
   it("refreshes the tracker once when polling observes a new completed sync", () => {
     const completed = status({
       finishedAt: "2026-06-02T20:30:00.000Z",
       latestSummary: { date: "2026-06-01", entryCount: 22, fillCount: 75, path: "daily_sync_summary.json", spreadCount: 31 },
+      runId: "daily-2026-06-01-a",
       state: "completed",
+      targetDate: "2026-06-01",
     });
 
     expect(shouldRefreshTrackerAfterDailySyncStatus(null, completed)).toEqual({
-      nextKey: "2026-06-02T20:30:00.000Z|2026-06-01",
+      nextKey: "2026-06-02T20:30:00.000Z|2026-06-01|daily-2026-06-01-a",
       shouldRefresh: true,
     });
-    expect(shouldRefreshTrackerAfterDailySyncStatus("2026-06-02T20:30:00.000Z|2026-06-01", completed)).toEqual({
-      nextKey: "2026-06-02T20:30:00.000Z|2026-06-01",
+    expect(shouldRefreshTrackerAfterDailySyncStatus("2026-06-02T20:30:00.000Z|2026-06-01|daily-2026-06-01-a", completed)).toEqual({
+      nextKey: "2026-06-02T20:30:00.000Z|2026-06-01|daily-2026-06-01-a",
       shouldRefresh: false,
     });
   });

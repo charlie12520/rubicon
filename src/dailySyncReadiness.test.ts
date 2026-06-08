@@ -4,17 +4,17 @@ import { buildDailySyncReadiness } from "./dailySyncReadiness";
 
 function status(overrides: Partial<DailySyncStatusResult> = {}): DailySyncStatusResult {
   return {
-    generatedAt: "2026-05-29T19:54:00.000Z",
-    message: "Daily SPX/IBKR sync is idle.",
+    generatedAt: "2026-05-29T10:54:00.000Z",
+    message: "Daily pipeline is idle.",
     ok: true,
     state: "idle",
     targetPlan: {
       afterCutoff: false,
-      cutoffTimeEt: "16:25",
+      cutoffTimeEt: "07:00",
       estimatedTargetDate: "2026-05-28",
       mode: "auto",
       note: "Auto mode is estimated to target the previous session.",
-      nowEt: "2026-05-29 15:54 ET",
+      nowEt: "2026-05-29 06:54 ET",
       requestedDate: "auto",
     },
     ...overrides,
@@ -26,10 +26,10 @@ describe("daily sync readiness", () => {
     const readiness = buildDailySyncReadiness(status(), "2026-05-29", "2026-05-28");
 
     expect(readiness.tone).toBe("warning");
-    expect(readiness.label).toBe("Same-day sync opens at 16:25 ET");
+    expect(readiness.label).toBe("Same-day pipeline opens at 07:00 ET");
     expect(readiness.detail).toContain("Auto is still targeting 2026-05-28");
-    expect(readiness.detail).toContain("2026-05-29 sync opens after 16:25 ET");
-    expect(readiness.detail).toContain("about 31 minutes from now");
+    expect(readiness.detail).toContain("2026-05-29 pipeline opens after 07:00 ET");
+    expect(readiness.detail).toContain("about 6 minutes from now");
   });
 
   it("marks today ready after auto targets today", () => {
@@ -37,11 +37,11 @@ describe("daily sync readiness", () => {
       status({
         targetPlan: {
           afterCutoff: true,
-          cutoffTimeEt: "16:25",
+          cutoffTimeEt: "07:00",
           estimatedTargetDate: "2026-05-29",
           mode: "auto",
           note: "Auto mode is estimated to target today's session.",
-          nowEt: "2026-05-29 16:30 ET",
+          nowEt: "2026-05-29 07:30 ET",
           requestedDate: "auto",
         },
       }),
@@ -50,7 +50,7 @@ describe("daily sync readiness", () => {
     );
 
     expect(readiness.tone).toBe("ok");
-    expect(readiness.label).toBe("Today sync ready");
+    expect(readiness.label).toBe("Today pipeline ready");
     expect(readiness.detail).toContain("Auto is targeting today's archive 2026-05-29");
   });
 

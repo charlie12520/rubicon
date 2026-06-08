@@ -31,6 +31,15 @@ function sanitizePctSeries(value: unknown, length: number): (number | null)[] {
   return series.concat(new Array(length - series.length).fill(null));
 }
 
+function sanitizeYmd(value: unknown): string | null {
+  const text = asString(value).trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : null;
+}
+
+function sanitizeEarningsTime(value: unknown): "before-open" | "after-close" | "not-supplied" | null {
+  return value === "before-open" || value === "after-close" || value === "not-supplied" ? value : null;
+}
+
 function sanitizeTile(value: unknown, timeCount: number): SpxHeatmapTile | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
@@ -47,10 +56,16 @@ function sanitizeTile(value: unknown, timeCount: number): SpxHeatmapTile | null 
     prevClose: finiteOrNull(record.prevClose),
     pct: finiteOrNull(record.pct),
     pctByTime: sanitizePctSeries(record.pctByTime, timeCount),
+    iv: finiteOrNull(record.iv), // annualized ATM IV from the live IBKR sweep; null otherwise
+    earningsDate: sanitizeYmd(record.earningsDate),
+    earningsTime: sanitizeEarningsTime(record.earningsTime),
   };
 }
 
 const CLASSIFICATION_FILE = "finviz-classification.json";
+// Auto-generated overlay: index members the reconciler placed by sector (industry =
+// "Unclassified" until hand-curated). Merged UNDER the base file (base always wins).
+const CLASSIFICATION_AUTO_FILE = "heatmap-classification-auto.json";
 
 // Finviz renders Alphabet, Fox and News Corp as a single weight-summed tile even
 // though SPY holds two share classes each; fold the second class into the first.
@@ -90,13 +105,25 @@ export function parseClassification(raw: string): SpxClassification {
   return map;
 }
 
-async function loadClassification(appRoot: string): Promise<SpxClassification> {
+async function readClassificationFile(appRoot: string, file: string): Promise<SpxClassification> {
   try {
-    const raw = await fs.readFile(path.join(appRoot, "data", CLASSIFICATION_FILE), "utf8");
-    return parseClassification(raw);
+    return parseClassification(await fs.readFile(path.join(appRoot, "data", file), "utf8"));
   } catch {
     return new Map();
   }
+}
+
+// Merge the hand-curated base taxonomy with the auto-generated overlay (new index
+// members the reconciler placed by sector). BASE WINS: a hand-classified entry in
+// finviz-classification.json always overrides the auto "Unclassified" placement.
+export async function loadClassificationMerged(appRoot: string): Promise<SpxClassification> {
+  const [base, auto] = await Promise.all([
+    readClassificationFile(appRoot, CLASSIFICATION_FILE),
+    readClassificationFile(appRoot, CLASSIFICATION_AUTO_FILE),
+  ]);
+  const merged: SpxClassification = new Map(auto); // auto first (fills gaps)
+  for (const [key, value] of base) merged.set(key, value); // base overrides
+  return merged;
 }
 
 // Weight-weighted blend of two %-change readings; either may be null/absent.
@@ -193,6 +220,44 @@ export function computeSectors(tiles: SpxHeatmapTile[]): SpxHeatmapSector[] {
     .sort((a, b) => b.weight - a.weight);
 }
 
+// Carry each tile's last non-null pctByTime value forward across INTERIOR null
+// minutes (between the tile's first print and the global frontier — the last
+// minute any tile has data). The live feed skips a whole minute when the per-stock
+// IV sweep overruns the minute boundary, leaving every tile null for that minute
+// so the map renders fully grey; carrying the prior minute's value forward (≤1-min
+// stale = imperceptible) shows it correctly instead. Leading nulls (name not yet
+// printed) and trailing nulls (future minutes past the frontier) are left untouched.
+export function forwardFillTileSeries(tiles: SpxHeatmapTile[]): SpxHeatmapTile[] {
+  let frontier = -1;
+  for (const tile of tiles) {
+    for (let i = tile.pctByTime.length - 1; i >= 0; i -= 1) {
+      const value = tile.pctByTime[i];
+      if (value !== null && value !== undefined) {
+        if (i > frontier) frontier = i;
+        break;
+      }
+    }
+  }
+  if (frontier < 0) return tiles;
+  return tiles.map((tile) => {
+    const out = tile.pctByTime.slice();
+    let started = false;
+    let last: number | null = null;
+    let mutated = false;
+    for (let i = 0; i <= frontier && i < out.length; i += 1) {
+      const value = out[i];
+      if (value !== null && value !== undefined) {
+        started = true;
+        last = value;
+      } else if (started && last !== null) {
+        out[i] = last;
+        mutated = true;
+      }
+    }
+    return mutated ? { ...tile, pctByTime: out } : tile;
+  });
+}
+
 function sanitizeIndex(value: unknown): SpxHeatmapIndexSummary | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
@@ -221,14 +286,18 @@ function emptyPayload(note: string): SpxHeatmapPayload {
   };
 }
 
-export async function loadSpxHeatmap(appRoot: string): Promise<SpxHeatmapPayload> {
-  const filePath = path.join(appRoot, "data", DATA_FILE);
+// Shared loader for any index heatmap (SPX, QQQ, …). The only per-index input is
+// the on-disk payload filename + a label for the empty/parse notes — the dual-class
+// fold, Finviz classification overlay, sector derivation, and forward-fill are all
+// index-agnostic and reused as-is.
+async function loadHeatmapPayload(appRoot: string, dataFile: string, indexLabel: string): Promise<SpxHeatmapPayload> {
+  const filePath = path.join(appRoot, "data", dataFile);
   let raw: string;
   try {
     raw = await fs.readFile(filePath, "utf8");
   } catch {
     return emptyPayload(
-      "No S&P 500 heatmap built yet. Run `python scripts/refresh-spx-heatmap.py` (or the daily sync) to populate it.",
+      `No ${indexLabel} heatmap built yet. Run \`python scripts/refresh-spx-heatmap.py\` (or the daily sync) to populate it.`,
     );
   }
 
@@ -244,8 +313,12 @@ export async function loadSpxHeatmap(appRoot: string): Promise<SpxHeatmapPayload
     // industry taxonomy so the panel can nest sector → industry → stock and the
     // universe collapses from 503 to 500 tiles. Sectors are re-derived from the
     // merged + classified tiles — the on-disk GICS sectors are intentionally ignored.
-    const classification = await loadClassification(appRoot);
-    const tiles = applyClassification(mergeDualClassTiles(rawTiles), classification).sort((a, b) => b.weight - a.weight);
+    const classification = await loadClassificationMerged(appRoot);
+    // Forward-fill interior null minutes so a feed-skipped minute renders as the
+    // prior minute's colours instead of a fully-grey "blank minute".
+    const tiles = forwardFillTileSeries(applyClassification(mergeDualClassTiles(rawTiles), classification)).sort(
+      (a, b) => b.weight - a.weight,
+    );
     const sectors = computeSectors(tiles);
 
     return {
@@ -262,6 +335,17 @@ export async function loadSpxHeatmap(appRoot: string): Promise<SpxHeatmapPayload
       note: typeof parsed.note === "string" ? parsed.note : undefined,
     };
   } catch (error) {
-    return emptyPayload(`S&P 500 heatmap data could not be parsed: ${error instanceof Error ? error.message : String(error)}`);
+    return emptyPayload(`${indexLabel} heatmap data could not be parsed: ${error instanceof Error ? error.message : String(error)}`);
   }
+}
+
+// Intraday S&P 500 market map (data/spx-heatmap.json).
+export async function loadSpxHeatmap(appRoot: string): Promise<SpxHeatmapPayload> {
+  return loadHeatmapPayload(appRoot, DATA_FILE, "S&P 500");
+}
+
+// Intraday Nasdaq-100 market map (data/qqq-heatmap.json) — same payload shape and
+// feed, projected onto the QQQ universe + weights by scripts/refresh-spx-heatmap.py.
+export async function loadQqqHeatmap(appRoot: string): Promise<SpxHeatmapPayload> {
+  return loadHeatmapPayload(appRoot, "qqq-heatmap.json", "Nasdaq-100");
 }

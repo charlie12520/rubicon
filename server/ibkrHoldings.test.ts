@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { normalizeHoldingsSnapshotPayload, shouldFireIbkrHoldingsAutoRefresh } from "./ibkrHoldings.ts";
+import { normalizeHoldingsSnapshotPayload, shouldFireIbkrHoldingsAutoRefresh, shouldFireIntradayHoldingsRefresh } from "./ibkrHoldings.ts";
 
 const ORIGINAL_AUTO_REFRESH = process.env.IBKR_HOLDINGS_AUTO_REFRESH;
 const ORIGINAL_AUTO_REFRESH_TIME = process.env.IBKR_HOLDINGS_AUTO_REFRESH_TIME;
@@ -169,6 +169,21 @@ describe("IBKR holdings helpers", () => {
     armIbkrHoldingsAutoRefresh();
 
     expect(unref).toHaveBeenCalledOnce();
+  });
+
+  it("fires the intraday holdings refresh inside the ET market window on the interval", () => {
+    const opts = { enabled: true, intervalMs: 5 * 60_000, windowStart: "09:30", windowEnd: "16:15" };
+    const inWindow = new Date("2026-06-03T18:00:00.000Z"); // 14:00 ET, Wednesday
+    const nowMs = inWindow.getTime();
+
+    expect(shouldFireIntradayHoldingsRefresh(inWindow, null, opts).shouldFire).toBe(true);
+    expect(shouldFireIntradayHoldingsRefresh(inWindow, nowMs - 4 * 60_000, opts).shouldFire).toBe(false);
+    expect(shouldFireIntradayHoldingsRefresh(inWindow, nowMs - 6 * 60_000, opts).shouldFire).toBe(true);
+
+    expect(shouldFireIntradayHoldingsRefresh(new Date("2026-06-03T12:00:00.000Z"), null, opts).shouldFire).toBe(false); // 08:00 ET, before open
+    expect(shouldFireIntradayHoldingsRefresh(new Date("2026-06-03T20:30:00.000Z"), null, opts).shouldFire).toBe(false); // 16:30 ET, past window
+    expect(shouldFireIntradayHoldingsRefresh(new Date("2026-06-06T18:00:00.000Z"), null, opts).shouldFire).toBe(false); // Saturday
+    expect(shouldFireIntradayHoldingsRefresh(inWindow, null, { ...opts, enabled: false }).shouldFire).toBe(false);
   });
 });
 

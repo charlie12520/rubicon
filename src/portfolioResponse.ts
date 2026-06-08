@@ -16,6 +16,8 @@ export type SpreadResponseRow = {
   spread: LiveSpread;
   creditReference: number; // cost-to-close at spot used as the P/L baseline (index points)
   dollarsPerPointNow: number; // $ per 1pt SPX move toward the short strike, per contract
+  decayNextHourDollars: number; // $/contract the credit decays over the next trading hour (spot held)
+  thetaPerSpeed: number; // decayNextHourDollars / dollarsPerPointNow — the seller's edge ratio
   curve: SpreadCurvePoint[]; // pnl is total dollars for this spread (× contracts × 100)
 };
 
@@ -85,7 +87,8 @@ export function buildPortfolioResponse(spreads: LiveSpread[], options: BuildPort
     };
     const dollars = spread.contracts * 100;
     // Self-consistent baseline at spot (≈ creditNow when a live mark exists).
-    const creditReference = predictSpreadResponse({ ...base, level: spot }).creditAtLevel;
+    const now = predictSpreadResponse({ ...base, level: spot });
+    const creditReference = now.creditAtLevel;
     const rawCurve = creditCurve(base, levelMin, levelMax, steps);
     const curve: SpreadCurvePoint[] = rawCurve.map((point, i) => {
       const pnl = (creditReference - point.credit) * dollars;
@@ -95,7 +98,9 @@ export function buildPortfolioResponse(spreads: LiveSpread[], options: BuildPort
     return {
       spread,
       creditReference,
-      dollarsPerPointNow: predictSpreadResponse({ ...base, level: spot }).dollarsPerPointNow,
+      dollarsPerPointNow: now.dollarsPerPointNow,
+      decayNextHourDollars: now.decayNextHourDollars,
+      thetaPerSpeed: now.thetaPerSpeed,
       curve,
     };
   });

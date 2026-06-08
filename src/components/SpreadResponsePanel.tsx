@@ -196,6 +196,12 @@ export function SpreadResponsePanel(props: SpreadResponseProps) {
             ${result.dollarsPerPointNow.toFixed(0)}/pt · {result.scaleNow.toFixed(1)}pt
           </div>
         </div>
+        <div title="Credit that decays in your favor over the next hour if SPX holds (Bachelier theta, clamps into the close). θ/speed = $-to-time per $-at-risk per point.">
+          <div style={{ fontSize: 11, color: "#9ca3af" }}>θ decay/hr · θ/speed</div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: "#86efac", fontVariantNumeric: "tabular-nums" }}>
+            ${result.decayNextHourDollars.toFixed(0)}/hr · {result.thetaPerSpeed.toFixed(1)}x
+          </div>
+        </div>
       </div>
 
       {/* curve */}

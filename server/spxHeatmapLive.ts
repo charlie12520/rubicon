@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import type { SpxHeatmapLiveStatus } from "../shared/types.ts";
-import { easternClock, timeDeltaMinutes } from "./easternClock.ts";
+import { easternClock, timeDeltaMinutes, type EasternClock } from "./easternClock.ts";
 import { pathExists } from "./jsonStore.ts";
 
 // Long-running per-minute IBKR snapshot poller. It rewrites data/spx-heatmap.json
@@ -28,6 +28,18 @@ const execFileAsync = promisify(execFile);
 // open; the script itself idles until 09:30). Disable with SPX_HEATMAP_AUTO_START=false.
 const AUTO_START_ENABLED = String(process.env.SPX_HEATMAP_AUTO_START ?? "true").toLowerCase() !== "false";
 const AUTO_START_TIME = process.env.SPX_HEATMAP_AUTO_START_TIME ?? "09:28";
+
+// The feed only pulls during regular US market hours, with a small pre-open grace
+// for the auto-start. Starting is refused after 16:00 ET, before ~09:25, or on a
+// weekend, so we never pull post-close. (Holidays aren't detected — same limitation
+// as fplLive's weekday check.)
+const PULL_WINDOW_OPEN = "09:25";
+const PULL_WINDOW_CLOSE = "16:00";
+
+export function isMarketPullWindow(now: EasternClock = easternClock()): boolean {
+  if (now.weekday < 1 || now.weekday > 5) return false; // weekend
+  return now.time >= PULL_WINDOW_OPEN && now.time < PULL_WINDOW_CLOSE;
+}
 
 let activeChild: ChildProcessWithoutNullStreams | null = null;
 let startedAt: string | null = null;
@@ -77,6 +89,7 @@ export async function getSpxHeatmapLiveStatus(): Promise<SpxHeatmapLiveStatus> {
     available: await pathExists(LIVE_SCRIPT),
     autoStartEt: AUTO_START_ENABLED ? AUTO_START_TIME : null,
     autoStartLastFiredDate,
+    marketOpen: isMarketPullWindow(),
   };
 }
 
@@ -175,6 +188,10 @@ export async function startSpxHeatmapLive(opts: { clientId?: number; ports?: str
     pushLog(`[${new Date().toISOString()}] using existing heatmap poller pid ${external.pid}`);
     return getSpxHeatmapLiveStatus();
   }
+  if (!isMarketPullWindow()) {
+    pushLog(`[${new Date().toISOString()}] start refused: market closed — the feed only pulls ${PULL_WINDOW_OPEN}–${PULL_WINDOW_CLOSE} ET, Mon–Fri`);
+    return getSpxHeatmapLiveStatus();
+  }
   if (!(await pathExists(LIVE_SCRIPT))) {
     pushLog(`error: heatmap script not found at ${LIVE_SCRIPT}`);
     return getSpxHeatmapLiveStatus();
@@ -182,12 +199,14 @@ export async function startSpxHeatmapLive(opts: { clientId?: number; ports?: str
 
   const clientId = Number.isFinite(opts.clientId) ? Number(opts.clientId) : DEFAULT_CLIENT_ID;
   const ports = opts.ports?.trim() || DEFAULT_PORTS;
-  const args = [LIVE_SCRIPT, "--source", "ibkr-live", "--ports", ports, "--client-id", String(clientId)];
+  // One large-cap feed pulls the SPY∪QQQ union once and writes both spx-heatmap.json
+  // and qqq-heatmap.json (a shared stock like AAPL is fetched a single time).
+  const args = [LIVE_SCRIPT, "--source", "ibkr-live", "--indexes", "spx,qqq", "--ports", ports, "--client-id", String(clientId)];
 
   startedAt = new Date().toISOString();
   lastExit = null;
   logTail.length = 0;
-  pushLog(`[${startedAt}] launching ${LIVE_PYTHON} refresh-spx-heatmap.py --source ibkr-live --ports ${ports} --client-id ${clientId}`);
+  pushLog(`[${startedAt}] launching ${LIVE_PYTHON} refresh-spx-heatmap.py --source ibkr-live --indexes spx,qqq --ports ${ports} --client-id ${clientId}`);
 
   await fsp.mkdir(path.dirname(LIVE_LOG), { recursive: true });
   const logStream = fs.createWriteStream(LIVE_LOG, { flags: "a" });

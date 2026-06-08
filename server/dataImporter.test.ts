@@ -49,7 +49,7 @@ describe("AI STUFF trade importer", () => {
     const snapshot = await loadTrackerSnapshot();
     const sourceHealth = new Map(snapshot.sourceHealth.map((source) => [source.label, source]));
     const latestSummary = snapshot.dailySummaries.find((summary) => summary.date === snapshot.latestTradeDate);
-    const rawWorkbookAccess = sourceHealth.get("Google raw workbook access");
+    const trackerUpload = sourceHealth.get("Google tracker upload");
     const stagedPayload = sourceHealth.get("Staged sheet payload");
 
     expect(snapshot.availableDates).toContain("2026-05-28");
@@ -62,8 +62,8 @@ describe("AI STUFF trade importer", () => {
     expect(["ok", "warning"]).toContain(sourceHealth.get("Google Drive connector snapshot")?.status);
     expect(sourceHealth.get("Google Drive connector snapshot")?.count).toBeGreaterThanOrEqual(4);
     expect(sourceHealth.get("Google Drive connector snapshot")?.detail).toContain("SPX Spread Trade Tracker");
-    expect(rawWorkbookAccess?.status).toBe(latestSummary?.rawUploadGoogleSheetUrl ? "ok" : "warning");
-    expect(rawWorkbookAccess?.detail).toMatch(/raw workbook|local mirrors|Google auth/i);
+    expect(trackerUpload?.status).toBe(latestSummary?.uploadStatus === "uploaded" ? "ok" : "warning");
+    expect(trackerUpload?.detail).toMatch(/tracker upload|local Rubicon review|Trade Log rows/i);
     expect(sourceHealth.get("Google CSV export probe")?.status).toBe("warning");
     expect(sourceHealth.get("Google CSV export probe")?.detail).toContain("disabled");
     expect(sourceHealth.get("Replay market data")?.detail).toContain("Latest replay date");
@@ -83,8 +83,8 @@ describe("AI STUFF trade importer", () => {
     expect(summary?.spreadCount).toBe(24);
     expect(summary?.entryCount).toBe(19);
     expect(summary?.optionContractCount).toBe(12);
-    expect(summary?.uploadTabCount).toBe(11);
-    expect(summary?.payloadRows).toBeGreaterThan(summary?.volumeProfileRowCount ?? 0);
+    expect(summary?.uploadTabCount).toBe(1);
+    expect(summary?.payloadRows).toBe(20);
     expect(summary?.uploadStatus).toBe(summary?.rawUploadGoogleSheetUrl ? "uploaded" : "payload_ready_unconfirmed");
     if (summary?.rawUploadGoogleSheetUrl) {
       expect(summary.rawUploadGoogleSheetUrl).toContain("docs.google.com/spreadsheets");
@@ -100,7 +100,7 @@ describe("AI STUFF trade importer", () => {
     expect(summary?.issues.find((issue) => issue.title === "Validated partial archive availability")?.severity).toBe("info");
     expect(summary?.issues.some((issue) => issue.title === "Option intraday missing rows near SPX open/close")).toBe(false);
     expect(summary?.issues.some((issue) => issue.title === "Volume profile missing rows near SPX open/close")).toBe(false);
-    expect(summary?.issues.some((issue) => issue.title === "Live Google upload not confirmed")).toBe(false);
+    expect(summary?.issues.some((issue) => issue.title === "Google tracker upload not confirmed")).toBe(false);
     expect(summary?.issues.some((issue) => issue.title === "Connector receipt row not found")).toBe(false);
   });
 
@@ -187,7 +187,7 @@ describe("AI STUFF trade importer", () => {
 
     expect(freshness.status).toBe("warning");
     expect(freshness.isFresh).toBe(false);
-    expect(freshness.detail).toContain("did not include a 2026-05-29 raw upload receipt row");
+    expect(freshness.detail).toContain("did not include a completed 2026-05-29 tracker upload row");
     expect(freshness.detail).toContain("Google upload remains unconfirmed");
   });
 
@@ -211,7 +211,7 @@ describe("AI STUFF trade importer", () => {
             {
               stage: "upload",
               severity: "warning",
-              title: "Live Google upload not confirmed",
+              title: "Google tracker upload not confirmed",
               detail: "No receipt.",
             },
           ],
@@ -235,8 +235,8 @@ describe("AI STUFF trade importer", () => {
     expect(summaries[0].rawUploadGoogleSheetUrl).toBe("https://docs.google.com/spreadsheets/d/raw");
     expect(summaries[0].uploadReceiptSource).toBe("Google Drive connector snapshot");
     expect(summaries[0].uploadReceiptReadAt).toBe("2026-05-29T14:23:00-04:00");
-    expect(summaries[0].issues.some((nextIssue) => nextIssue.title === "Live Google upload not confirmed")).toBe(false);
-    expect(summaries[0].issues.some((nextIssue) => nextIssue.title === "Live Google upload confirmed")).toBe(true);
+    expect(summaries[0].issues.some((nextIssue) => nextIssue.title === "Google tracker upload not confirmed")).toBe(false);
+    expect(summaries[0].issues.some((nextIssue) => nextIssue.title === "Google tracker upload confirmed")).toBe(true);
     expect(summaries[0].issueCount).toBe(0);
   });
 
@@ -264,7 +264,7 @@ describe("AI STUFF trade importer", () => {
             {
               stage: "upload",
               severity: "warning",
-              title: "Live Google upload not confirmed",
+              title: "Google tracker upload not confirmed",
               detail: "No receipt.",
             },
           ],
@@ -317,7 +317,7 @@ describe("AI STUFF trade importer", () => {
             {
               stage: "upload",
               severity: "warning",
-              title: "Live Google upload not confirmed",
+              title: "Google tracker upload not confirmed",
               detail: "No receipt.",
             },
           ],
@@ -604,6 +604,17 @@ describe("AI STUFF trade importer", () => {
     ).toBe(false);
   });
 
+  it("keeps safe replay spread marks inside the selected vertical width", async () => {
+    const replay = await loadReplayPayload("2026-06-05");
+    const trades = new Map(replay.quickTrades.map((trade) => [trade.id, trade]));
+    const impossible = replay.spreadMarks.filter((mark) => {
+      const trade = trades.get(mark.tradeId);
+      return Boolean(trade?.width && Math.abs(mark.value) > trade.width + 0.01);
+    });
+
+    expect(impossible).toHaveLength(0);
+  });
+
   it("surfaces pull and upload issues from the daily sync archive", async () => {
     const snapshot = await loadTrackerSnapshot();
     const summary = snapshot.dailySummaries.find((nextSummary) => nextSummary.date === "2026-05-28");
@@ -620,8 +631,8 @@ describe("AI STUFF trade importer", () => {
     if (summary?.rawUploadGoogleSheetUrl) {
       expect(summary.rawUploadGoogleSheetUrl).toContain("docs.google.com/spreadsheets");
     }
-    expect(summary?.issues.some((issue) => issue.title === "Live Google upload not confirmed")).toBe(false);
-    expect(summary?.issues.some((issue) => issue.title === "Live Google upload confirmed")).toBe(Boolean(summary?.rawUploadGoogleSheetUrl));
+    expect(summary?.issues.some((issue) => issue.title === "Google tracker upload not confirmed")).toBe(false);
+    expect(summary?.issues.some((issue) => issue.title === "Google tracker upload confirmed")).toBe(summary?.uploadStatus === "uploaded");
   });
 
   it("loads IBKR wallet size from a configured account snapshot file", async () => {

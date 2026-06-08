@@ -51,6 +51,16 @@ export function spreadDelta(d: number, s: number, width = DEFAULT_WIDTH): number
   return clamp(normCdf(d / s) - normCdf((d - width) / s), 0, 1);
 }
 
+/**
+ * Bachelier vertical vega: dV/ds = φ(d/s) − φ((d−W)/s). >0 for an OTM credit
+ * spread (d<0), → 0 far OTM and far ITM. The chain rule factor for theta, since
+ * the move-scale s carries all the time dependence (s = a·√minutesToClose).
+ */
+export function spreadVega(d: number, s: number, width = DEFAULT_WIDTH): number {
+  if (!(s > 1e-6)) return 0;
+  return normPdf(d / s) - normPdf((d - width) / s);
+}
+
 /** Signed distance from spot to the short strike, oriented so larger = closer to max loss. */
 export function signedDistanceToLoss(side: SpreadSide, spot: number, shortStrike: number): number {
   return side === "call_credit" ? spot - shortStrike : shortStrike - spot;
@@ -84,6 +94,32 @@ export function impliedScale(
   return 0.5 * (lo + hi);
 }
 
+export type SpreadThetaPoint = {
+  thetaDollarsPerHourNow: number;  // instantaneous decay rate, $/hr per contract
+  decayNextHourDollars: number;    // $/contract decayed over the next trading hour (reprice, clamps at close)
+  dollarsPerPoint: number;         // speed: $ per 1pt SPX move toward the short strike, per contract
+  thetaPerSpeed: number;           // decayNextHourDollars / dollarsPerPoint (edge ratio)
+};
+
+/**
+ * Theta (time decay) of a width-W vertical at signed distance `d`, move-scale `s`,
+ * with `minutesToClose` left. The move-scale carries all the time dependence
+ * (s = a·√m), so ds/dt = −s/(2m) and the instantaneous value-decay rate is −vega·ds/dt.
+ * `decayNextHourDollars` reprices one trading hour ahead (clamped at the close) — the
+ * realized-style figure validated in journal_spread_theta_rate.md; display that one.
+ * All dollar figures are per 1 contract; >0 = credit bleeding in the seller's favor.
+ */
+export function spreadThetaAt(d: number, s: number, minutesToClose: number, width = DEFAULT_WIDTH): SpreadThetaPoint {
+  const m = Math.max(minutesToClose, 0.5);
+  const dollarsPerPoint = spreadDelta(d, s, width) * 100;
+  const dsdtPerMin = -s / (2 * m);
+  const thetaDollarsPerHourNow = -spreadVega(d, s, width) * dsdtPerMin * 60 * 100;
+  const sNextHour = s * Math.sqrt(Math.max(m - 60, 0) / m);
+  const decayNextHourDollars = (bachelierVertical(d, s, width) - bachelierVertical(d, sNextHour, width)) * 100;
+  const thetaPerSpeed = dollarsPerPoint > 1e-9 ? decayNextHourDollars / dollarsPerPoint : 0;
+  return { thetaDollarsPerHourNow, decayNextHourDollars, dollarsPerPoint, thetaPerSpeed };
+}
+
 export type SpreadResponseInput = {
   side: SpreadSide;
   shortStrike: number;
@@ -104,6 +140,12 @@ export type SpreadResponseResult = {
   deltaCredit: number;     // creditAtLevel - credit  (per spread, index points)
   deltaDollarsPerContract: number; // deltaCredit * 100
   dollarsPerPointNow: number;      // current speed: $ per 1pt SPX move, per contract
+  // Time decay (theta), spot held at the current level. >0 = credit bleeds in the
+  // credit seller's favor. See journal_spread_theta_rate.md (DepthHistory) — the
+  // realized decay tracks decayNextHourDollars; display that, not the instantaneous rate.
+  thetaDollarsPerHourNow: number;  // instantaneous decay rate, $/hr per contract
+  decayNextHourDollars: number;    // $/contract decayed over the next trading hour (reprice, clamps at close)
+  thetaPerSpeed: number;           // decayNextHourDollars / dollarsPerPointNow — $-to-time per $-at-risk/pt (edge ratio)
 };
 
 /** The headline equation: predict the spread's net credit (and change) at a target level. */
@@ -117,6 +159,9 @@ export function predictSpreadResponse(input: SpreadResponseInput): SpreadRespons
   const sL = s0 * Math.sqrt(mcAt / mcNow);
   const creditAtLevel = bachelierVertical(dL, sL, width);
   const deltaCredit = creditAtLevel - input.credit;
+  // Time decay at the current spot (see spreadThetaAt). Held at the current level.
+  const theta = spreadThetaAt(d0, s0, mcNow, width);
+
   return {
     scaleNow: s0,
     scaleAtLevel: sL,
@@ -125,7 +170,10 @@ export function predictSpreadResponse(input: SpreadResponseInput): SpreadRespons
     creditAtLevel,
     deltaCredit,
     deltaDollarsPerContract: deltaCredit * 100,
-    dollarsPerPointNow: spreadDelta(d0, s0, width) * 100,
+    dollarsPerPointNow: theta.dollarsPerPoint,
+    thetaDollarsPerHourNow: theta.thetaDollarsPerHourNow,
+    decayNextHourDollars: theta.decayNextHourDollars,
+    thetaPerSpeed: theta.thetaPerSpeed,
   };
 }
 

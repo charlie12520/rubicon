@@ -18,6 +18,7 @@ dist-ssr
 # because a plain `data/` exclusion can't be re-included file-by-file).
 data/*
 !data/finviz-classification.json
+!data/heatmap-classification-auto.json
 artifacts/
 output/
 .claude/

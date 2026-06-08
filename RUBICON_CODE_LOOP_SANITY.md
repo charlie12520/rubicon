@@ -1,5 +1,7 @@
 # Rubicon Code Loop Sanity
 
+> Point-in-time source-code audit. This file preserves findings from the date below and is not the current codebase map. For current orientation, read `codebase.md` and `detailedcodebase.md`; for current status, read `WORKLOG.md`, `naive_acceptance.md`, and `naive_validation.md`.
+
 Date: 2026-06-02
 
 Scope: source-code-only pass. This audit did not open `data/`, sibling `IBKR Equity History Pull` archives, large JSON files, or CSV artifacts. Evidence came from `src/`, `server/`, `scripts/`, and project docs.

@@ -15,51 +15,61 @@ describe("desktop alert helpers", () => {
     expect(sanitizeDesktopAlertText("abcdef", 3)).toBe("abc");
   });
 
-  it("logs async PowerShell spawn errors before detaching the alert process", async () => {
+  it("launches calendar alerts through the native Windows toast (long duration, no wscript popup)", async () => {
     vi.resetModules();
-    let errorHandler: ((error: Error) => void) | undefined;
-    const unref = vi.fn();
-    const child = {
-      on: vi.fn((event: string, handler: (error: Error) => void) => {
-        if (event === "error") {
-          errorHandler = handler;
-        }
-        return child;
-      }),
-      pid: 12345,
-      unref,
-    };
-    const spawn = vi.fn((_command: string, _args: string[], _options: unknown) => child);
-    vi.doMock("node:child_process", () => ({ spawn }));
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const spawn = vi.fn();
+    const spawnSync = vi.fn((_command: string, _args: string[], _options: unknown) => ({
+      status: 0,
+      stderr: "",
+      stdout: "Rubicon.RubiconApp\r\n",
+    }));
+    vi.doMock("node:child_process", () => ({ spawn, spawnSync }));
 
     const { showCalendarDesktopAlert } = await import("./desktopAlert.ts");
-    showCalendarDesktopAlert({ body: "CPI in one minute" }, "C:\\rubicon");
+    const result = showCalendarDesktopAlert({ body: "CPI in one minute" }, "C:\\rubicon");
 
-    expect(child.on).toHaveBeenCalledWith("error", expect.any(Function));
-    expect(errorHandler).toBeDefined();
-    errorHandler?.(new Error("powershell missing"));
+    expect(spawn).not.toHaveBeenCalled(); // no more centered wscript Popup dialog
+    const spawnArgs = spawnSync.mock.calls[0] as unknown as [string, string[], Record<string, unknown>];
 
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining("powershell missing"));
-    expect(unref).toHaveBeenCalledOnce();
-  });
-
-  it("launches calendar alerts through a visible Windows Script Host popup", async () => {
-    vi.resetModules();
-    const on = vi.fn().mockReturnThis();
-    const unref = vi.fn();
-    const spawn = vi.fn((_command: string, _args: string[], _options: unknown) => ({ on, pid: 12345, unref }));
-    vi.doMock("node:child_process", () => ({ spawn }));
-
-    const { showCalendarDesktopAlert } = await import("./desktopAlert.ts");
-    showCalendarDesktopAlert({ body: "CPI in one minute" }, "C:\\rubicon");
-
-    const spawnArgs = spawn.mock.calls[0] as unknown as [string, string[], Record<string, unknown>];
-
-    expect(spawnArgs[0]).toBe("wscript.exe");
-    expect(spawnArgs[1]).toContain("C:\\rubicon\\scripts\\show-calendar-alert.vbs");
+    expect(spawnArgs[0]).toBe("powershell.exe");
+    expect(spawnArgs[1]).toContain("C:\\rubicon\\scripts\\show-windows-toast.ps1");
     expect(spawnArgs[1]).toContain("Calendar event starts in 1 minute");
     expect(spawnArgs[1]).toContain("CPI in one minute");
-    expect(spawnArgs[2]).toEqual(expect.objectContaining({ windowsHide: false }));
+    expect(spawnArgs[1]).toContain("long"); // a 1-minute pre-event warning lingers
+    expect(spawnArgs[2]).toEqual(expect.objectContaining({ windowsHide: true }));
+    expect(result.ok).toBe(true);
+  });
+
+  it("launches live-update alerts through a native Windows toast helper", async () => {
+    vi.resetModules();
+    const spawn = vi.fn();
+    const spawnSync = vi.fn((_command: string, _args: string[], _options: unknown) => ({
+      status: 0,
+      stderr: "",
+      stdout: "127.0.0.1-9BBB1E10_tz517vvf8m8yt!App\r\n",
+    }));
+    vi.doMock("node:child_process", () => ({ spawn, spawnSync }));
+
+    const { showLiveUpdateDesktopToast } = await import("./desktopAlert.ts");
+    showLiveUpdateDesktopToast(
+      {
+        body: "Fed speaker comments on tariff risks",
+        detail: "Matched fed - 8:00 AM",
+        title: "FirstSquawk word-filter alert",
+      },
+      "C:\\rubicon",
+    );
+
+    const spawnArgs = spawnSync.mock.calls[0] as unknown as [string, string[], Record<string, unknown>];
+
+    expect(spawnArgs[0]).toBe("powershell.exe");
+    expect(spawnArgs[1]).toContain("-File");
+    expect(spawnArgs[1]).toContain("C:\\rubicon\\scripts\\show-windows-toast.ps1");
+    expect(spawnArgs[1]).toContain("-AppId");
+    expect(spawnArgs[1]).toContain("auto");
+    expect(spawnArgs[1]).toContain("FirstSquawk word-filter alert");
+    expect(spawnArgs[1]).toContain("Fed speaker comments on tariff risks");
+    expect(spawnArgs[1]).toContain("short");
+    expect(spawnArgs[2]).toEqual(expect.objectContaining({ windowsHide: true }));
   });
 });

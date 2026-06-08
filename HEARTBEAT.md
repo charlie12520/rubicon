@@ -8,7 +8,7 @@ Every heartbeat should read less, change less, and prove more.
 
 ```text
 Heartbeat:
-Read AGENTS.md, WORKLOG.md, ACCEPTANCE_CRITERIA.md, and VALIDATION.md.
+Read AGENTS.md, codebase.md, WORKLOG.md, naive_acceptance.md, and naive_validation.md.
 
 Context budget:
 Read PRODUCT_SPEC.md only if product behavior is unclear.
@@ -19,7 +19,7 @@ Read DECISIONS.md only before making or revising architecture/product decisions.
 Before changing code:
 1. Inspect git/worktree state and preserve user changes.
 2. Identify the current phase and active acceptance ID from WORKLOG.md.
-3. Select exactly one RED or YELLOW acceptance criterion from ACCEPTANCE_CRITERIA.md.
+3. Select exactly one RED or YELLOW acceptance criterion from naive_acceptance.md.
 4. State the smallest patch that could move that criterion toward GREEN.
 5. State the narrowest validation command or artifact that will prove it.
 6. For later-phase/breadth work, state the workflow-depth proof: what user/operator action changes state, what related record or module updates, and how persistence/recovery is verified.
@@ -34,14 +34,14 @@ Execution:
 - Do not satisfy later-phase goals with static UI or modeled data alone. Add the smallest workflow that proves the surface is usable.
 
 Validation:
-- Run the narrowest relevant check from VALIDATION.md.
+- Run the narrowest relevant check from naive_validation.md.
 - If it passes, update the acceptance criterion status and proof.
 - If it fails, classify the failure and try one focused fix.
 - If the same acceptance criterion or failure class fails twice, stop and document three options in WORKLOG.md instead of continuing blindly.
 
 Update:
 - Update WORKLOG.md.
-- Update ACCEPTANCE_CRITERIA.md.
+- Update naive_acceptance.md.
 - Update DECISIONS.md only if a meaningful product or architecture decision was made.
 - After a phase run, record a goal meta-review and revise MiniOS/task-list goals when the previous goals were too broad, too static, or too easy to satisfy without workflow proof.
 - Manual phase exit rule: after a completed phase or goal set, score the run in WORKLOG.md against ten productivity meta-goals: goal quality, time to stable, rework rate, validation strength, workflow depth, context carryover, tooling leverage, user-visible value, agent productivity metrics, and next-goal improvement. Do this before defining the next goals.

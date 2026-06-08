@@ -54,8 +54,8 @@ export function buildDailySyncReadiness(
 
   if (!status?.targetPlan) {
     return {
-      detail: "Daily sync status has not loaded yet, so the app cannot estimate the auto target.",
-      label: "Sync readiness unknown",
+      detail: "Daily pipeline status has not loaded yet, so the app cannot estimate the auto target.",
+      label: "Pipeline readiness unknown",
       tone: "warning",
     };
   }
@@ -66,7 +66,7 @@ export function buildDailySyncReadiness(
   if (!status.ok || status.state === "failed") {
     return {
       detail: `${status.message} Last auto target estimate was ${target}.`,
-      label: "Sync needs attention",
+      label: "Pipeline needs attention",
       tone: "error",
     };
   }
@@ -74,7 +74,7 @@ export function buildDailySyncReadiness(
   if (status.state === "running") {
     return {
       detail: `The daily sync is running for target ${target}. Watch the diagnostics below for log-tail errors.`,
-      label: "Sync running",
+      label: "Pipeline running",
       tone: "ok",
     };
   }
@@ -83,23 +83,23 @@ export function buildDailySyncReadiness(
     const countdown = formatCutoffCountdown(plan.nowEt, plan.cutoffTimeEt);
 
     return {
-      detail: `Auto is still targeting ${target}. Today's ${today} sync opens after ${plan.cutoffTimeEt} ET${countdown}.`,
-      label: `Same-day sync opens at ${plan.cutoffTimeEt} ET`,
+      detail: `Auto is still targeting ${target}. Today's ${today} pipeline opens after ${plan.cutoffTimeEt} ET${countdown}.`,
+      label: `Same-day pipeline opens at ${plan.cutoffTimeEt} ET`,
       tone: "warning",
     };
   }
 
   if (plan.mode === "auto" && today && target === today) {
     return {
-      detail: `Auto is targeting today's archive ${today}. Run Daily Sync when TWS/Gateway and local pulls are ready.`,
-      label: "Today sync ready",
+      detail: `Auto is targeting today's archive ${today}. Run Daily Pipeline when TWS/Gateway and local pulls are ready.`,
+      label: "Today pipeline ready",
       tone: "ok",
     };
   }
 
   return {
     detail: `Auto target estimate is ${target}. ${plan.note}`,
-    label: "Sync target estimated",
+    label: "Pipeline target estimated",
     tone: plan.afterCutoff ? "ok" : "warning",
   };
 }

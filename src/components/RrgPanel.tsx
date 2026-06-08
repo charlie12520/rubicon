@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Pause, Play } from "lucide-react";
 import type { RrgBarsPayload } from "../../shared/types";
-import { fetchRrgBars } from "../api";
+import { fetchRrgBars, fetchSectorRrgBars } from "../api";
 import {
   computeRrg,
   defaultWindows,
@@ -23,6 +23,28 @@ import { RelativeRotationGraph } from "./RelativeRotationGraph";
 import "./RrgPanel.css";
 
 const BASKET_VALUE = "__basket__";
+
+// The Rotation tab defaults to the canonical SPY sector-rotation RRG (11 SPDR sector
+// ETFs benchmarked to SPY), auto-refreshed daily from Yahoo. "Stocks" switches to the
+// TC2000 screener universe (basket benchmark, most-rotated names preselected).
+type Universe = "sectors" | "stocks";
+const SECTOR_BENCHMARK = "SPY";
+
+// Apply the right default benchmark + plotted set for a freshly-loaded universe.
+function universeDefaults(payload: RrgBarsPayload, universe: Universe): {
+  benchmarkValue: string;
+  selected: string[];
+} {
+  if (universe === "sectors") {
+    const hasBenchmark = payload.symbols.includes(SECTOR_BENCHMARK);
+    const plotted = payload.symbols.filter((symbol) => symbol !== SECTOR_BENCHMARK);
+    return {
+      benchmarkValue: hasBenchmark ? SECTOR_BENCHMARK : BASKET_VALUE,
+      selected: plotted.length ? plotted : payload.symbols,
+    };
+  }
+  return { benchmarkValue: BASKET_VALUE, selected: pickInitialSymbols(payload) };
+}
 
 function clampInt(value: string, min: number, max: number, fallback: number): number {
   const n = Number.parseInt(value, 10);
@@ -57,6 +79,7 @@ function pickInitialSymbols(payload: RrgBarsPayload): string[] {
 export function RrgPanel() {
   const [bars, setBars] = useState<RrgBarsPayload | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [universe, setUniverse] = useState<Universe>("sectors");
 
   const [timeframe, setTimeframe] = useState<Timeframe>("weekly");
   const [benchmarkValue, setBenchmarkValue] = useState<string>(BASKET_VALUE);
@@ -72,16 +95,21 @@ export function RrgPanel() {
 
   useEffect(() => {
     const controller = new AbortController();
-    fetchRrgBars(controller.signal)
+    const fetcher = universe === "sectors" ? fetchSectorRrgBars : fetchRrgBars;
+    setBars(null);
+    setLoadError(null);
+    fetcher(controller.signal)
       .then((payload) => {
+        const defaults = universeDefaults(payload, universe);
         setBars(payload);
-        setSelected(new Set(pickInitialSymbols(payload)));
+        setBenchmarkValue(defaults.benchmarkValue);
+        setSelected(new Set(defaults.selected));
       })
       .catch((error: Error) => {
         if (error.name !== "AbortError") setLoadError(error.message);
       });
     return () => controller.abort();
-  }, []);
+  }, [universe]);
 
   const selectedList = useMemo(() => [...selected].sort((a, b) => a.localeCompare(b)), [selected]);
   const benchmarkSymbol = benchmarkValue === BASKET_VALUE ? null : benchmarkValue;
@@ -171,6 +199,15 @@ export function RrgPanel() {
     setAsOf("");
   }
 
+  function changeUniverse(next: Universe) {
+    if (next === universe) return;
+    setPlaying(false);
+    setAsOf("");
+    setQuadrant("all");
+    setHighlight(null);
+    setUniverse(next); // triggers the load effect, which applies universe defaults
+  }
+
   function togglePlay() {
     if (playing) {
       setPlaying(false);
@@ -229,13 +266,14 @@ export function RrgPanel() {
     if (!bars) return;
     setPlaying(false);
     setTimeframe("weekly");
-    setBenchmarkValue(BASKET_VALUE);
     const w = defaultWindows("weekly");
     setRatioWindow(w.ratioWindow);
     setMomentumWindow(w.momentumWindow);
     setTailLength(8);
     setAsOf("");
-    setSelected(new Set(pickInitialSymbols(bars)));
+    const defaults = universeDefaults(bars, universe);
+    setBenchmarkValue(defaults.benchmarkValue);
+    setSelected(new Set(defaults.selected));
     setHighlight(null);
     setQuadrant("all");
   }
@@ -273,6 +311,14 @@ export function RrgPanel() {
       </div>
 
       <div className="rrg-controls">
+        <div className="rrg-control">
+          <span>Universe</span>
+          <div className="micro-segment" role="group" aria-label="Universe">
+            <button type="button" className={universe === "sectors" ? "active" : ""} onClick={() => changeUniverse("sectors")}>Sectors</button>
+            <button type="button" className={universe === "stocks" ? "active" : ""} onClick={() => changeUniverse("stocks")}>Stocks</button>
+          </div>
+        </div>
+
         <label className="rrg-control">
           <span>Benchmark</span>
           <select value={benchmarkValue} onChange={(e) => changeBenchmark(e.target.value)}>

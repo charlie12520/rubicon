@@ -57,4 +57,140 @@ describe("Replay safe default", () => {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }
   });
+
+  it("rebuilds old-version safe replay caches before serving spread marks", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "rubicon-safe-replay-version-"));
+    const date = "2026-06-05";
+    const dayDir = path.join(tempRoot, "IBKR Equity History Pull", "data", "ibkr_trades", date);
+    const tabsDir = path.join(dayDir, "google_sheet_tab_csvs");
+    const optionDir = path.join(dayDir, "ibkr_option_intraday");
+    await fs.mkdir(tabsDir, { recursive: true });
+    await fs.mkdir(optionDir, { recursive: true });
+
+    const entriesPath = path.join(dayDir, "entries.csv");
+    const spxPath = path.join(tabsDir, "SPX_5s.csv");
+    const marksPath = path.join(optionDir, "spread_trade_marks_5s.csv");
+    const spreadKey = JSON.stringify([
+      { abs_ratio: 1, expiration: "20260605", local_symbol: "SPXW  260605P07470000", right: "P", strike: 7470 },
+      { abs_ratio: 1, expiration: "20260605", local_symbol: "SPXW  260605P07475000", right: "P", strike: 7475 },
+    ]);
+    await fs.writeFile(
+      entriesPath,
+      [
+        "target_trade_date_et,account,perm_id,entry_sequence,entry_action,entry_time_et,spread_key,entry_quantity,entry_price,entry_credit_debit,spread_class,legs,direction_vector,total_commission,lifecycle_status,exit_time_et,exit_price,exit_total_commission,position_before,position_after",
+        [
+          date,
+          "DU123",
+          "123",
+          "1",
+          "entry",
+          "2026-06-05T09:31:00-04:00",
+          csvCell(spreadKey),
+          "1",
+          "-0.50",
+          "credit",
+          "put_credit_vertical",
+          csvCell("SPXW  260605P07470000 BOT | SPXW  260605P07475000 SLD"),
+          csvCell(JSON.stringify([1, -1])),
+          "0",
+          "Closed",
+          "2026-06-05T09:45:00-04:00",
+          "-1.00",
+          "0",
+          "0",
+          "1",
+        ].join(","),
+      ].join("\n"),
+      "utf8",
+    );
+    await fs.writeFile(
+      spxPath,
+      "timestamp_et,symbol,open,high,low,close\n2026-06-05T09:31:00-04:00,SPX,5000,5001,4999,5000\n",
+      "utf8",
+    );
+    await fs.writeFile(
+      marksPath,
+      [
+        "perm_id,entry_sequence,timestamp_et,spread_trade_mark,spread_close,source",
+        "123,1,2026-06-05T09:31:00-04:00,-9,-9,IBKR_TRADES_5s_ohlc_ffill_nickel",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const source = {
+      entries: await sourceFile(entriesPath),
+      openInterest: { path: null, mtimeMs: null },
+      spx: await sourceFile(spxPath),
+      spreadMarks: await sourceFile(marksPath),
+      volume: { path: null, mtimeMs: null },
+    };
+    await fs.writeFile(
+      path.join(dayDir, "rubicon_replay_safe_state.json"),
+      JSON.stringify(
+        {
+          generatedAt: "2026-06-06T00:00:00.000Z",
+          payload: {
+            date,
+            openInterest: [],
+            quickTrades: [],
+            selectedTradeId: null,
+            spreadMarks: [
+              {
+                entrySequence: 1,
+                label: "09:31",
+                permId: "123",
+                source: "cached-old",
+                time: Math.floor(Date.parse("2026-06-05T09:31:00-04:00") / 1000),
+                timestampEt: "2026-06-05T09:31:00-04:00",
+                tradeId: "IBKR-123-1",
+                value: -99,
+              },
+            ],
+            spxBars: [
+              {
+                close: 4999,
+                high: 4999,
+                label: "09:31",
+                low: 4999,
+                open: 4999,
+                time: Math.floor(Date.parse("2026-06-05T09:31:00-04:00") / 1000),
+                timestampEt: "2026-06-05T09:31:00-04:00",
+              },
+            ],
+            volume: [],
+          },
+          projection: { spxBars: "old", spreadMarks: "old", volume: "old" },
+          schema: "rubicon-replay-safe-state",
+          source,
+          version: 2,
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    process.env.AI_STUFF_ROOT = tempRoot;
+    vi.resetModules();
+
+    try {
+      const { loadReplayPayload } = await import("./dataImporter.ts");
+      const replay = await loadReplayPayload(date);
+
+      expect(replay.spxBars[0]?.close).toBe(5000);
+      expect(replay.spreadMarks[0]?.value).toBe(-5);
+      expect(replay.spreadMarks[0]?.source).toContain("rubicon_width_clamped");
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
 });
+
+function csvCell(value: string): string {
+  return `"${value.replaceAll("\"", "\"\"")}"`;
+}
+
+async function sourceFile(target: string): Promise<{ path: string; mtimeMs: number }> {
+  const stats = await fs.stat(target);
+  return { path: target, mtimeMs: stats.mtimeMs };
+}

@@ -1,5 +1,7 @@
 # VALIDATION.md
 
+> Historical/reference detail. The current compact validation source of truth is `naive_validation.md`; as of 2026-06-03 the latest validation is A142, with recent A140/A141/A142 proof summarized there. Older run records below remain useful evidence but are not the active validation ledger.
+
 > Restoration note: the exact pre-compaction file was not recoverable in this non-git workspace. The compact replacement was preserved as `naive_validation.md`; this canonical file was rebuilt into the prior detailed style from `WORKLOG.md` and current evidence.
 
 ## Main Validation Command
@@ -26,10 +28,10 @@ Run dev server:
 - `npm run dev`
 
 API:
-- `http://[::1]:5174` when another local project occupies `127.0.0.1:5174`
+- default app/API target is `http://127.0.0.1:5174`; the desktop launcher can use `http://[::1]:5174` when another local project occupies `127.0.0.1:5174`
 
 Web:
-- `http://[::1]:5173` in dev, proxying `/api` to `http://[::1]:5174`
+- `http://localhost:5173` in dev, proxying `/api` to `http://127.0.0.1:5174`
 
 Database/init:
 - none; local-first CSV/JSON importer
@@ -46,7 +48,23 @@ Unit tests:
 Production build:
 - `npm run build`
 
-## Latest Validation - 2026-06-02 A120
+## Current Compact Validation - 2026-06-03 A142
+
+Commands:
+- `npm run test -- server/morningMacroCalendar.test.ts`
+- `npm run test -- server/morningBrief.test.ts src/components/MorningDashboard.test.tsx`
+- `npm run typecheck`
+- `npm run build`
+
+Result:
+- GREEN for A142. See `naive_validation.md` and `WORKLOG.md` for the active concise proof.
+
+Proof:
+- Morning's US macro calendar emits public-source timing for MBA, ADP weekly/monthly, API crude, NAR existing-home sales, UMich preliminary sentiment, NY Empire State, and NAHB HMI.
+- Macro calendar focused tests passed 1 file / 15 tests; Morning payload/dashboard tests passed 2 files / 21 tests.
+- Typecheck passed; build passed with only the existing Vite large-chunk warning.
+
+## Historical Validation Snapshot - 2026-06-02 A120
 
 Commands:
 - `npm run test -- server/morningBrief.test.ts src/components/MorningDashboard.test.tsx`

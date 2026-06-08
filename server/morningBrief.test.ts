@@ -8,11 +8,8 @@ import {
   loadMorningBrief,
   loadMorningLiveUpdates,
   loadTc2000Pulls,
-  parseDailyFxCalendar,
   parseFirstSquawkRss,
   parseFirstSquawkTimeline,
-  parseIgEconomicCalendarEvents,
-  parseIgMajorCalendarEvents,
   parseRollcallCalendar,
   readCachedLiveUpdatesForBrief,
   resetMorningLiveUpdateCacheForTests,
@@ -25,9 +22,7 @@ describe("morning brief parsers", () => {
     const appRoot = path.join(tempDir, "app");
     const stateDir = path.join(tempDir, "state");
     const originalStateDir = process.env.RUBICON_MORNING_BRIEF_STATE_DIR;
-    const originalDailyFx = process.env.RUBICON_DAILYFX_URL;
     process.env.RUBICON_MORNING_BRIEF_STATE_DIR = stateDir;
-    process.env.RUBICON_DAILYFX_URL = "http://127.0.0.1:1/should-not-be-read";
     await fs.mkdir(appRoot, { recursive: true });
 
     const statePayload = {
@@ -39,9 +34,9 @@ describe("morning brief parsers", () => {
           id: "cached-event",
           impact: "high",
           sortMinute: 600,
-          source: "DailyFX",
+          source: "BLS",
           timeLabel: "10:00 AM",
-          title: "Cached DailyFX event",
+          title: "Cached US macro event",
         },
       ],
       trumpEvents: [],
@@ -49,7 +44,7 @@ describe("morning brief parsers", () => {
       majorEvents: [],
       liveUpdates: [],
       tc2000: emptyTc2000State(),
-      sources: [{ detail: "Cached state source.", label: "DailyFX", status: "ok" }],
+      sources: [{ detail: "Cached state source.", label: "US macro calendar", status: "ok" }],
     };
     await fs.mkdir(stateDir, { recursive: true });
     await fs.writeFile(morningBriefStatePath("2026-06-02", appRoot), JSON.stringify({ savedAt: "2026-06-02T11:01:00.000Z", payload: statePayload }, null, 2), "utf8");
@@ -57,12 +52,11 @@ describe("morning brief parsers", () => {
     try {
       const loaded = await loadMorningBrief("2026-06-02", appRoot);
 
-      expect(loaded.economicEvents.map((event) => event.title)).toEqual(["Cached DailyFX event"]);
+      expect(loaded.economicEvents.map((event) => event.title)).toEqual(["Cached US macro event"]);
       expect(loaded.generatedAt).toBe("2026-06-02T11:00:00.000Z");
       expect(loaded.sources.some((source) => source.label === "Morning brief state" && source.status === "ok")).toBe(true);
     } finally {
       restoreEnv("RUBICON_MORNING_BRIEF_STATE_DIR", originalStateDir);
-      restoreEnv("RUBICON_DAILYFX_URL", originalDailyFx);
       await fs.rm(tempDir, { recursive: true, force: true });
     }
   });
@@ -136,10 +130,10 @@ describe("morning brief parsers", () => {
     const appRoot = path.join(tempDir, "app");
     const stateDir = path.join(tempDir, "state");
     const originalStateDir = process.env.RUBICON_MORNING_BRIEF_STATE_DIR;
-    const originalDailyFx = process.env.RUBICON_DAILYFX_URL;
+    const originalMacroDisabled = process.env.RUBICON_US_MACRO_CALENDAR_DISABLED;
     const originalRollcall = process.env.RUBICON_ROLLCALL_URL;
     process.env.RUBICON_MORNING_BRIEF_STATE_DIR = stateDir;
-    process.env.RUBICON_DAILYFX_URL = "http://127.0.0.1:1/dailyfx";
+    process.env.RUBICON_US_MACRO_CALENDAR_DISABLED = "1";
     process.env.RUBICON_ROLLCALL_URL = "http://127.0.0.1:1/rollcall";
     await fs.mkdir(path.join(appRoot, "data"), { recursive: true });
 
@@ -154,183 +148,10 @@ describe("morning brief parsers", () => {
       expect(cached.sources.some((source: { label?: string }) => source.label === "Morning brief state")).toBe(true);
     } finally {
       restoreEnv("RUBICON_MORNING_BRIEF_STATE_DIR", originalStateDir);
-      restoreEnv("RUBICON_DAILYFX_URL", originalDailyFx);
+      restoreEnv("RUBICON_US_MACRO_CALENDAR_DISABLED", originalMacroDisabled);
       restoreEnv("RUBICON_ROLLCALL_URL", originalRollcall);
       await fs.rm(tempDir, { recursive: true, force: true });
     }
-  });
-
-  it("parses medium and high US rows from DailyFX-style calendar markup", () => {
-    const events = parseDailyFxCalendar(
-      `
-      <table>
-        <tr><td>8:30 AM</td><td>USD</td><td>Core PCE Price Index</td><td>High</td><td></td></tr>
-        <tr><td>9:45 AM</td><td>USD</td><td>Chicago PMI</td><td>Medium</td><td></td></tr>
-        <tr><td>10:00 AM</td><td>EUR</td><td>Euro Event</td><td>High</td><td></td></tr>
-        <tr><td>11:00 AM</td><td>USD</td><td>Low Event</td><td>Low</td><td></td></tr>
-      </table>
-      `,
-      "2026-05-29",
-    );
-
-    expect(events).toHaveLength(2);
-    expect(events.map((event) => event.title)).toEqual(["Core PCE Price Index", "Chicago PMI"]);
-    expect(events.map((event) => event.impact)).toEqual(["high", "medium"]);
-  });
-
-  it("parses medium and high US rows from the DailyFX/IG event API", () => {
-    const events = parseIgEconomicCalendarEvents(
-      [
-        {
-          country: "United States",
-          date: "2026-05-29T12:30:00Z",
-          event: "Goods Trade Balance Adv",
-          id: "goods",
-          importance: 2,
-          actual: "$-82.4B",
-          forecast: "$-86.5B",
-          previous: "$-85.3B",
-        },
-        {
-          country: "United States",
-          date: "2026-05-29T13:45:00Z",
-          event: "Chicago PMI",
-          id: "pmi",
-          importance: 3,
-        },
-        {
-          country: "United States",
-          date: "2026-05-29T17:00:00Z",
-          event: "Baker Hughes Oil Rig Count",
-          id: "rigs",
-          importance: 1,
-        },
-        {
-          country: "Australia",
-          date: "2026-05-29T01:30:00Z",
-          event: "Retail Sales",
-          id: "au-retail",
-          importance: 3,
-        },
-      ],
-      "2026-05-29",
-    );
-
-    expect(events).toHaveLength(2);
-    expect(events.map((event) => event.title)).toEqual(["Goods Trade Balance Adv", "Chicago PMI"]);
-    expect(events.map((event) => event.timeLabel)).toEqual(["8:30 AM", "9:45 AM"]);
-    expect(events.map((event) => event.impact)).toEqual(["medium", "high"]);
-    expect(events[0].coverage).toBe("Actual $-82.4B / Forecast $-86.5B / Previous $-85.3B");
-  });
-
-  it("labels DailyFX rows without release values as event-only", () => {
-    const events = parseIgEconomicCalendarEvents(
-      [
-        {
-          country: "United States",
-          date: "2026-05-29T13:10:00Z",
-          event: "Fed Bowman Speech",
-          id: "bowman",
-          importance: 2,
-          category: "Interest Rate",
-        },
-      ],
-      "2026-05-29",
-    );
-
-    expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({
-      coverage: "Event only - Interest Rate",
-      detail: "Event only - Interest Rate",
-      title: "Fed Bowman Speech",
-    });
-  });
-
-  it("builds this-week and next-week major events with native monthly OPEX", () => {
-    const events = parseIgMajorCalendarEvents(
-      [
-        {
-          country: "United States",
-          date: "2026-06-01T14:00:00Z",
-          event: "ISM Manufacturing PMI",
-          id: "ism",
-          importance: 3,
-          forecast: "53",
-          previous: "52.7",
-        },
-        {
-          country: "United States",
-          date: "2026-06-10T12:30:00Z",
-          event: "Inflation Rate YoY",
-          id: "cpi",
-          importance: 3,
-          previous: "3.8%",
-        },
-        {
-          country: "United States",
-          date: "2026-06-11T14:00:00Z",
-          event: "JOLTs Job Openings",
-          id: "jolts-medium",
-          importance: 2,
-          previous: "7.4M",
-        },
-        {
-          country: "United States",
-          date: "2026-06-05T17:00:00Z",
-          event: "Baker Hughes Total Rigs Count",
-          id: "rigs",
-          importance: 1,
-        },
-      ],
-      "2026-06-12",
-    );
-
-    expect(events.map((event) => event.title)).toEqual(["Inflation Rate YoY", "Monthly OPEX"]);
-    expect(events.map((event) => event.impact)).toEqual(["high", "market"]);
-    expect(events.map((event) => event.window)).toEqual(["thisWeek", "nextWeek"]);
-    expect(events[0].kind).toBe("inflation");
-    expect(events[1]).toMatchObject({
-      date: "2026-06-19",
-      kind: "opex",
-      source: "OPEX",
-    });
-  });
-
-  it("keeps source names visible while grouping simultaneous high-importance rows", () => {
-    const events = parseIgMajorCalendarEvents(
-      [
-        {
-          country: "United States",
-          date: "2026-06-05T12:30:00Z",
-          event: "Non Farm Payrolls",
-          id: "nfp",
-          importance: 3,
-          forecast: "85K",
-        },
-        {
-          country: "United States",
-          date: "2026-06-05T12:30:00Z",
-          event: "Unemployment Rate",
-          id: "unemployment",
-          importance: 3,
-          forecast: "4.3%",
-        },
-        {
-          country: "United States",
-          date: "2026-06-11T12:30:00Z",
-          event: "PPI MoM",
-          id: "ppi",
-          importance: 3,
-          previous: "1.4%",
-        },
-      ],
-      "2026-06-02",
-    );
-
-    expect(events.map((event) => event.title)).toEqual(["Non Farm Payrolls, Unemployment Rate", "PPI MoM"]);
-    expect(events[0].detail).toContain("Non Farm Payrolls");
-    expect(events[0].detail).toContain("Unemployment Rate");
-    expect(events[1].detail).toContain("PPI MoM");
   });
 
   it("parses actionable presidential events from a selected RollCall day", () => {

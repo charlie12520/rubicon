@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { TradeRecord } from "../shared/types";
-import { quickTradeAriaLabel, quickTradeCountLabel, quickTradeLabel } from "./quickTrades";
+import {
+  buildQuickSpreadGroups,
+  quickSpreadAriaLabel,
+  quickSpreadKey,
+  quickSpreadLabel,
+  quickTradeAriaLabel,
+  quickTradeCountLabel,
+  quickTradeLabel,
+} from "./quickTrades";
 
 describe("replay quick trade labels", () => {
   it("includes time, side, strikes, and size in compact quick-access labels", () => {
@@ -13,6 +21,22 @@ describe("replay quick trade labels", () => {
 
   it("summarizes every selected-date trade as quick checks", () => {
     expect(quickTradeCountLabel([trade({ id: "one" }), trade({ id: "two" }), trade({ id: "three" })])).toBe("3 quick checks");
+  });
+
+  it("groups same-date entries by side and strikes for spread-level replay", () => {
+    const groups = buildQuickSpreadGroups([
+      trade({ id: "call-a", contracts: 5, pnl: 125 }),
+      trade({ id: "put-a", side: "Put", shortStrike: 7555, longStrike: 7550, entryTime: "2026-05-28T09:45:00-04:00", contracts: 10, pnl: -50 }),
+      trade({ id: "call-b", entryTime: "2026-05-28T10:15:00-04:00", contracts: 15, pnl: 250 }),
+    ]);
+
+    expect(groups).toHaveLength(2);
+    expect(groups[0].trades.map((nextTrade) => nextTrade.id)).toEqual(["call-a", "call-b"]);
+    expect(groups[0].contracts).toBe(20);
+    expect(groups[0].pnl).toBe(375);
+    expect(quickSpreadKey(groups[0].trades[0])).toBe("2026-05-28:Call:7565:7570");
+    expect(quickSpreadLabel(groups[0])).toBe("Call 7565/7570 - 2 entries");
+    expect(quickSpreadAriaLabel(groups[0])).toContain("20 total contracts");
   });
 });
 

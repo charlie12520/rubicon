@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildDailySyncCommand, buildDailySyncTargetPlan, dailySyncCompletionAllowsDerivedStateRefresh, dailySyncSourceHealth, mergeDailySyncCompletionStatus, refreshDailySyncDerivedState, resolveDailySyncGoogleUploaded, selectDailySyncPreferredLogPath, spxHeatmapPayloadIsFilled, startDailySync, summaryGoogleUploaded } from "./dailySync.ts";
+import { buildDailySyncCommand, buildDailySyncTargetPlan, dailySyncCompletionAllowsDerivedStateRefresh, dailySyncSourceHealth, mergeDailySyncCompletionStatus, refreshDailySyncDerivedState, resolveDailySyncGoogleUploaded, resolveDailySyncRuntimeState, selectDailySyncPreferredLogPath, spxHeatmapPayloadIsFilled, startDailySync, summaryGoogleUploaded } from "./dailySync.ts";
 
 describe("daily SPX/IBKR sync launcher", () => {
   it("builds the guarded PowerShell wrapper command", () => {
@@ -222,6 +222,157 @@ describe("daily SPX/IBKR sync launcher", () => {
     expect(merged.pipelineState).toBe("completed");
     expect(merged.steps?.map((step) => step.id)).toEqual(["tc2000-open", "tc2000-export", "qullamaggie-report", "tc2000-bars"]);
     expect(merged.warnings).toEqual(["TC2000 Qullamaggie export failed or did not produce a fresh non-empty CSV."]);
+  });
+
+  it("does not fail a review-ready option retry just because the wrapper exits non-zero", () => {
+    const launched = {
+      ok: true,
+      state: "running" as const,
+      message: "Failed/missing option data retry started for 2026-06-08.",
+      generatedAt: "2026-06-08T21:16:59.028Z",
+      startedAt: "2026-06-08T21:16:59.028Z",
+      runId: "option-retry-2026-06-08-20260608211659",
+      targetDate: "2026-06-08",
+    };
+    const persisted = {
+      ...launched,
+      message: "Running bounded SPX spread-leg option pull.",
+      reviewReady: true,
+      googleUploaded: true,
+      pipelineState: "running" as const,
+      stages: {
+        dataCollection: {
+          id: "dataCollection" as const,
+          label: "Data Collection",
+          status: "complete" as const,
+          detail: "Manual option retry uses existing review-critical local files.",
+          blockers: [],
+          warnings: [],
+        },
+        rubiconIngest: {
+          id: "rubiconIngest" as const,
+          label: "Rubicon Ingest",
+          status: "complete" as const,
+          detail: "Manual option retry will refresh option-derived Rubicon state if needed.",
+          blockers: [],
+          warnings: [],
+        },
+        googleUpload: {
+          id: "googleUpload" as const,
+          label: "Google Upload",
+          status: "complete" as const,
+          detail: "Manual option retry does not change Google tracker rows.",
+          blockers: [],
+          warnings: [],
+        },
+      },
+      steps: [
+        { id: "sync-started", label: "Sync started", status: "complete" as const },
+        {
+          id: "option-spx-spread-legs",
+          label: "Option SPX spread legs",
+          status: "running" as const,
+          detail: "Running bounded SPX spread-leg option pull with hard timeout 360s.",
+        },
+        {
+          id: "option-open-interest",
+          label: "Option open interest",
+          status: "pending" as const,
+          detail: "Waiting for bounded option open-interest pull.",
+        },
+      ],
+    };
+
+    const merged = mergeDailySyncCompletionStatus({
+      exitCode: 2,
+      finishedAt: "2026-06-08T21:19:14.114Z",
+      launched,
+      persisted,
+    });
+
+    expect(merged.ok).toBe(true);
+    expect(merged.state).toBe("completed");
+    expect(merged.pipelineState).toBe("completed");
+    expect(merged.message).toContain("completed with warnings");
+    expect(merged.warnings?.join("\n")).toContain("launcher exited with code 2");
+    expect(merged.steps?.find((step) => step.id === "option-spx-spread-legs")?.status).toBe("warning");
+    expect(merged.steps?.find((step) => step.id === "option-open-interest")?.status).toBe("warning");
+  });
+
+  it("keeps local review ready while surfacing a missing Google payload as a stage error", () => {
+    const launched = {
+      ok: true,
+      state: "running" as const,
+      message: "Daily pipeline started.",
+      generatedAt: "2026-06-08T20:00:09.151Z",
+      startedAt: "2026-06-08T20:00:09.151Z",
+      targetDate: "2026-06-08",
+    };
+    const persisted = {
+      ...launched,
+      reviewReady: true,
+      stages: {
+        dataCollection: {
+          id: "dataCollection" as const,
+          label: "Data Collection",
+          status: "complete" as const,
+          detail: "Local review data is usable.",
+        },
+        rubiconIngest: {
+          id: "rubiconIngest" as const,
+          label: "Rubicon Ingest",
+          status: "complete" as const,
+          detail: "Rubicon state refreshed.",
+        },
+        googleUpload: {
+          id: "googleUpload" as const,
+          label: "Google Upload",
+          status: "failed" as const,
+          detail: "Google Sheet upload payload missing.",
+          blockers: ["No google_sheet_upload_payload.json found for 2026-06-08."],
+        },
+      },
+    };
+
+    const merged = mergeDailySyncCompletionStatus({
+      exitCode: 2,
+      finishedAt: "2026-06-08T20:06:56.984Z",
+      launched,
+      persisted,
+    });
+
+    expect(merged.ok).toBe(true);
+    expect(merged.state).toBe("completed");
+    expect(merged.reviewReady).toBe(true);
+    expect(merged.googleUploaded).toBe(false);
+    expect(merged.pipelineState).toBe("failed-with-stage-errors");
+  });
+
+  it("downgrades persisted running status when the lock is stale and no process is active", () => {
+    expect(
+      resolveDailySyncRuntimeState({
+        activeProcess: false,
+        persistedState: "running",
+        lockActive: false,
+        lockStale: true,
+      }),
+    ).toBe("failed");
+    expect(
+      resolveDailySyncRuntimeState({
+        activeProcess: false,
+        persistedState: "completed",
+        lockActive: false,
+        lockStale: true,
+      }),
+    ).toBe("completed");
+    expect(
+      resolveDailySyncRuntimeState({
+        activeProcess: false,
+        persistedState: "idle",
+        lockActive: false,
+        lockStale: false,
+      }),
+    ).toBe("idle");
   });
 
   it("treats a missing Google receipt as unknown, not false", () => {

@@ -346,6 +346,26 @@ async function readDailySyncLock(): Promise<DailySyncLockInfo> {
   };
 }
 
+export function resolveDailySyncRuntimeState({
+  activeProcess,
+  lockActive,
+  lockStale,
+  persistedState,
+}: {
+  activeProcess: boolean;
+  lockActive: boolean;
+  lockStale?: boolean;
+  persistedState?: DailySyncStatusResult["state"];
+}): DailySyncStatusResult["state"] {
+  if (activeProcess || lockActive) {
+    return "running";
+  }
+  if (persistedState === "running" && lockStale) {
+    return "failed";
+  }
+  return persistedState ?? "idle";
+}
+
 async function clearStaleDailySyncLock(lock: DailySyncLockInfo): Promise<void> {
   if (!lock.stale) {
     return;
@@ -631,7 +651,7 @@ export function summaryGoogleUploaded(summary: DailySyncLatestSummary | undefine
   if (status === "complete" || status === "uploaded") {
     return true;
   }
-  if (status === "failed" || status === "error") {
+  if (status === "failed" || status === "error" || status === "missing_payload" || status === "missing-payload" || status === "payload_missing" || status === "missing") {
     return false;
   }
   return undefined;
@@ -691,6 +711,60 @@ function stepsWithSummaryGoogleUpload(steps: DailySyncStep[] | undefined, summar
     );
 }
 
+function terminalizeStepAfterClose(step: DailySyncStep, finishedAt: string, wrapperExitCode: number | null): DailySyncStep {
+  if (step.status !== "running" && step.status !== "pending") {
+    return step;
+  }
+  const exitText = wrapperExitCode === 0 || wrapperExitCode === null ? "the launcher closed" : `the launcher exited with code ${wrapperExitCode}`;
+  return {
+    ...step,
+    detail:
+      step.status === "running"
+        ? `${step.detail ?? step.label} ${exitText}; no further live progress is active.`
+        : `${step.detail ?? step.label} was not reached before ${exitText}.`,
+    status: "warning",
+    updatedAt: finishedAt,
+  };
+}
+
+function terminalizeStepsAfterClose(steps: DailySyncStep[] | undefined, finishedAt: string, wrapperExitCode: number | null): DailySyncStep[] | undefined {
+  return steps?.map((step) => terminalizeStepAfterClose(step, finishedAt, wrapperExitCode));
+}
+
+function terminalizeStageAfterClose(stage: DailyPipelineStage, finishedAt: string, wrapperExitCode: number | null): DailyPipelineStage {
+  if (stage.status !== "running" && stage.status !== "pending") {
+    return stage;
+  }
+  const exitText = wrapperExitCode === 0 || wrapperExitCode === null ? "the launcher closed" : `the launcher exited with code ${wrapperExitCode}`;
+  return {
+    ...stage,
+    detail:
+      stage.status === "running"
+        ? `${stage.detail ?? stage.label} stopped when ${exitText}.`
+        : `${stage.detail ?? stage.label} was not reached before ${exitText}.`,
+    status: "warning",
+    updatedAt: finishedAt,
+  };
+}
+
+function terminalizeStagesAfterClose(stages: DailyPipelineStages, finishedAt: string, wrapperExitCode: number | null): DailyPipelineStages {
+  return {
+    dataCollection: terminalizeStageAfterClose(stages.dataCollection, finishedAt, wrapperExitCode),
+    rubiconIngest: terminalizeStageAfterClose(stages.rubiconIngest, finishedAt, wrapperExitCode),
+    googleUpload: terminalizeStageAfterClose(stages.googleUpload, finishedAt, wrapperExitCode),
+  };
+}
+
+function warningListWithWrapperExit(warnings: string[], exitCode: number | null, hardFailure: boolean): string[] {
+  if (exitCode === 0 || exitCode === null || hardFailure) {
+    return warnings;
+  }
+  return [
+    ...warnings,
+    `Daily sync launcher exited with code ${exitCode}, but review-critical local data is ready; treating this as a non-blocking launcher warning.`,
+  ];
+}
+
 function pipelineStateFromStages(
   stages: DailyPipelineStages,
   state: DailySyncStatusResult["state"],
@@ -726,9 +800,11 @@ export function mergeDailySyncCompletionStatus({
   persisted,
 }: DailySyncCompletionMergeInput): DailySyncStatusResult {
   const base = persisted ?? launched;
-  const warnings = Array.isArray(base.warnings) ? base.warnings.filter(Boolean) : [];
-  const steps = Array.isArray(base.steps) ? base.steps : launched.steps;
-  const stages = normalizeStages(base, launched.startedAt);
+  const baseWarnings = Array.isArray(base.warnings) ? base.warnings.filter(Boolean) : [];
+  const rawSteps = Array.isArray(base.steps) ? base.steps : launched.steps;
+  const steps = terminalizeStepsAfterClose(rawSteps, finishedAt, exitCode);
+  const normalizedBase = { ...base, steps };
+  const stages = terminalizeStagesAfterClose(normalizeStages(normalizedBase, launched.startedAt), finishedAt, exitCode);
   const reviewReady = base.reviewReady ?? pipelineReviewReady(stages);
   const googleUploaded = resolveDailySyncGoogleUploaded({
     currentSummary: base.latestSummary,
@@ -736,22 +812,28 @@ export function mergeDailySyncCompletionStatus({
     persistedGoogleUploaded: base.googleUploaded,
     stages,
   });
-  const processFailed = exitCode !== 0;
-  const failed = processFailed || !reviewReady;
-  const pipelineState = base.pipelineState ?? pipelineStateFromStages(stages, failed ? "failed" : "completed", processFailed);
+  const hardFailure = !reviewReady || stageHasBlockers(stages.dataCollection) || stageHasBlockers(stages.rubiconIngest);
+  const warnings = warningListWithWrapperExit(baseWarnings, exitCode, hardFailure);
+  const state: DailySyncStatusResult["state"] = hardFailure ? "failed" : "completed";
+  const pipelineState = pipelineStateFromStages(stages, state, hardFailure);
   const launchMessage = launched.message;
-  const fallbackMessage = failed
+  const fallbackMessage = hardFailure
     ? `Daily pipeline exited with code ${exitCode ?? "unknown"}.`
-    : warnings.length
-      ? "Daily pipeline completed with stage warnings."
+    : warnings.length || pipelineState !== "completed"
+      ? "Daily pipeline completed with warnings."
       : "Daily pipeline completed.";
-  const message = base.message && base.message !== launchMessage ? base.message : fallbackMessage;
+  const message =
+    !hardFailure && base.message && /running|waiting/i.test(base.message)
+      ? fallbackMessage
+      : base.message && base.message !== launchMessage
+        ? base.message
+        : fallbackMessage;
 
   return {
     ...launched,
     ...base,
-    ok: !failed,
-    state: failed ? "failed" : "completed",
+    ok: !hardFailure,
+    state,
     message,
     exitCode,
     finishedAt,
@@ -1033,8 +1115,14 @@ export async function dailySyncSourceHealth(): Promise<SourceHealth> {
 export async function getDailySyncStatus(): Promise<DailySyncStatusResult> {
   const persisted = await readJson<DailySyncStatusResult | null>(DAILY_SYNC_STATUS_PATH, null);
   const lock = await readDailySyncLock();
+  const generatedAt = new Date().toISOString();
   const targetPlan = activeDailySync || lock.active ? persisted?.targetPlan ?? buildDailySyncTargetPlan("auto") : buildDailySyncTargetPlan("auto");
-  const statusState = activeDailySync || lock.active ? "running" : persisted?.state ?? "idle";
+  const runtimeState = resolveDailySyncRuntimeState({
+    activeProcess: Boolean(activeDailySync),
+    lockActive: lock.active,
+    lockStale: lock.stale,
+    persistedState: persisted?.state,
+  });
   const targetDate = persisted?.targetDate ?? persisted?.targetPlan?.estimatedTargetDate ?? lock.targetDate;
   const runId = persisted?.runId ?? lock.runId;
   const latestPipelineRun = await latestDailySummary();
@@ -1044,30 +1132,55 @@ export async function getDailySyncStatus(): Promise<DailySyncStatusResult> {
     : undefined;
   const currentSummary = currentRunSummary ?? targetSummary ?? persisted?.latestSummary;
   const latestLog = await latestAnalysisLog(selectDailySyncPreferredLogPath({ currentSummary: currentRunSummary, targetSummary, persistedSummary: persisted?.latestSummary }));
-  const stages = stagesWithSummaryGoogleUpload(normalizeStages(persisted, persisted?.startedAt), currentRunSummary ?? targetSummary);
+  const closeMarker = persisted?.finishedAt ?? generatedAt;
+  const wrapperExitCode = persisted?.exitCode ?? null;
+  const rawStages = stagesWithSummaryGoogleUpload(normalizeStages(persisted, persisted?.startedAt), currentRunSummary ?? targetSummary);
+  const stages = runtimeState === "running" ? rawStages : terminalizeStagesAfterClose(rawStages, closeMarker, wrapperExitCode);
   const reviewReady = persisted?.reviewReady ?? pipelineReviewReady(stages);
+  const statusState =
+    runtimeState === "failed" && persisted?.reviewReady === true && !stageHasBlockers(stages.dataCollection) && !stageHasBlockers(stages.rubiconIngest)
+      ? "completed"
+      : runtimeState;
   const googleUploaded = resolveDailySyncGoogleUploaded({
     currentSummary: currentRunSummary,
     targetSummary,
     persistedGoogleUploaded: persisted?.googleUploaded,
     stages,
   });
-  const pipelineState = summaryGoogleUploaded(currentRunSummary ?? targetSummary) ? pipelineStateFromStages(stages, statusState) : persisted?.pipelineState ?? pipelineStateFromStages(stages, statusState);
+  const pipelineState =
+    statusState === "failed" && persisted?.state === "running" && lock.stale
+      ? "failed"
+      : summaryGoogleUploaded(currentRunSummary ?? targetSummary)
+        ? pipelineStateFromStages(stages, statusState)
+        : persisted?.pipelineState === "running" && statusState !== "running"
+          ? pipelineStateFromStages(stages, statusState)
+          : persisted?.state !== statusState && statusState !== "running"
+            ? pipelineStateFromStages(stages, statusState)
+            : persisted?.pipelineState ?? pipelineStateFromStages(stages, statusState);
   const runningMessage = lock.active && !activeDailySync
     ? lock.message ?? "Daily pipeline is running from another process."
     : persisted?.message ?? "Daily pipeline is running.";
+  const completedMessage = pipelineState === "completed" ? "Daily pipeline completed." : "Daily pipeline completed with warnings.";
+  const message =
+    statusState === "running"
+      ? runningMessage
+      : statusState === "completed" && persisted?.message && /running|waiting/i.test(persisted.message)
+        ? completedMessage
+        : persisted?.message ?? "Daily pipeline is idle.";
+  const rawSteps = stepsWithSummaryGoogleUpload(persisted?.steps, currentSummary);
+  const steps = statusState === "running" ? rawSteps : terminalizeStepsAfterClose(rawSteps, closeMarker, wrapperExitCode);
 
   return {
-    ok: persisted?.ok ?? true,
+    ok: statusState === "failed" ? false : statusState === "completed" && reviewReady ? true : persisted?.ok ?? true,
     state: statusState,
-    message: statusState === "running" ? runningMessage : persisted?.message ?? "Daily pipeline is idle.",
+    message,
     command: persisted?.command,
     cwd: persisted?.cwd ?? IBKR_ROOT,
     catchup: persisted?.catchup,
     dryRun: persisted?.dryRun,
     exitCode: persisted?.exitCode,
     finishedAt: persisted?.finishedAt,
-    generatedAt: new Date().toISOString(),
+    generatedAt,
     googleUploaded,
     latestLogPath: latestLog?.path,
     latestLogTail: latestLog?.tail,
@@ -1082,7 +1195,7 @@ export async function getDailySyncStatus(): Promise<DailySyncStatusResult> {
     startedAt: persisted?.startedAt,
     stages,
     targetDate,
-    steps: stepsWithSummaryGoogleUpload(persisted?.steps, currentSummary),
+    steps,
     targetPlan,
     warnings: persisted?.warnings,
   };

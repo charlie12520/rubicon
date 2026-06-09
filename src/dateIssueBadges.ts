@@ -31,7 +31,7 @@ export function issueBadgeForSummary(summary: DailySummary, options: DateIssueBa
     tradeCount: options.tradeCount ?? options.tradeCountsByDate?.get(summary.date) ?? summary.entryCount,
     tradeCountsByDate: options.tradeCountsByDate,
   });
-  const failedOutputs = model.reviewItems.filter((item) => item.status === "failed");
+  const failedOutputs = model.reviewItems.filter((item) => item.status === "failed" && item.importance === "core");
   const count = failedOutputs.length;
   if (count <= 0) {
     return null;

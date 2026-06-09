@@ -86,6 +86,28 @@ describe("daily sync progress", () => {
     expect(progress.percent).toBeCloseTo(62.5);
   });
 
+  it("does not render a running label for a closed status with stale running steps", () => {
+    const progress = buildDailySyncProgress(status({
+      ok: false,
+      state: "failed",
+      pipelineState: "failed",
+      message: "Daily sync launcher exited before status cleanup.",
+      steps: [
+        { id: "sync-started", label: "Sync started", status: "complete" },
+        {
+          id: "option-spx-spread-legs",
+          label: "Option SPX spread legs",
+          status: "running",
+          detail: "Running bounded SPX spread-leg option pull.",
+        },
+      ],
+    }));
+
+    expect(progress.tone).toBe("error");
+    expect(progress.label).not.toContain("Running:");
+    expect(progress.detail).toBe("Daily sync launcher exited before status cleanup.");
+  });
+
   it("forces completed pipeline state to full progress", () => {
     const progress = buildDailySyncProgress(status({
       pipelineState: "completed",

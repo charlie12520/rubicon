@@ -112,7 +112,13 @@ export function buildDailySyncProgress(status: DailySyncStatusResult | null | un
   const steps = normalizeSteps(status);
   const totalSteps = steps.length;
   const completeOrWarningCount = steps.filter((step) => FINISHED_STEP_STATUSES.has(step.status)).length;
-  const runningStep = steps.find((step) => step.status === "running");
+  const statusClosed =
+    status?.state === "failed" ||
+    status?.state === "completed" ||
+    status?.pipelineState === "failed" ||
+    status?.pipelineState === "failed-with-stage-errors" ||
+    status?.pipelineState === "completed";
+  const runningStep = statusClosed ? undefined : steps.find((step) => step.status === "running");
   const failedStep = steps.find((step) => step.status === "failed");
   const hasWarnings = steps.some((step) => step.status === "warning") || Boolean(status?.warnings?.length);
   const failed = Boolean(failedStep) || isFailedStatus(status);
@@ -142,6 +148,8 @@ export function buildDailySyncProgress(status: DailySyncStatusResult | null | un
   const currentStepProgressLabel = formatStepProgressLabel(currentStep?.progress);
   const label = failedStep
     ? `Stopped at ${failedStep.label}`
+    : failed
+      ? "Sync stopped"
     : runningStep
       ? `Running: ${runningStep.label}`
       : completed && hasWarnings

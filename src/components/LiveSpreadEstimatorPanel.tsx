@@ -41,7 +41,7 @@ type SpxFeedControl = {
 
 const muted: CSSProperties = { fontSize: 11, color: "#9ca3af" };
 
-function currentMinutesToClose(now = new Date()): number {
+export function currentMinutesToClose(now = new Date()): number {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/New_York",
     hour: "2-digit",
@@ -90,7 +90,17 @@ export function LiveSpreadEstimatorPanel({ holdings, todayEt, refreshing, onRefr
     return null;
   }, [selection.spot, bars]);
 
-  const minutesToClose = useMemo(() => currentMinutesToClose(), [holdings]);
+  // Tick a wall clock (live only) so the expected-move cone and the P/L curve's theta
+  // keep advancing toward 16:00 ET even when holdings/bars aren't refreshing. Without
+  // this, minutesToClose was memoized on [holdings] and the cone width froze between
+  // (gated) holdings polls. Replay anchors to the bar clock instead, so it doesn't tick.
+  const [nowTs, setNowTs] = useState(() => Date.now());
+  useEffect(() => {
+    if (spxBarsLive === false) return;
+    const id = window.setInterval(() => setNowTs(Date.now()), 20_000);
+    return () => window.clearInterval(id);
+  }, [spxBarsLive]);
+  const minutesToClose = useMemo(() => currentMinutesToClose(new Date(nowTs)), [nowTs]);
 
   const openOptions = useMemo<EstimatorSpreadOption[]>(
     () => selection.spreads.map((spread) => ({ spread, status: "open" as const })),

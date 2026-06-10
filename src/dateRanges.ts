@@ -26,6 +26,14 @@ function addDays(date: Date, days: number): Date {
   return copy;
 }
 
+export function previousTradingSessionDate(day: string): string {
+  let previous = addDays(asDate(day), -1);
+  while (previous.getDay() === 0 || previous.getDay() === 6) {
+    previous = addDays(previous, -1);
+  }
+  return isoDay(previous);
+}
+
 function mondayStart(date: Date): Date {
   const copy = new Date(date);
   const day = copy.getDay();
@@ -42,7 +50,7 @@ export function resolveRange(range: RangeId, today: string, customDate: string):
     return { start: today, end: today, label: today };
   }
   if (range === "yesterday") {
-    const yesterday = isoDay(addDays(base, -1));
+    const yesterday = previousTradingSessionDate(today);
     return { start: yesterday, end: yesterday, label: yesterday };
   }
   if (range === "thisWeek") {

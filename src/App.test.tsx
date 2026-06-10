@@ -144,6 +144,35 @@ describe("App Replay state routing", () => {
     await waitFor(() => expect(screen.getByTestId("replay-charts").getAttribute("data-replay-date")).toBe("2026-06-01"));
   });
 
+  it("routes the Yesterday preset on Monday to the prior Friday session", async () => {
+    const trades = [
+      tradeFixture("friday-trade", "2026-06-05", "09:45", "Put"),
+      tradeFixture("monday-trade", "2026-06-08", "09:45", "Call"),
+    ];
+    fetchTrackerMock.mockResolvedValue(snapshotFixture({
+      availableDates: ["2026-06-05", "2026-06-08"],
+      dailySummaries: [
+        dailySummaryFixture("2026-06-05", 1),
+        dailySummaryFixture("2026-06-08", 1),
+      ],
+      latestTradeDate: "2026-06-08",
+      today: "2026-06-08",
+      trades,
+    }));
+    fetchReplayMock.mockImplementation((date) => Promise.resolve(replayPayloadFixture(date)));
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("tab", { name: "Replay" }));
+
+    await waitFor(() => expect(screen.getByTestId("replay-charts").getAttribute("data-replay-date")).toBe("2026-06-08"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Yesterday" }));
+
+    await waitFor(() => expect(screen.getByTestId("replay-charts").getAttribute("data-replay-date")).toBe("2026-06-05"));
+    expect(screen.getByDisplayValue("2026-06-05")).toBeTruthy();
+    expect(screen.getByTestId("replay-charts").getAttribute("data-selected-trade")).toBe("friday-trade");
+  });
+
   it("keeps the date-scoped Replay payload when selecting another spread", async () => {
     fetchReplayMock.mockResolvedValue(replayPayloadFixture("2026-06-02"));
 

@@ -30,7 +30,7 @@ import {
 } from "lucide-react";
 import type { DailySummary, DailySyncStatusResult, DailySyncStepStatus, ReplayPayload, SourceHealth, SpreadMark, SpreadSpeedPayload, SpxBar, SpxLiveBarsLiveStatus, TrackerSnapshot, TradeRecord, WalletSnapshot } from "../shared/types";
 import { fetchDailySyncStatus, fetchLiveSpreadSpeed, fetchLiveSpreadSpeedStatus, fetchReplay, fetchSpreadSpeed, fetchTracker, refreshGoogleSnapshot, runDailyOptionPull, runDailySync, saveTradeJournalSnapshot, startLiveSpreadSpeed, stopLiveSpreadSpeed } from "./api";
-import { rangePresets, tradesInRange, type RangeId } from "./dateRanges";
+import { previousTradingSessionDate, rangePresets, tradesInRange, type RangeId } from "./dateRanges";
 import { formatCurrency, formatNumber, formatPercent, formatSignedCurrency } from "./format";
 import { buildDailyReview, REPLAY_SPEEDS, summarizeTrades } from "./stats";
 import { reviewActionDirectionLabel } from "./dailyReviewSide";
@@ -995,10 +995,9 @@ function App() {
                     showFullDayReplay();
                   }
                   if (preset.id === "yesterday") {
-                    const yesterday = new Date(`${marketToday}T12:00:00`);
-                    yesterday.setDate(yesterday.getDate() - 1);
-                    setSelectedDate(yesterday.toLocaleDateString("en-CA"));
-                    setCustomDate(yesterday.toLocaleDateString("en-CA"));
+                    const yesterday = previousTradingSessionDate(marketToday);
+                    setSelectedDate(yesterday);
+                    setCustomDate(yesterday);
                     setSelectedSpreadKey(undefined);
                     showFullDayReplay();
                   }

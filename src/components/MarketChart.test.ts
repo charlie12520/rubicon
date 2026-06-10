@@ -34,7 +34,7 @@ describe("replay event marker layout", () => {
     ]);
   });
 
-  it("keeps dense triangle markers within bounds without overlapping on a narrow chart", () => {
+  it("anchors every replay arrow tip to the event coordinate", () => {
     const layouts = layoutEventMarkers(
       [
         marker("entry", "E1 09:31", 36, 138),
@@ -50,22 +50,60 @@ describe("replay event marker layout", () => {
     );
 
     for (const layout of layouts) {
-      expect(layout.markerWidth).toBeLessThanOrEqual(11);
-      expect(layout.markerHeight).toBeLessThanOrEqual(11);
-      expect(layout.markerX).toBeGreaterThanOrEqual(4);
-      expect(layout.markerY).toBeGreaterThanOrEqual(4);
-      expect(layout.markerX + layout.markerWidth).toBeLessThanOrEqual(176);
-      expect(layout.markerY + layout.markerHeight).toBeLessThanOrEqual(176);
-    }
-
-    for (let leftIndex = 0; leftIndex < layouts.length; leftIndex += 1) {
-      for (let rightIndex = leftIndex + 1; rightIndex < layouts.length; rightIndex += 1) {
-        expect(overlaps(layouts[leftIndex], layouts[rightIndex])).toBe(false);
-      }
+      expect(layout.chartHeight).toBe(180);
+      expect(layout.markerWidth).toBe(24);
+      expect(layout.markerHeight).toBe(30);
+      expect(layout.railWidth).toBeGreaterThan(0);
+      expect(layout.markerX + layout.tipX).toBeCloseTo(layout.anchorX, 5);
+      expect(layout.markerY + layout.tipY).toBeCloseTo(layout.anchorY, 5);
     }
   });
 
-  it("points entry triangles from below and exit triangles from above", () => {
+  it("groups overlapping vertical rails without merging the event arrows", () => {
+    const layouts = layoutEventMarkers(
+      [
+        marker("entry", "E6 11:19", 111, 141),
+        marker("entry", "E7 11:27", 116, 142),
+        marker("entry", "E8 11:30", 118, 142),
+        marker("exit", "X6 11:33", 128, 108),
+      ],
+      { width: 180, height: 180 },
+    );
+
+    const groupedEntries = layouts.filter((layout) => layout.kind === "entry");
+    expect(groupedEntries).toHaveLength(3);
+    expect(groupedEntries.filter((layout) => layout.showRail)).toHaveLength(1);
+    expect(groupedEntries.every((layout) => layout.railGrouped)).toBe(true);
+    expect(groupedEntries[0].railKind).toBe("entry");
+    expect(groupedEntries[0].railWidth).toBeGreaterThan(3);
+    expect(groupedEntries[0].railX).toBeLessThanOrEqual(111);
+
+    for (const layout of groupedEntries) {
+      expect(layout.markerX + layout.tipX).toBeCloseTo(layout.anchorX, 5);
+      expect(layout.markerY + layout.tipY).toBeCloseTo(layout.anchorY, 5);
+    }
+
+    const isolatedExit = layouts.find((layout) => layout.kind === "exit");
+    expect(isolatedExit?.showRail).toBe(true);
+    expect(isolatedExit?.railGrouped).toBe(false);
+    expect(isolatedExit?.railWidth).toBe(3);
+  });
+
+  it("uses one mixed rail when entry and exit rails collide", () => {
+    const layouts = layoutEventMarkers(
+      [
+        marker("entry", "E1 09:31", 90, 100),
+        marker("exit", "X1 09:31", 94, 100),
+      ],
+      { width: 240, height: 180 },
+    );
+
+    expect(layouts.filter((layout) => layout.showRail)).toHaveLength(1);
+    expect(layouts.every((layout) => layout.railKind === "mixed")).toBe(true);
+    expect(layouts.every((layout) => layout.railGrouped)).toBe(true);
+  });
+
+  it("draws entries from below and exits from above while keeping the tip anchored", () => {
     const layouts = layoutEventMarkers(
       [
         marker("entry", "E1 09:31", 90, 100),
@@ -77,8 +115,11 @@ describe("replay event marker layout", () => {
     const entry = layouts.find((layout) => layout.kind === "entry");
     const exit = layouts.find((layout) => layout.kind === "exit");
 
-    expect(entry?.markerY).toBeGreaterThanOrEqual(entry?.anchorY ?? 0);
-    expect((exit?.markerY ?? 0) + (exit?.markerHeight ?? 0)).toBeLessThanOrEqual(exit?.anchorY ?? 0);
+    expect(entry?.tipY).toBe(0);
+    expect(entry?.markerY).toBe(entry?.anchorY);
+    expect((entry?.markerY ?? 0) + (entry?.tipY ?? 0)).toBe(entry?.anchorY);
+    expect(exit?.tipY).toBe(exit?.markerHeight);
+    expect((exit?.markerY ?? 0) + (exit?.markerHeight ?? 0)).toBe(exit?.anchorY);
   });
 });
 
@@ -91,17 +132,4 @@ function marker(kind: "entry" | "exit", label: string, x: number, y: number) {
     x,
     y,
   };
-}
-
-function overlaps(
-  left: { markerX: number; markerY: number; markerWidth: number; markerHeight: number },
-  right: { markerX: number; markerY: number; markerWidth: number; markerHeight: number },
-): boolean {
-  const gap = 2;
-  return !(
-    left.markerX + left.markerWidth + gap <= right.markerX
-    || right.markerX + right.markerWidth + gap <= left.markerX
-    || left.markerY + left.markerHeight + gap <= right.markerY
-    || right.markerY + right.markerHeight + gap <= left.markerY
-  );
 }

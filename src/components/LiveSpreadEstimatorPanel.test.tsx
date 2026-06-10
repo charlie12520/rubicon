@@ -9,7 +9,7 @@ import type { IbkrHoldingPosition, IbkrHoldingsSnapshot } from "../../shared/typ
 // subtitle, and P/L readout — stub the chart child so jsdom doesn't choke.
 vi.mock("./EstimatorSpxChart", () => ({ EstimatorSpxChart: () => null }));
 
-import { LiveSpreadEstimatorPanel } from "./LiveSpreadEstimatorPanel";
+import { LiveSpreadEstimatorPanel, currentMinutesToClose } from "./LiveSpreadEstimatorPanel";
 
 function pos(overrides: Partial<IbkrHoldingPosition>): IbkrHoldingPosition {
   return {
@@ -65,5 +65,21 @@ describe("LiveSpreadEstimatorPanel", () => {
     expect(screen.getAllByText(/CCS 6620\/6625/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/PCS 6580\/6575/).length).toBeGreaterThan(0);
     expect(screen.getByText(/portfolio P\/L if SPX/i)).toBeTruthy();
+  });
+});
+
+describe("currentMinutesToClose", () => {
+  it("counts the wall clock down to 16:00 ET so the cone + theta advance as time passes", () => {
+    // Fixed UTC instants → ET (EDT, UTC-4 in June): 11:00, 11:20, 15:00 ET.
+    const at1100 = currentMinutesToClose(new Date("2026-06-08T15:00:00Z"));
+    const at1120 = currentMinutesToClose(new Date("2026-06-08T15:20:00Z"));
+    const at1500 = currentMinutesToClose(new Date("2026-06-08T19:00:00Z"));
+    // Strictly decreasing as time passes — the property the cone fix relies on.
+    expect(at1100).toBeGreaterThan(at1120);
+    expect(at1120).toBeGreaterThan(at1500);
+    // And it is the real minutes to the 16:00 close.
+    expect(at1100).toBeCloseTo(300, 0);
+    expect(at1100 - at1120).toBeCloseTo(20, 0);
+    expect(at1500).toBeCloseTo(60, 0);
   });
 });

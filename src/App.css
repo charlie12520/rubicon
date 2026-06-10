@@ -5558,7 +5558,7 @@ h2 {
   display: block;
   --event-color: #f59e0b;
   color: var(--event-color);
-  filter: drop-shadow(0 0 5px rgba(245, 158, 11, 0.36));
+  filter: drop-shadow(0 0 5px rgba(245, 158, 11, 0.46));
   line-height: 0;
   overflow: visible;
   pointer-events: auto;
@@ -5567,42 +5567,70 @@ h2 {
 .trade-cross.exit {
   --event-color: #fb7185;
   color: var(--event-color);
-  filter: drop-shadow(0 0 5px rgba(251, 113, 133, 0.34));
+  filter: drop-shadow(0 0 5px rgba(251, 113, 133, 0.44));
 }
 
-.trade-cross-triangle {
-  position: absolute;
-  inset: 0;
+.trade-cross svg {
+  position: relative;
+  z-index: 2;
   display: block;
+  overflow: visible;
   pointer-events: none;
 }
 
-.trade-cross.entry .trade-cross-triangle {
-  clip-path: polygon(50% 0, 100% 100%, 0 100%);
-}
-
-.trade-cross.exit .trade-cross-triangle {
-  clip-path: polygon(0 0, 100% 0, 50% 100%);
-}
-
-.trade-cross-triangle.outline {
-  inset: -1px;
-  background: rgba(3, 7, 12, 0.98);
-}
-
-.trade-cross-triangle.fill {
-  background: currentColor;
-  opacity: 0.96;
-}
-
-.trade-cross-leader {
+.trade-cross-candle-rail {
   position: absolute;
+  z-index: 1;
   display: block;
-  height: 1px;
-  background: currentColor;
-  opacity: 0.26;
-  transform-origin: left center;
+  width: 3px;
+  border-left: 1px solid currentColor;
+  background: color-mix(in srgb, currentColor 5%, transparent);
+  box-shadow:
+    0 0 0 1px rgba(3, 7, 12, 0.34),
+    0 0 4px color-mix(in srgb, currentColor 18%, transparent);
+  opacity: 0.58;
+  transform: translateX(-0.5px);
   pointer-events: none;
+}
+
+.trade-cross-candle-rail.grouped {
+  border-right: 1px solid currentColor;
+  background: color-mix(in srgb, currentColor 4%, transparent);
+  box-shadow:
+    inset 0 0 0 1px rgba(3, 7, 12, 0.26),
+    0 0 3px color-mix(in srgb, currentColor 12%, transparent);
+  opacity: 0.48;
+  transform: translateX(0);
+}
+
+.trade-cross-candle-rail.mixed {
+  color: #f8d779;
+  background:
+    linear-gradient(90deg, rgba(245, 158, 11, 0.08), rgba(251, 113, 133, 0.08)),
+    color-mix(in srgb, currentColor 3%, transparent);
+}
+
+.trade-cross-arrow-stem {
+  stroke: currentColor;
+  stroke-width: 2.2px;
+  stroke-linecap: round;
+  opacity: 0.9;
+  vector-effect: non-scaling-stroke;
+}
+
+.trade-cross-arrow-head {
+  fill: currentColor;
+  stroke: #05080d;
+  stroke-width: 1.5px;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.trade-cross-anchor-dot {
+  fill: #05080d;
+  stroke: currentColor;
+  stroke-width: 1.5px;
+  vector-effect: non-scaling-stroke;
 }
 
 .trade-entry-meta {

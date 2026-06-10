@@ -53,21 +53,32 @@ type EventMarkerCluster = {
   events: PositionedTradeChartEvent[];
 };
 
-export type EventMarkerLayout = EventMarkerCluster & {
+type EventMarkerLayoutBase = EventMarkerCluster & {
+  chartHeight: number;
   markerX: number;
   markerY: number;
   markerWidth: number;
   markerHeight: number;
-  leaderAngle: number;
-  leaderLength: number;
+  tipX: number;
+  tipY: number;
 };
 
-const MARKER_TRIANGLE_SIZE = 11;
-const MARKER_TRIANGLE_EDGE_PADDING = 4;
-const MARKER_TRIANGLE_OVERLAP_GAP = 2;
-const MARKER_TRIANGLE_OFFSETS = [0, -14, 14, -28, 28, -42, 42];
-const MARKER_TRIANGLE_VERTICAL_OFFSETS = [0, 14, 28, 42];
+export type EventMarkerLayout = EventMarkerLayoutBase & {
+  showRail: boolean;
+  railX: number;
+  railWidth: number;
+  railKind: TradeChartEvent["kind"] | "mixed";
+  railGrouped: boolean;
+  railTitle: string;
+};
+
+const MARKER_ARROW_WIDTH = 24;
+const MARKER_ARROW_HEIGHT = 30;
+const MARKER_ARROW_HEAD_HALF_WIDTH = 6;
+const MARKER_ARROW_HEAD_LENGTH = 8;
 const MARKER_DUPLICATE_TOLERANCE = 5;
+const MARKER_RAIL_WIDTH = 3;
+const MARKER_RAIL_GROUP_GAP = 6;
 
 type MarketChartProps =
   | {
@@ -239,10 +250,10 @@ export function layoutEventMarkers(
   size: { width: number; height: number },
 ): EventMarkerLayout[] {
   const clusters = clusterEventMarkers(events);
-  const occupied: EventMarkerLayout[] = [];
-  const entries = layoutMarkerSide(clusters.filter((cluster) => cluster.kind === "entry"), size, occupied);
-  const exits = layoutMarkerSide(clusters.filter((cluster) => cluster.kind === "exit"), size, occupied);
-  return [...entries, ...exits].sort((left, right) => left.anchorX - right.anchorX || left.anchorY - right.anchorY);
+  const entries = layoutMarkerSide(clusters.filter((cluster) => cluster.kind === "entry"), size);
+  const exits = layoutMarkerSide(clusters.filter((cluster) => cluster.kind === "exit"), size);
+  const layouts = [...entries, ...exits].sort((left, right) => left.anchorX - right.anchorX || left.anchorY - right.anchorY);
+  return assignRailGroups(layouts, size.width);
 }
 
 function clusterEventMarkers(events: PositionedTradeChartEvent[]): EventMarkerCluster[] {
@@ -287,73 +298,85 @@ function eventClusterKey(event: PositionedTradeChartEvent): string {
 function layoutMarkerSide(
   clusters: EventMarkerCluster[],
   size: { width: number; height: number },
-  occupied: EventMarkerLayout[],
-): EventMarkerLayout[] {
+): EventMarkerLayoutBase[] {
   const sorted = [...clusters].sort((left, right) => left.anchorX - right.anchorX || left.anchorY - right.anchorY);
-  const layouts: EventMarkerLayout[] = [];
-
-  for (const cluster of sorted) {
-    let selected = markerLayoutCandidate(cluster, size, MARKER_TRIANGLE_OFFSETS[0], MARKER_TRIANGLE_VERTICAL_OFFSETS[0]);
-    let foundOpenSlot = false;
-    for (const verticalOffset of MARKER_TRIANGLE_VERTICAL_OFFSETS) {
-      for (const horizontalOffset of MARKER_TRIANGLE_OFFSETS) {
-        const candidate = markerLayoutCandidate(cluster, size, horizontalOffset, verticalOffset);
-        if (!occupied.some((layout) => markerBoxesOverlap(candidate, layout))) {
-          selected = candidate;
-          foundOpenSlot = true;
-          break;
-        }
-      }
-      if (foundOpenSlot) {
-        break;
-      }
-    }
-    layouts.push(selected);
-    occupied.push(selected);
-  }
-
-  return layouts;
+  return sorted.map((cluster) => markerLayoutCandidate(cluster, size.height));
 }
 
-function markerLayoutCandidate(
-  cluster: EventMarkerCluster,
-  size: { width: number; height: number },
-  horizontalOffset: number,
-  verticalOffset: number,
-): EventMarkerLayout {
-  const markerWidth = MARKER_TRIANGLE_SIZE;
-  const markerHeight = MARKER_TRIANGLE_SIZE;
-  const maxX = Math.max(MARKER_TRIANGLE_EDGE_PADDING, size.width - markerWidth - MARKER_TRIANGLE_EDGE_PADDING);
-  const maxY = Math.max(MARKER_TRIANGLE_EDGE_PADDING, size.height - markerHeight - MARKER_TRIANGLE_EDGE_PADDING);
-  const preferredX = cluster.anchorX - markerWidth / 2 + horizontalOffset;
-  const preferredY = cluster.kind === "entry"
-    ? cluster.anchorY + verticalOffset
-    : cluster.anchorY - markerHeight - verticalOffset;
-  const markerX = clamp(preferredX, MARKER_TRIANGLE_EDGE_PADDING, maxX);
-  const markerY = clamp(preferredY, MARKER_TRIANGLE_EDGE_PADDING, maxY);
-  const tipX = markerX + markerWidth / 2;
-  const tipY = cluster.kind === "entry" ? markerY : markerY + markerHeight;
-  const leaderDx = cluster.anchorX - tipX;
-  const leaderDy = cluster.anchorY - tipY;
-
+function markerLayoutCandidate(cluster: EventMarkerCluster, chartHeight: number): EventMarkerLayoutBase {
+  const markerWidth = MARKER_ARROW_WIDTH;
+  const markerHeight = MARKER_ARROW_HEIGHT;
+  const tipX = markerWidth / 2;
+  const tipY = cluster.kind === "entry" ? 0 : markerHeight;
   return {
     ...cluster,
-    markerX,
-    markerY,
+    chartHeight,
+    markerX: cluster.anchorX - tipX,
+    markerY: cluster.kind === "entry" ? cluster.anchorY : cluster.anchorY - markerHeight,
     markerWidth,
     markerHeight,
-    leaderAngle: Math.atan2(leaderDy, leaderDx),
-    leaderLength: Math.sqrt(leaderDx * leaderDx + leaderDy * leaderDy),
+    tipX,
+    tipY,
   };
 }
 
-function markerBoxesOverlap(left: EventMarkerLayout, right: EventMarkerLayout): boolean {
-  return !(
-    left.markerX + left.markerWidth + MARKER_TRIANGLE_OVERLAP_GAP <= right.markerX
-    || right.markerX + right.markerWidth + MARKER_TRIANGLE_OVERLAP_GAP <= left.markerX
-    || left.markerY + left.markerHeight + MARKER_TRIANGLE_OVERLAP_GAP <= right.markerY
-    || right.markerY + right.markerHeight + MARKER_TRIANGLE_OVERLAP_GAP <= left.markerY
-  );
+function assignRailGroups(layouts: EventMarkerLayoutBase[], chartWidth: number): EventMarkerLayout[] {
+  const railProps = new Map<EventMarkerLayoutBase, Pick<EventMarkerLayout, "showRail" | "railX" | "railWidth" | "railKind" | "railGrouped" | "railTitle">>();
+  const sorted = [...layouts].sort((left, right) => left.anchorX - right.anchorX || left.anchorY - right.anchorY);
+  let currentGroup: EventMarkerLayoutBase[] = [];
+  let currentMaxX = Number.NEGATIVE_INFINITY;
+
+  const flushGroup = () => {
+    if (!currentGroup.length) {
+      return;
+    }
+    const minX = Math.min(...currentGroup.map((layout) => layout.anchorX));
+    const maxX = Math.max(...currentGroup.map((layout) => layout.anchorX));
+    const naturalWidth = Math.max(MARKER_RAIL_WIDTH, maxX - minX + MARKER_RAIL_WIDTH);
+    const railWidth = Math.min(Math.max(0, chartWidth), naturalWidth);
+    const railCenter = (minX + maxX) / 2;
+    const railX = chartWidth > railWidth ? clamp(railCenter - railWidth / 2, 0, chartWidth - railWidth) : 0;
+    const railOwner = currentGroup[0];
+    const kinds = new Set(currentGroup.map((layout) => layout.kind));
+    const railKind = kinds.size > 1 ? "mixed" : railOwner.kind;
+    const railTitle = [...new Set(currentGroup.map((layout) => layout.title))].join(", ");
+    const railGrouped = currentGroup.length > 1;
+
+    for (const layout of currentGroup) {
+      railProps.set(layout, {
+        showRail: layout === railOwner,
+        railX,
+        railWidth,
+        railKind,
+        railGrouped,
+        railTitle,
+      });
+    }
+  };
+
+  for (const layout of sorted) {
+    if (!currentGroup.length || layout.anchorX - currentMaxX <= MARKER_RAIL_GROUP_GAP) {
+      currentGroup.push(layout);
+      currentMaxX = Math.max(currentMaxX, layout.anchorX);
+    } else {
+      flushGroup();
+      currentGroup = [layout];
+      currentMaxX = layout.anchorX;
+    }
+  }
+  flushGroup();
+
+  return layouts.map((layout) => ({
+    ...layout,
+    ...(railProps.get(layout) ?? {
+      showRail: true,
+      railX: layout.anchorX - MARKER_RAIL_WIDTH / 2,
+      railWidth: MARKER_RAIL_WIDTH,
+      railKind: layout.kind,
+      railGrouped: false,
+      railTitle: layout.title,
+    }),
+  }));
 }
 
 function compactEventLabel(events: PositionedTradeChartEvent[]): string {
@@ -407,23 +430,62 @@ function createEventMarker(layout: EventMarkerLayout): HTMLDivElement {
   marker.setAttribute("aria-label", layout.title);
   marker.setAttribute("role", "img");
 
-  const leader = document.createElement("span");
-  leader.className = "trade-cross-leader";
-  const tipX = layout.markerWidth / 2;
-  const tipY = layout.kind === "entry" ? 0 : layout.markerHeight;
-  leader.style.left = `${tipX}px`;
-  leader.style.top = `${tipY}px`;
-  leader.style.width = `${Math.max(0, layout.leaderLength)}px`;
-  leader.style.transform = `rotate(${layout.leaderAngle}rad)`;
-  if (layout.leaderLength <= 1.5) {
-    leader.hidden = true;
+  if (layout.showRail) {
+    const rail = document.createElement("span");
+    rail.className = [
+      "trade-cross-candle-rail",
+      layout.railKind,
+      layout.railGrouped ? "grouped" : "",
+    ].filter(Boolean).join(" ");
+    rail.style.left = `${layout.railX - layout.markerX}px`;
+    rail.style.top = `${-layout.markerY}px`;
+    rail.style.width = `${layout.railWidth}px`;
+    rail.style.height = `${layout.chartHeight}px`;
+    rail.title = layout.railTitle;
+    marker.appendChild(rail);
+  }
+  marker.appendChild(createEventArrowSvg(layout));
+  return marker;
+}
+
+function createEventArrowSvg(layout: EventMarkerLayout): SVGSVGElement {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", `0 0 ${layout.markerWidth} ${layout.markerHeight}`);
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+
+  const stem = document.createElementNS("http://www.w3.org/2000/svg", "line");
+  stem.setAttribute("class", "trade-cross-arrow-stem");
+  stem.setAttribute("x1", String(layout.tipX));
+  stem.setAttribute("x2", String(layout.tipX));
+
+  const head = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+  head.setAttribute("class", "trade-cross-arrow-head");
+
+  const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+  dot.setAttribute("class", "trade-cross-anchor-dot");
+  dot.setAttribute("cx", String(layout.tipX));
+  dot.setAttribute("cy", String(layout.tipY));
+  dot.setAttribute("r", "2.4");
+
+  if (layout.kind === "entry") {
+    const baseY = layout.tipY + MARKER_ARROW_HEAD_LENGTH;
+    stem.setAttribute("y1", String(baseY + 1));
+    stem.setAttribute("y2", String(layout.markerHeight - 2));
+    head.setAttribute(
+      "points",
+      `${layout.tipX},${layout.tipY} ${layout.tipX - MARKER_ARROW_HEAD_HALF_WIDTH},${baseY} ${layout.tipX + MARKER_ARROW_HEAD_HALF_WIDTH},${baseY}`,
+    );
+  } else {
+    const baseY = layout.tipY - MARKER_ARROW_HEAD_LENGTH;
+    stem.setAttribute("y1", "2");
+    stem.setAttribute("y2", String(baseY - 1));
+    head.setAttribute(
+      "points",
+      `${layout.tipX},${layout.tipY} ${layout.tipX - MARKER_ARROW_HEAD_HALF_WIDTH},${baseY} ${layout.tipX + MARKER_ARROW_HEAD_HALF_WIDTH},${baseY}`,
+    );
   }
 
-  const outline = document.createElement("span");
-  outline.className = "trade-cross-triangle outline";
-  const fill = document.createElement("span");
-  fill.className = "trade-cross-triangle fill";
-
-  marker.append(leader, outline, fill);
-  return marker;
+  svg.append(stem, head, dot);
+  return svg;
 }

@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import fs from "node:fs/promises";
+import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -23,6 +24,13 @@ import {
   writeReviewNote,
 } from "./dataImporter.ts";
 
+const aiStuffRoot = process.env.AI_STUFF_ROOT ?? path.resolve(process.cwd(), "..");
+const hasLocalTradeArchive = existsSync(path.join(aiStuffRoot, "IBKR Equity History Pull", "data", "ibkr_trades", "2026-05-28"));
+// Integration tests that read the real AI STUFF trade archive (and assert
+// specific recorded sessions) only run on the trading machine -- CI runners
+// have no archive, so they skip instead of failing.
+const itArchive = it.skipIf(!hasLocalTradeArchive);
+
 const originalGoogleExportProbe = process.env.SPX_GOOGLE_EXPORT_PROBE;
 const originalGoogleDriveSnapshotStaleHours = process.env.SPX_GOOGLE_DRIVE_SNAPSHOT_STALE_HOURS;
 
@@ -45,7 +53,7 @@ afterAll(() => {
 });
 
 describe("AI STUFF trade importer", () => {
-  it("normalizes local IBKR entries into tracker trades", async () => {
+  itArchive("normalizes local IBKR entries into tracker trades", async () => {
     const snapshot = await loadTrackerSnapshot();
     const sourceHealth = new Map(snapshot.sourceHealth.map((source) => [source.label, source]));
     const latestSummary = snapshot.dailySummaries.find((summary) => summary.date === snapshot.latestTradeDate);
@@ -72,7 +80,7 @@ describe("AI STUFF trade importer", () => {
     expect(sourceHealth.get("IBKR live wallet refresh")?.detail).toMatch(/TWS\/Gateway|IBKR port/);
   });
 
-  it("surfaces the live same-day sync summary with the repaired upload receipt confirmed", async () => {
+  itArchive("surfaces the live same-day sync summary with the repaired upload receipt confirmed", async () => {
     const snapshot = await loadTrackerSnapshot();
     const summary = snapshot.dailySummaries.find((nextSummary) => nextSummary.date === "2026-05-29");
 
@@ -104,14 +112,14 @@ describe("AI STUFF trade importer", () => {
     expect(summary?.issues.some((issue) => issue.title === "Connector receipt row not found")).toBe(false);
   });
 
-  it("loads the latest connector receipt row search evidence", async () => {
+  itArchive("loads the latest connector receipt row search evidence", async () => {
     const checks = await readGoogleDriveReceiptChecks();
 
     expect(checks?.source).toBe("Google Drive connector row search");
     expect(checks?.checks?.some((check) => check.date === "2026-05-29" && check.status === "found")).toBe(true);
   });
 
-  it("loads the connector snapshot captured from the SPX Spread Trade Tracker", async () => {
+  itArchive("loads the connector snapshot captured from the SPX Spread Trade Tracker", async () => {
     const snapshot = await readGoogleDriveTrackerSnapshot();
 
     expect(snapshot?.title).toBe("SPX Spread Trade Tracker");
@@ -430,7 +438,7 @@ describe("AI STUFF trade importer", () => {
     expect(source.detail).toContain("Authenticated Google Sheets API refresh");
   });
 
-  it("loads replay panes for the latest traded date", async () => {
+  itArchive("loads replay panes for the latest traded date", async () => {
     const replay = await loadReplayPayload("2026-05-28", "IBKR-997697494-1");
 
     expect(replay.spxBars.length).toBeGreaterThan(300);
@@ -439,7 +447,7 @@ describe("AI STUFF trade importer", () => {
     expect(replay.volume.length).toBeGreaterThan(0);
   });
 
-  it("loads live same-day replay data from staged payload tabs and filters non-SPX option noise", async () => {
+  itArchive("loads live same-day replay data from staged payload tabs and filters non-SPX option noise", async () => {
     const replay = await loadReplayPayload("2026-05-29");
 
     expect(replay.spxBars.length).toBeGreaterThan(300);
@@ -453,7 +461,7 @@ describe("AI STUFF trade importer", () => {
     expect(replay.volume.every((point) => point.strike > 1000)).toBe(true);
   });
 
-  it("loads spread OHLC range data from the reconstructed two-leg spread marks", async () => {
+  itArchive("loads spread OHLC range data from the reconstructed two-leg spread marks", async () => {
     const replay = await loadReplayPayload("2026-05-28", "IBKR-997697617-7");
     const entryMark = replay.spreadMarks.find((mark) => mark.tradeId === "IBKR-997697617-7" && mark.label === "10:15");
 
@@ -467,7 +475,7 @@ describe("AI STUFF trade importer", () => {
     expect(entryMark?.low).toBeLessThan(entryMark?.value ?? Number.NEGATIVE_INFINITY);
   });
 
-  it("represents every imported spread with full-session two-leg mark reconstruction", async () => {
+  itArchive("represents every imported spread with full-session two-leg mark reconstruction", async () => {
     const replay = await loadReplayPayload("2026-05-28", "IBKR-997697494-1");
     const expectedTradeIds = new Set(replay.quickTrades.map((trade) => trade.id));
     const expectedLegsByTrade = new Map(
@@ -538,7 +546,7 @@ describe("AI STUFF trade importer", () => {
     });
   });
 
-  it("flags credit spread entry fills that diverge from the chart mark", async () => {
+  itArchive("flags credit spread entry fills that diverge from the chart mark", async () => {
     const replay = await loadReplayPayload("2026-05-28");
     const flagged = replay.quickTrades.find((trade) => trade.id === "IBKR-997697617-7");
     const ordinary = replay.quickTrades.find((trade) => trade.id === "IBKR-997697494-1");
@@ -550,7 +558,7 @@ describe("AI STUFF trade importer", () => {
     expect(ordinary?.entryChartDeviationFlag).toBe(false);
   });
 
-  it("keeps the tracker snapshot summary-first instead of hydrating row-level replay marks", async () => {
+  itArchive("keeps the tracker snapshot summary-first instead of hydrating row-level replay marks", async () => {
     const snapshot = await loadTrackerSnapshot();
     const trade = snapshot.trades.find((nextTrade) => nextTrade.id === "IBKR-997697617-7");
 
@@ -559,7 +567,7 @@ describe("AI STUFF trade importer", () => {
     expect(trade?.entryChartDeviation).toBeNull();
   });
 
-  it("reuses the tracker snapshot for immediate repeated dashboard reads", async () => {
+  itArchive("reuses the tracker snapshot for immediate repeated dashboard reads", async () => {
     const first = await loadTrackerSnapshot();
     const second = await loadTrackerSnapshot();
 
@@ -567,7 +575,7 @@ describe("AI STUFF trade importer", () => {
     expect(second.latestTradeDate).toBe(first.latestTradeDate);
   });
 
-  it("loads pre-entry spread marks so the spread chart tracks before entry", async () => {
+  itArchive("loads pre-entry spread marks so the spread chart tracks before entry", async () => {
     const tradeId = "IBKR-997697564-4";
     const replay = await loadReplayPayload("2026-05-28", tradeId);
     const trade = replay.quickTrades.find((next) => next.id === tradeId);
@@ -604,7 +612,7 @@ describe("AI STUFF trade importer", () => {
     ).toBe(false);
   });
 
-  it("keeps safe replay spread marks inside the selected vertical width", async () => {
+  itArchive("keeps safe replay spread marks inside the selected vertical width", async () => {
     const replay = await loadReplayPayload("2026-06-05");
     const trades = new Map(replay.quickTrades.map((trade) => [trade.id, trade]));
     const impossible = replay.spreadMarks.filter((mark) => {
@@ -615,7 +623,7 @@ describe("AI STUFF trade importer", () => {
     expect(impossible).toHaveLength(0);
   });
 
-  it("surfaces pull and upload issues from the daily sync archive", async () => {
+  itArchive("surfaces pull and upload issues from the daily sync archive", async () => {
     const snapshot = await loadTrackerSnapshot();
     const summary = snapshot.dailySummaries.find((nextSummary) => nextSummary.date === "2026-05-28");
 

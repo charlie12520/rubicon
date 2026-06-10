@@ -1,5 +1,14 @@
+import { existsSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { buildDailySyncCommand, buildDailySyncTargetPlan, dailySyncCompletionAllowsDerivedStateRefresh, dailySyncSourceHealth, mergeDailySyncCompletionStatus, refreshDailySyncDerivedState, resolveDailySyncGoogleUploaded, resolveDailySyncRuntimeState, selectDailySyncPreferredLogPath, spxHeatmapPayloadIsFilled, startDailySync, summaryGoogleUploaded } from "./dailySync.ts";
+
+// Preflight + source-health hit the real wrapper in the sibling IBKR project,
+// which only exists on the trading machine — skip (don't fail) on CI runners.
+const hasLocalWrapper = existsSync(
+  path.resolve(process.cwd(), "..", "IBKR Equity History Pull", "run_daily_spx_ibkr_sync_with_sheet_payload.ps1"),
+);
+const itWrapper = it.skipIf(!hasLocalWrapper);
 
 describe("daily SPX/IBKR sync launcher", () => {
   it("builds the guarded PowerShell wrapper command", () => {
@@ -63,7 +72,7 @@ describe("daily SPX/IBKR sync launcher", () => {
     expect(plan.note).toContain("Explicit date 2026-05-27");
   });
 
-  it("exposes a dry-run preflight without starting the long sync", async () => {
+  itWrapper("exposes a dry-run preflight without starting the long sync", async () => {
     const result = await startDailySync({ date: "auto", dryRun: true });
 
     expect(result.ok).toBe(true);
@@ -90,7 +99,7 @@ describe("daily SPX/IBKR sync launcher", () => {
     ]);
   });
 
-  it("reports the local daily sync launcher in source health", async () => {
+  itWrapper("reports the local daily sync launcher in source health", async () => {
     const health = await dailySyncSourceHealth();
 
     expect(health.label).toBe("AI STUFF daily sync launcher");

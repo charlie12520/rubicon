@@ -357,21 +357,29 @@ describe("daily SPX/IBKR sync launcher", () => {
     expect(merged.pipelineState).toBe("failed-with-stage-errors");
   });
 
-  it("downgrades persisted running status when the lock is stale and no process is active", () => {
+  it("downgrades persisted running status whenever no process or active lock backs it", () => {
+    // Covers both a stale leftover lock AND the 2026-06-08 shape where the
+    // wrapper died silently and its finally block removed the lock entirely —
+    // either way nothing backs "running", so it must not persist forever.
     expect(
       resolveDailySyncRuntimeState({
         activeProcess: false,
         persistedState: "running",
         lockActive: false,
-        lockStale: true,
       }),
     ).toBe("failed");
     expect(
       resolveDailySyncRuntimeState({
         activeProcess: false,
+        persistedState: "running",
+        lockActive: true,
+      }),
+    ).toBe("running");
+    expect(
+      resolveDailySyncRuntimeState({
+        activeProcess: false,
         persistedState: "completed",
         lockActive: false,
-        lockStale: true,
       }),
     ).toBe("completed");
     expect(
@@ -379,7 +387,6 @@ describe("daily SPX/IBKR sync launcher", () => {
         activeProcess: false,
         persistedState: "idle",
         lockActive: false,
-        lockStale: false,
       }),
     ).toBe("idle");
   });

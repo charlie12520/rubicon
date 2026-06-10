@@ -349,18 +349,21 @@ async function readDailySyncLock(): Promise<DailySyncLockInfo> {
 export function resolveDailySyncRuntimeState({
   activeProcess,
   lockActive,
-  lockStale,
   persistedState,
 }: {
   activeProcess: boolean;
   lockActive: boolean;
-  lockStale?: boolean;
   persistedState?: DailySyncStatusResult["state"];
 }): DailySyncStatusResult["state"] {
   if (activeProcess || lockActive) {
     return "running";
   }
-  if (persistedState === "running" && lockStale) {
+  if (persistedState === "running") {
+    // No live process and no active lock (stale OR already removed): the run
+    // died without writing a final status — the 2026-06-08 full sync did
+    // exactly this (5 log lines, then silence) and the status stuck on
+    // "running". Surface it as failed; getDailySyncStatus upgrades it back to
+    // completed when review readiness proves the run actually finished.
     return "failed";
   }
   return persistedState ?? "idle";
@@ -1120,7 +1123,6 @@ export async function getDailySyncStatus(): Promise<DailySyncStatusResult> {
   const runtimeState = resolveDailySyncRuntimeState({
     activeProcess: Boolean(activeDailySync),
     lockActive: lock.active,
-    lockStale: lock.stale,
     persistedState: persisted?.state,
   });
   const targetDate = persisted?.targetDate ?? persisted?.targetPlan?.estimatedTargetDate ?? lock.targetDate;
@@ -1161,10 +1163,15 @@ export async function getDailySyncStatus(): Promise<DailySyncStatusResult> {
     ? lock.message ?? "Daily pipeline is running from another process."
     : persisted?.message ?? "Daily pipeline is running.";
   const completedMessage = pipelineState === "completed" ? "Daily pipeline completed." : "Daily pipeline completed with warnings.";
+  // When the failed→completed review-readiness upgrade fired, the persisted
+  // message still describes a run in flight — replace it explicitly instead of
+  // regex-sniffing the user-facing text (a legitimate final message containing
+  // the word "running" must not be masked).
+  const upgradedToCompleted = statusState === "completed" && runtimeState !== "completed";
   const message =
     statusState === "running"
       ? runningMessage
-      : statusState === "completed" && persisted?.message && /running|waiting/i.test(persisted.message)
+      : upgradedToCompleted
         ? completedMessage
         : persisted?.message ?? "Daily pipeline is idle.";
   const rawSteps = stepsWithSummaryGoogleUpload(persisted?.steps, currentSummary);

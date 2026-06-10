@@ -5694,6 +5694,58 @@ h2 {
   min-height: 0;
 }
 
+/* Daily Review — compact day statistics under the entry/exit chart.
+   auto-fit + minmax wraps to the viewport, so it can never side-scroll. */
+.review-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+  gap: 8px;
+}
+
+.review-stat-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid rgba(143, 155, 173, 0.14);
+  border-radius: 6px;
+  background: rgba(10, 15, 22, 0.72);
+}
+
+.review-stat-label {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #8190a3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.review-stat-value {
+  font-size: 16px;
+  font-weight: 700;
+  color: #dce7f5;
+  font-variant-numeric: tabular-nums;
+}
+
+.review-stat-chip.good .review-stat-value {
+  color: #4ade80;
+}
+
+.review-stat-chip.bad .review-stat-value {
+  color: #fb7185;
+}
+
+.review-stat-detail {
+  font-size: 11px;
+  color: #74839a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .trade-entry-meta {
   margin-top: 4px;
   color: #fbbf24;

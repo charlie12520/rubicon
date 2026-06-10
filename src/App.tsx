@@ -33,6 +33,7 @@ import { fetchDailySyncStatus, fetchLiveSpreadSpeed, fetchLiveSpreadSpeedStatus,
 import { previousTradingSessionDate, rangePresets, tradesInRange, type RangeId } from "./dateRanges";
 import { formatCurrency, formatNumber, formatPercent, formatSignedCurrency } from "./format";
 import { buildDailyReview, REPLAY_SPEEDS, summarizeTrades } from "./stats";
+import { buildDailyReviewStatItems } from "./dailyReviewStats";
 import { reviewActionDirectionLabel } from "./dailyReviewSide";
 import { buildDailyPnlSimulation, summarizeDailyPnlSimulation } from "./dailyPnlSimulator";
 import { marketDateFromSnapshot, selectDateAfterTrackerRefresh } from "./refreshLogic";
@@ -2309,6 +2310,7 @@ function DailyReviewScreen({
   const reviewStats = useMemo(() => summarizeTrades(trades, EMPTY_WALLET), [trades]);
   const pnlSimulation = useMemo(() => buildDailyPnlSimulation(trades, spreadMarks, spxBars), [spxBars, spreadMarks, trades]);
   const pnlSimulationSummary = useMemo(() => summarizeDailyPnlSimulation(pnlSimulation), [pnlSimulation]);
+  const reviewStatItems = useMemo(() => buildDailyReviewStatItems({ trades, spxBars }), [spxBars, trades]);
   const tradeMap = useMemo(() => mapTradesById(trades), [trades]);
   const [reviewChartInterval, setReviewChartInterval] = useState<ReviewChartInterval>(2);
   const [cheatCode, setCheatCode] = useState(false);
@@ -2537,6 +2539,27 @@ function DailyReviewScreen({
             )}
           </div>
         </section>
+
+        {reviewStatItems.length > 0 && (
+          <section className="review-panel review-stats-panel">
+            <div className="review-panel-heading">
+              <div>
+                <span className="eyeless-label">Day statistics</span>
+                <h3>Session &amp; Execution</h3>
+              </div>
+              <span className="panel-count">{reviewStatItems.length} stats</span>
+            </div>
+            <div className="review-stats-grid">
+              {reviewStatItems.map((item) => (
+                <div className={`review-stat-chip${item.tone && item.tone !== "neutral" ? ` ${item.tone}` : ""}`} key={item.key}>
+                  <span className="review-stat-label">{item.label}</span>
+                  <strong className="review-stat-value">{item.value}</strong>
+                  {item.detail && <span className="review-stat-detail">{item.detail}</span>}
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         <div className="review-content-grid">
           <section className="review-panel event-panel">

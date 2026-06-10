@@ -145,12 +145,63 @@ def unique_symbols(symbols: list[str]) -> list[str]:
     return result
 
 
-def read_tc2000_export_symbols(root: Path) -> tuple[list[str], list[str]]:
+# The scanner export is an OCR screen-scrape, so a botched read can emit price
+# fragments ("346P"), exchange names, OTC tiers, or column headers as symbols.
+TICKER_PATTERN = re.compile(r"^[A-Z]{1,5}([.\-][A-Z]{1,2})?$")
+NON_TICKER_TOKENS = {
+    "AMEX",
+    "ARCA",
+    "CHANGE",
+    "ETF",
+    "ETN",
+    "GREY",
+    "INDEX",
+    "LAST",
+    "NAME",
+    "NASDAQ",
+    "NET",
+    "NYSE",
+    "OTC",
+    "OTCBB",
+    "PINK",
+    "PRICE",
+    "SCREEN",
+    "SYMBOL",
+    "TICKER",
+    "VOLUME",
+}
+
+
+def is_plausible_ticker(symbol: str) -> bool:
+    if not symbol or symbol in NON_TICKER_TOKENS:
+        return False
+    return bool(TICKER_PATTERN.match(symbol))
+
+
+def select_export_files(root: Path, include_all: bool = False) -> list[Path]:
+    """Pick which scanner export CSVs feed the symbol universe.
+
+    Default: every ``*_latest.csv`` (one per scanner window). Unioning every
+    dated export dragged stale/garbage runs back in long after a clean re-run
+    replaced them. Fallback when no ``*_latest.csv`` exists: the single newest
+    CSV. ``include_all`` restores the legacy union of every CSV.
+    """
+    if not root.exists():
+        return []
+    all_csvs = sorted(root.glob("*.csv"), key=lambda item: item.stat().st_mtime, reverse=True)
+    if include_all:
+        return all_csvs
+    latest = [path for path in all_csvs if path.name.lower().endswith("_latest.csv")]
+    if latest:
+        return latest
+    return all_csvs[:1]
+
+
+def read_tc2000_export_symbols(root: Path, include_all: bool = False) -> tuple[list[str], list[str], list[str]]:
     symbols: list[str] = []
     sources: list[str] = []
-    if not root.exists():
-        return symbols, sources
-    for path in sorted(root.glob("*.csv"), key=lambda item: item.stat().st_mtime, reverse=True):
+    rejected: list[str] = []
+    for path in select_export_files(root, include_all=include_all):
         try:
             with path.open(newline="", encoding="utf-8-sig") as handle:
                 reader = csv.DictReader(handle)
@@ -163,10 +214,12 @@ def read_tc2000_export_symbols(root: Path) -> tuple[list[str], list[str]]:
             print(f"Skipping TC2000 export {path}: {exc}", file=sys.stderr)
             continue
         file_symbols = [symbol for symbol in file_symbols if symbol]
-        if file_symbols:
-            symbols.extend(file_symbols)
+        kept = [symbol for symbol in file_symbols if is_plausible_ticker(symbol)]
+        rejected.extend(symbol for symbol in file_symbols if not is_plausible_ticker(symbol))
+        if kept:
+            symbols.extend(kept)
             sources.append(str(path))
-    return unique_symbols(symbols), sources
+    return unique_symbols(symbols), sources, unique_symbols(rejected)
 
 
 def dataframe_to_json(df, max_bars: int) -> dict[str, list[dict[str, Any]]]:
@@ -377,6 +430,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="treat an existing single-instance lock as stale after this many seconds",
     )
     parser.add_argument("--ignore-lock", action="store_true", help="run even if another instance holds the lock (not recommended)")
+    parser.add_argument(
+        "--all-exports",
+        action="store_true",
+        help="legacy behavior: union symbols from every export CSV instead of *_latest.csv only",
+    )
     return parser
 
 
@@ -401,7 +459,14 @@ def read_extra_symbols(args: argparse.Namespace) -> list[str]:
 
 
 def run_refresh(args: argparse.Namespace) -> int:
-    export_symbols, sources = read_tc2000_export_symbols(TC2000_EXPORT_ROOT)
+    export_symbols, sources, rejected_symbols = read_tc2000_export_symbols(
+        TC2000_EXPORT_ROOT, include_all=args.all_exports
+    )
+    if rejected_symbols:
+        print(
+            f"Rejected non-ticker tokens from TC2000 exports: {', '.join(rejected_symbols)}",
+            file=sys.stderr,
+        )
     symbols = unique_symbols([*export_symbols, *read_extra_symbols(args)])
     if not symbols:
         payload = {
@@ -411,6 +476,7 @@ def run_refresh(args: argparse.Namespace) -> int:
             "note": "No TC2000 scanner export symbols were available.",
             "profileIndustrySource": None,
             "profilesBySymbol": {},
+            "rejectedSymbols": rejected_symbols,
             "source": str(TC2000_EXPORT_ROOT),
             "sources": sources,
             "symbols": [],
@@ -458,6 +524,7 @@ def run_refresh(args: argparse.Namespace) -> int:
         "profileIndustrySource": profile_industry_source,
         "profileSource": "StockAnalysis company pages and local StockAnalysis industry CSV" if profiles else None,
         "profilesBySymbol": profiles,
+        "rejectedSymbols": rejected_symbols,
         "source": str(args.cache_dir),
         "sources": sources,
         "symbols": symbols,

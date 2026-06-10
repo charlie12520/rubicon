@@ -5633,6 +5633,46 @@ h2 {
   vector-effect: non-scaling-stroke;
 }
 
+/* Compact event ticks (small-tile marker mode): a faint hairline up the chart
+   plus a slim stub at the bottom edge — shows WHEN entries/exits happened
+   without burying the price action. Entries amber, exits rose (same palette as
+   the full markers). */
+.trade-tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  pointer-events: auto;
+  --event-color: #f59e0b;
+  color: var(--event-color);
+}
+
+.trade-tick.exit {
+  --event-color: #fb7185;
+}
+
+.trade-tick-line {
+  position: absolute;
+  top: 0;
+  bottom: 13px;
+  left: 1px;
+  width: 1px;
+  background: currentColor;
+  opacity: 0.22;
+}
+
+.trade-tick-stub {
+  position: absolute;
+  bottom: 1px;
+  left: 0;
+  width: 3px;
+  height: 11px;
+  border-radius: 1.5px;
+  background: currentColor;
+  opacity: 0.95;
+  box-shadow: 0 0 4px color-mix(in srgb, currentColor 45%, transparent);
+}
+
 /* Printed event label (rendered only when markers are enlarged). */
 .trade-cross-label {
   position: absolute;

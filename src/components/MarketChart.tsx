@@ -93,6 +93,12 @@ type MarketChartCommonProps = {
   onToggleEnlarge?: () => void;
   /** Multiplies the entry/exit marker geometry; labels appear above ~1.2. */
   markerScale?: number;
+  /**
+   * "full" draws arrows + rails (+ labels when scaled up). "compact" draws only
+   * a slim bottom tick + faint hairline per event — for small grid tiles where
+   * full markers bury the price action; the enlarge mode is the detail view.
+   */
+  markerMode?: "full" | "compact";
 };
 
 type MarketChartProps = MarketChartCommonProps &
@@ -114,6 +120,7 @@ export function MarketChart(props: MarketChartProps) {
     const chart = createChart(container, rubiconChartOptions());
     const cleanups: Array<() => void> = [];
     const markerScale = props.markerScale ?? 1;
+    const markerMode = props.markerMode ?? "full";
 
     if (props.kind === "candles") {
       const series = chart.addSeries(CandlestickSeries, {
@@ -125,7 +132,7 @@ export function MarketChart(props: MarketChartProps) {
       });
       series.setData(toCandlestickData(props.data));
       if (props.events?.length) {
-        cleanups.push(renderEventMarkers(container, chart, series, props.events, markerScale));
+        cleanups.push(renderEventMarkers(container, chart, series, props.events, markerScale, markerMode));
       }
     } else if (props.kind === "line") {
       const series = chart.addSeries(LineSeries, {
@@ -136,13 +143,13 @@ export function MarketChart(props: MarketChartProps) {
       });
       series.setData(toLineData(props.data, (mark) => mark.value));
       if (props.events?.length) {
-        cleanups.push(renderEventMarkers(container, chart, series, props.events, markerScale));
+        cleanups.push(renderEventMarkers(container, chart, series, props.events, markerScale, markerMode));
       }
     } else {
       const series = chart.addSeries(CandlestickSeries, SPREAD_HL_BAR_OPTIONS);
       series.setData(toCandlestickData(props.data));
       if (props.events?.length) {
-        cleanups.push(renderEventMarkers(container, chart, series, props.events, markerScale));
+        cleanups.push(renderEventMarkers(container, chart, series, props.events, markerScale, markerMode));
       }
     }
 
@@ -210,6 +217,7 @@ function renderEventMarkers(
   },
   events: TradeChartEvent[],
   markerScale = 1,
+  markerMode: "full" | "compact" = "full",
 ) {
   const overlay = document.createElement("div");
   overlay.className = "event-cross-layer";
@@ -228,6 +236,13 @@ function renderEventMarkers(
         continue;
       }
       positionedEvents.push({ ...event, x, y });
+    }
+
+    if (markerMode === "compact") {
+      for (const tick of layoutCompactEventTicks(positionedEvents)) {
+        overlay.appendChild(createEventTick(tick));
+      }
+      return;
     }
 
     const layouts = layoutEventMarkers(positionedEvents, {
@@ -249,6 +264,40 @@ function renderEventMarkers(
     chart.timeScale().unsubscribeVisibleTimeRangeChange(render);
     overlay.remove();
   };
+}
+
+export type CompactEventTick = {
+  kind: TradeChartEvent["kind"];
+  x: number;
+  label: string;
+  title: string;
+};
+
+/**
+ * Compact-mode layout: one slim tick per event CLUSTER (same dedup as the full
+ * markers), anchored at the event's time x. The price coordinate is ignored —
+ * the small tiles only need to show WHEN entries/exits happened; the enlarged
+ * view carries the full arrows, rails, and labels.
+ */
+export function layoutCompactEventTicks(events: PositionedTradeChartEvent[]): CompactEventTick[] {
+  return clusterEventMarkers(events)
+    .map((cluster) => ({ kind: cluster.kind, x: cluster.anchorX, label: cluster.label, title: cluster.title }))
+    .sort((left, right) => left.x - right.x);
+}
+
+function createEventTick(tick: CompactEventTick): HTMLDivElement {
+  const el = document.createElement("div");
+  el.className = `trade-tick ${tick.kind}`;
+  el.style.left = `${tick.x - 1.5}px`;
+  el.title = tick.title;
+  el.setAttribute("aria-label", tick.title);
+  el.setAttribute("role", "img");
+  const line = document.createElement("span");
+  line.className = "trade-tick-line";
+  const stub = document.createElement("span");
+  stub.className = "trade-tick-stub";
+  el.append(line, stub);
+  return el;
 }
 
 export function layoutEventMarkers(

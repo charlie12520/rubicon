@@ -100,6 +100,7 @@ export function ReplayCharts({ replay, replayIndex, replayMode, selectedTrade, s
           events={spxEvents}
           overlays={spxOverlays}
           enlarged={spxEnlarged}
+          markerMode={spxEnlarged ? "full" : "compact"}
           markerScale={spxEnlarged ? ENLARGED_MARKER_SCALE : 1}
           onToggleEnlarge={() => setEnlargedChart(spxEnlarged ? null : "spx")}
           toolbar={<SpxChartControls cheatCode={cheatCode} onTimeframeChange={setTimeframe} onToggleCheat={() => setCheatCode((enabled) => !enabled)} timeframe={timeframe} />}
@@ -112,6 +113,7 @@ export function ReplayCharts({ replay, replayIndex, replayMode, selectedTrade, s
             accent="#f59e0b"
             events={spreadEvents}
             enlarged={spreadEnlarged}
+            markerMode={spreadEnlarged ? "full" : "compact"}
             markerScale={spreadEnlarged ? ENLARGED_MARKER_SCALE : 1}
             onToggleEnlarge={() => setEnlargedChart(spreadEnlarged ? null : "spread")}
             toolbar={<SpreadChartToggle mode={spreadChartMode} onChange={setSpreadChartMode} />}
@@ -124,6 +126,7 @@ export function ReplayCharts({ replay, replayIndex, replayMode, selectedTrade, s
             accent="#f59e0b"
             events={spreadEvents}
             enlarged={spreadEnlarged}
+            markerMode={spreadEnlarged ? "full" : "compact"}
             markerScale={spreadEnlarged ? ENLARGED_MARKER_SCALE : 1}
             onToggleEnlarge={() => setEnlargedChart(spreadEnlarged ? null : "spread")}
             toolbar={<SpreadChartToggle mode={spreadChartMode} onChange={setSpreadChartMode} />}

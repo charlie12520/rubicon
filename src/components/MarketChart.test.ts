@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { layoutEventMarkers } from "./MarketChart";
+import { layoutCompactEventTicks, layoutEventMarkers } from "./MarketChart";
 
 describe("replay event marker layout", () => {
   it("collapses duplicate same-point exits into one compact label", () => {
@@ -57,6 +57,21 @@ describe("replay event marker layout", () => {
       expect(layout.markerX + layout.tipX).toBeCloseTo(layout.anchorX, 5);
       expect(layout.markerY + layout.tipY).toBeCloseTo(layout.anchorY, 5);
     }
+  });
+
+  it("compact mode collapses events into one slim tick per cluster, sorted by time", () => {
+    const ticks = layoutCompactEventTicks([
+      marker("exit", "X2 11:17", 112, 156),
+      marker("exit", "X3 11:17", 114, 158),
+      marker("entry", "E2 10:08", 62, 120),
+      marker("entry", "E1 09:31", 36, 138),
+    ]);
+
+    expect(ticks.map((tick) => tick.kind)).toEqual(["entry", "entry", "exit"]);
+    expect(ticks.map((tick) => Math.round(tick.x))).toEqual([36, 62, 113]);
+    const exit = ticks.find((tick) => tick.kind === "exit")!;
+    expect(exit.label).toBe("X2-3 11:17");
+    expect(exit.title).toBe("X2 11:17, X3 11:17");
   });
 
   it("scales the marker geometry while keeping every tip anchored (enlarge mode)", () => {

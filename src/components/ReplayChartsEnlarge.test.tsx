@@ -8,8 +8,13 @@ import type { ReplayPayload } from "../../shared/types";
 // lightweight-charts needs a real canvas; this test is about the enlarge
 // orchestration, so stub MarketChart with a probe that exposes its props.
 vi.mock("./MarketChart", () => ({
-  MarketChart: (props: { title: string; enlarged?: boolean; markerScale?: number; onToggleEnlarge?: () => void }) => (
-    <section data-testid={`chart:${props.title}`} data-enlarged={String(Boolean(props.enlarged))} data-marker-scale={String(props.markerScale ?? 1)}>
+  MarketChart: (props: { title: string; enlarged?: boolean; markerScale?: number; markerMode?: string; onToggleEnlarge?: () => void }) => (
+    <section
+      data-testid={`chart:${props.title}`}
+      data-enlarged={String(Boolean(props.enlarged))}
+      data-marker-scale={String(props.markerScale ?? 1)}
+      data-marker-mode={props.markerMode ?? "full"}
+    >
       {props.onToggleEnlarge && (
         <button onClick={props.onToggleEnlarge} type="button">
           enlarge {props.title}
@@ -53,9 +58,17 @@ describe("ReplayCharts enlarge mode", () => {
 
     expect(screen.getByTestId(/chart:SPX Intraday/)).toHaveAttribute("data-enlarged", "true");
     expect(screen.getByTestId(/chart:SPX Intraday/)).toHaveAttribute("data-marker-scale", "1.7");
-    // the spread chart stays normal
+    expect(screen.getByTestId(/chart:SPX Intraday/)).toHaveAttribute("data-marker-mode", "full");
+    // the spread chart stays normal — small tiles use the compact tick mode
     expect(screen.getByTestId("chart:Selected Spread")).toHaveAttribute("data-enlarged", "false");
+    expect(screen.getByTestId("chart:Selected Spread")).toHaveAttribute("data-marker-mode", "compact");
     expect(container.querySelector(".chart-enlarge-backdrop")).not.toBeNull();
+  });
+
+  it("uses the compact marker mode for all charts at grid size", () => {
+    renderCharts();
+    expect(screen.getByTestId(/chart:SPX Intraday/)).toHaveAttribute("data-marker-mode", "compact");
+    expect(screen.getByTestId("chart:Selected Spread")).toHaveAttribute("data-marker-mode", "compact");
   });
 
   it("Escape and the backdrop both restore the normal layout", () => {

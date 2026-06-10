@@ -8,7 +8,9 @@ function readWrapper(): string {
   return fs.readFileSync(WRAPPER_PATH, "utf8");
 }
 
-describe("daily sync PowerShell wrapper", () => {
+// The wrapper lives in the sibling IBKR project, which only exists on the
+// trading machine — skip (don't fail) on CI runners.
+describe.skipIf(!fs.existsSync(WRAPPER_PATH))("daily sync PowerShell wrapper", () => {
   it("retries review-critical SPX spread legs before failing Data Collection", () => {
     const wrapper = readWrapper();
     const earlyRetryIndex = wrapper.indexOf('Invoke-OptionSidecarSequence -Date $ResolvedTradeDate -Scope "spx-spread-legs"');

@@ -18,6 +18,19 @@ describe("daily sync PowerShell wrapper", () => {
     expect(hardFailureIndex).toBeGreaterThan(earlyRetryIndex);
   });
 
+  it("runs TC2000 steps even when Data Collection blocks local review", () => {
+    const wrapper = readWrapper();
+    expect(wrapper).toContain("function Invoke-Tc2000Steps");
+
+    const retryIndex = wrapper.indexOf('Invoke-OptionSidecarSequence -Date $ResolvedTradeDate -Scope "spx-spread-legs"');
+    const blockedThrowIndex = wrapper.indexOf('throw "Data Collection blocked local review for $ResolvedTradeDate."');
+    expect(retryIndex).toBeGreaterThanOrEqual(0);
+    expect(blockedThrowIndex).toBeGreaterThan(retryIndex);
+
+    const blockedSection = wrapper.slice(retryIndex, blockedThrowIndex);
+    expect(blockedSection).toContain("Invoke-Tc2000Steps");
+  });
+
   it("keeps the broad failed-or-missing retry after Google upload", () => {
     const wrapper = readWrapper();
     const googleUploadFinishedIndex = wrapper.indexOf('Write-RubiconSyncStatus -State "running" -Ok ($SyncHardFailures.Count -eq 0) -Message "Google Upload stage finished."');

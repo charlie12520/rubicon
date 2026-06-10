@@ -91,10 +91,16 @@ async function ensureBuildIsFresh() {
 
 function startServerDetached() {
   const tsxCli = path.join(appRoot, "node_modules", "tsx", "dist", "cli.mjs");
+  // Mirror launch-desktop.mjs's proven detached spawn, including out/err log
+  // files — with stdio "ignore" a boot crash dies silently and undiagnosable.
+  const outLog = fs.openSync(path.join(appRoot, "data", "serve-headless-server.out.log"), "a");
+  const errLog = fs.openSync(path.join(appRoot, "data", "serve-headless-server.err.log"), "a");
   const child = spawn(process.execPath, [tsxCli, "server/index.ts"], {
     cwd: appRoot,
     detached: true,
-    stdio: "ignore",
+    env: { ...process.env },
+    shell: false,
+    stdio: ["ignore", outLog, errLog],
     windowsHide: true,
   });
   child.unref();

@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 
@@ -38,9 +39,40 @@ export async function firstExistingPath(candidates: string[]): Promise<string | 
   return null;
 }
 
+async function renameWithRetry(from: string, to: string): Promise<void> {
+  // On Windows, renaming onto a target that is mid-replace by another writer
+  // (or briefly held by antivirus/indexing) fails with a transient
+  // EPERM/EACCES/EBUSY. Retry with a short backoff before giving up.
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    try {
+      await fs.rename(from, to);
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException | null)?.code;
+      if (code !== "EPERM" && code !== "EACCES" && code !== "EBUSY") {
+        throw error;
+      }
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 5 + attempt * 10));
+    }
+  }
+  throw lastError;
+}
+
 export async function writeJsonAtomic(target: string, value: unknown): Promise<void> {
   await fs.mkdir(path.dirname(target), { recursive: true });
-  const temp = `${target}.tmp`;
-  await fs.writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, "utf8");
-  await fs.rename(temp, target);
+  // Unique temp name per write: concurrent writers to the same target (server
+  // routes + schedulers + sidecars all share data/*.json) must not share a
+  // temp file, or one writer's rename consumes the other's payload and the
+  // loser throws ENOENT.
+  const temp = `${target}.${process.pid}.${crypto.randomUUID()}.tmp`;
+  try {
+    await fs.writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+    await renameWithRetry(temp, target);
+  } finally {
+    // No-op after a successful rename; cleans up the orphan when the write or
+    // rename failed so data/ doesn't accumulate temp files.
+    await fs.rm(temp, { force: true });
+  }
 }

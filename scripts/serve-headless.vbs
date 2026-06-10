@@ -18,10 +18,12 @@ Set shell = CreateObject("WScript.Shell")
 
 scriptDir = fso.GetParentFolderName(WScript.ScriptFullName)
 appRoot = fso.GetParentFolderName(scriptDir)
-tsxPath = fso.BuildPath(appRoot, "node_modules\tsx\dist\cli.mjs")
+' serve-headless.mjs rebuilds a stale dist first (build failures fall back to
+' the existing dist), then starts tsx server/index.ts detached.
+tsxPath = fso.BuildPath(scriptDir, "serve-headless.mjs")
 
 nodeExe = FindNodeExe()
-nodeCmd = Quote(nodeExe) & " " & Quote(tsxPath) & " server/index.ts"
+nodeCmd = Quote(nodeExe) & " " & Quote(tsxPath)
 
 ' Primary path: WMI Win32_Process.Create with SW_HIDE — no console at all.
 wmiSucceeded = False

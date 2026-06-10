@@ -1,4 +1,4 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
@@ -36,7 +36,9 @@ const SPX_HEATMAP_SCRIPT = path.join("scripts", "refresh-spx-heatmap.py");
 const SECTOR_RRG_FILE = "sector-rrg-bars.json";
 const SECTOR_RRG_SCRIPT = path.join("scripts", "refresh-sector-rrg.py");
 
-let activeDailySync: ChildProcessWithoutNullStreams | null = null;
+// ChildProcess (not ...WithoutNullStreams): the sync child is spawned detached
+// with fd stdio, so its stream properties are null by design.
+let activeDailySync: ChildProcess | null = null;
 
 type DailySyncLaunchInput = {
   date?: string;
@@ -1280,13 +1282,22 @@ export async function startDailySync(input: DailySyncLaunchInput = {}): Promise<
   const logStream = await openRotatingLogStream(DAILY_SYNC_LAUNCH_LOG);
   logStream.write(`\n[${startedAt}] Launching ${command.display.join(" ")}\n`);
 
+  // Detached + file-descriptor stdio: a Rubicon server restart (tsx watch respawn,
+  // desktop relaunch, headless task restart) must NOT silently kill a running sync.
+  // The 2026-06-08 full sync died exactly this way — five log lines, then nothing:
+  // the non-detached child went down with the server and its piped output was lost.
+  // The wrapper owns its own completion status (Write-RubiconSyncStatus) and lock,
+  // so an orphaned sync still finishes and reports; the close handler below only
+  // fires when this server instance outlives the run (the normal case).
+  const childLogFd = fs.openSync(DAILY_SYNC_LAUNCH_LOG, "a");
   const child = spawn(command.command, command.args, {
     cwd: command.cwd,
     windowsHide: true,
+    detached: true,
+    stdio: ["ignore", childLogFd, childLogFd],
   });
+  child.unref();
   activeDailySync = child;
-  child.stdout.pipe(logStream);
-  child.stderr.pipe(logStream);
   logStream.on("error", (error) => {
     console.warn(`Daily sync launch log write failed: ${error.message}`);
   });
@@ -1313,6 +1324,11 @@ export async function startDailySync(input: DailySyncLaunchInput = {}): Promise<
 
   child.on("close", async (exitCode) => {
     const finishedAt = new Date().toISOString();
+    try {
+      fs.closeSync(childLogFd);
+    } catch {
+      // already closed
+    }
     logStream.write(`\n[${finishedAt}] Daily sync exited with code ${exitCode ?? "unknown"}\n`);
     logStream.end();
     activeDailySync = null;

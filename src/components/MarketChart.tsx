@@ -240,7 +240,7 @@ function renderEventMarkers(
 
     if (markerMode === "compact") {
       for (const tick of layoutCompactEventTicks(positionedEvents)) {
-        overlay.appendChild(createEventTick(tick));
+        overlay.appendChild(createEventTick(tick, markerScale));
       }
       return;
     }
@@ -285,17 +285,27 @@ export function layoutCompactEventTicks(events: PositionedTradeChartEvent[]): Co
     .sort((left, right) => left.x - right.x);
 }
 
-function createEventTick(tick: CompactEventTick): HTMLDivElement {
+function createEventTick(tick: CompactEventTick, scale = 1): HTMLDivElement {
+  // The tick geometry scales with the chart (the enlarged view passes >1) but
+  // the presentation stays minimal everywhere — "which trade / when" lives in
+  // the hover title, like the Daily Review chart.
+  const width = Math.max(3, 3 * scale);
+  const stubHeight = Math.max(11, 11 * scale);
   const el = document.createElement("div");
   el.className = `trade-tick ${tick.kind}`;
-  el.style.left = `${tick.x - 1.5}px`;
+  el.style.left = `${tick.x - width / 2}px`;
+  el.style.width = `${width}px`;
   el.title = tick.title;
   el.setAttribute("aria-label", tick.title);
   el.setAttribute("role", "img");
   const line = document.createElement("span");
   line.className = "trade-tick-line";
+  line.style.left = `${width / 2 - 0.5}px`;
+  line.style.bottom = `${stubHeight + 2}px`;
   const stub = document.createElement("span");
   stub.className = "trade-tick-stub";
+  stub.style.width = `${width}px`;
+  stub.style.height = `${stubHeight}px`;
   el.append(line, stub);
   return el;
 }

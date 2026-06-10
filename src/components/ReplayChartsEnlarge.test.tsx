@@ -57,15 +57,16 @@ describe("ReplayCharts enlarge mode", () => {
     fireEvent.click(screen.getByRole("button", { name: /enlarge SPX Intraday/ }));
 
     expect(screen.getByTestId(/chart:SPX Intraday/)).toHaveAttribute("data-enlarged", "true");
+    // enlarging scales the ticks but the presentation stays compact — event
+    // detail comes from hovering, like the Daily Review chart
     expect(screen.getByTestId(/chart:SPX Intraday/)).toHaveAttribute("data-marker-scale", "1.7");
-    expect(screen.getByTestId(/chart:SPX Intraday/)).toHaveAttribute("data-marker-mode", "full");
-    // the spread chart stays normal — small tiles use the compact tick mode
+    expect(screen.getByTestId(/chart:SPX Intraday/)).toHaveAttribute("data-marker-mode", "compact");
     expect(screen.getByTestId("chart:Selected Spread")).toHaveAttribute("data-enlarged", "false");
     expect(screen.getByTestId("chart:Selected Spread")).toHaveAttribute("data-marker-mode", "compact");
     expect(container.querySelector(".chart-enlarge-backdrop")).not.toBeNull();
   });
 
-  it("uses the compact marker mode for all charts at grid size", () => {
+  it("uses the compact marker mode for all charts in every state", () => {
     renderCharts();
     expect(screen.getByTestId(/chart:SPX Intraday/)).toHaveAttribute("data-marker-mode", "compact");
     expect(screen.getByTestId("chart:Selected Spread")).toHaveAttribute("data-marker-mode", "compact");

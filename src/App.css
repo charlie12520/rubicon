@@ -5633,6 +5633,67 @@ h2 {
   vector-effect: non-scaling-stroke;
 }
 
+/* Printed event label (rendered only when markers are enlarged). */
+.trade-cross-label {
+  position: absolute;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 640;
+  line-height: 1.1;
+  color: currentColor;
+  white-space: nowrap;
+  pointer-events: none;
+  text-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.95),
+    0 0 6px rgba(0, 0, 0, 0.8);
+}
+
+/* Replay chart enlarge ("theater") mode. position: fixed + inset means the
+   enlarged panel can never introduce horizontal overflow at any viewport. */
+.chart-enlarge-btn {
+  border: 1px solid #243349;
+  border-radius: 5px;
+  background: #0d1420;
+  color: #9fb2cc;
+  font-size: 12px;
+  line-height: 1;
+  padding: 3px 7px;
+  cursor: pointer;
+}
+
+.chart-enlarge-btn:hover {
+  background: #16202f;
+  color: #dce7f5;
+}
+
+.chart-enlarge-btn.active {
+  background: #1d2a3d;
+  color: #dce7f5;
+  border-color: #38507a;
+}
+
+.chart-enlarge-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 65;
+  background: rgba(2, 5, 9, 0.78);
+  backdrop-filter: blur(2px);
+}
+
+.chart-panel.chart-panel-enlarged {
+  position: fixed;
+  inset: 16px;
+  z-index: 70;
+  min-height: 0;
+  background: #070b11;
+  border: 1px solid #233248;
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.65);
+}
+
+.chart-panel.chart-panel-enlarged .market-chart {
+  min-height: 0;
+}
+
 .trade-entry-meta {
   margin-top: 4px;
   color: #fbbf24;

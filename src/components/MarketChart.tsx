@@ -55,6 +55,7 @@ type EventMarkerCluster = {
 
 type EventMarkerLayoutBase = EventMarkerCluster & {
   chartHeight: number;
+  chartWidth: number;
   markerX: number;
   markerY: number;
   markerWidth: number;
@@ -80,34 +81,26 @@ const MARKER_DUPLICATE_TOLERANCE = 5;
 const MARKER_RAIL_WIDTH = 3;
 const MARKER_RAIL_GROUP_GAP = 6;
 
-type MarketChartProps =
-  | {
-      kind: "candles";
-      data: SpxBar[];
-      title: string;
-      accent: string;
-      events?: TradeChartEvent[];
-      overlays?: MaOverlay[];
-      toolbar?: ReactNode;
-    }
-  | {
-      kind: "line";
-      data: SpreadMark[];
-      title: string;
-      accent: string;
-      events?: TradeChartEvent[];
-      overlays?: MaOverlay[];
-      toolbar?: ReactNode;
-    }
-  | {
-      kind: "spread-bars";
-      data: SpreadRangeBar[];
-      title: string;
-      accent: string;
-      events?: TradeChartEvent[];
-      overlays?: MaOverlay[];
-      toolbar?: ReactNode;
-    };
+type MarketChartCommonProps = {
+  title: string;
+  accent: string;
+  events?: TradeChartEvent[];
+  overlays?: MaOverlay[];
+  toolbar?: ReactNode;
+  /** Renders the chart in a fixed full-viewport overlay (theater mode). */
+  enlarged?: boolean;
+  /** When provided, an enlarge/restore button appears in the title tools. */
+  onToggleEnlarge?: () => void;
+  /** Multiplies the entry/exit marker geometry; labels appear above ~1.2. */
+  markerScale?: number;
+};
+
+type MarketChartProps = MarketChartCommonProps &
+  (
+    | { kind: "candles"; data: SpxBar[] }
+    | { kind: "line"; data: SpreadMark[] }
+    | { kind: "spread-bars"; data: SpreadRangeBar[] }
+  );
 
 export function MarketChart(props: MarketChartProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -120,6 +113,7 @@ export function MarketChart(props: MarketChartProps) {
 
     const chart = createChart(container, rubiconChartOptions());
     const cleanups: Array<() => void> = [];
+    const markerScale = props.markerScale ?? 1;
 
     if (props.kind === "candles") {
       const series = chart.addSeries(CandlestickSeries, {
@@ -131,7 +125,7 @@ export function MarketChart(props: MarketChartProps) {
       });
       series.setData(toCandlestickData(props.data));
       if (props.events?.length) {
-        cleanups.push(renderEventMarkers(container, chart, series, props.events));
+        cleanups.push(renderEventMarkers(container, chart, series, props.events, markerScale));
       }
     } else if (props.kind === "line") {
       const series = chart.addSeries(LineSeries, {
@@ -142,13 +136,13 @@ export function MarketChart(props: MarketChartProps) {
       });
       series.setData(toLineData(props.data, (mark) => mark.value));
       if (props.events?.length) {
-        cleanups.push(renderEventMarkers(container, chart, series, props.events));
+        cleanups.push(renderEventMarkers(container, chart, series, props.events, markerScale));
       }
     } else {
       const series = chart.addSeries(CandlestickSeries, SPREAD_HL_BAR_OPTIONS);
       series.setData(toCandlestickData(props.data));
       if (props.events?.length) {
-        cleanups.push(renderEventMarkers(container, chart, series, props.events));
+        cleanups.push(renderEventMarkers(container, chart, series, props.events, markerScale));
       }
     }
 
@@ -178,12 +172,23 @@ export function MarketChart(props: MarketChartProps) {
   const countLabel = chartCountLabel(props.kind, props.data);
 
   return (
-    <section className="chart-panel">
+    <section className={props.enlarged ? "chart-panel chart-panel-enlarged" : "chart-panel"}>
       <div className="panel-title">
         <span>{props.title}</span>
         <div className="chart-title-tools">
           {props.toolbar}
           {countLabel && <span className="panel-count">{countLabel}</span>}
+          {props.onToggleEnlarge && (
+            <button
+              aria-pressed={Boolean(props.enlarged)}
+              className={props.enlarged ? "chart-enlarge-btn active" : "chart-enlarge-btn"}
+              onClick={props.onToggleEnlarge}
+              title={props.enlarged ? "Restore chart size (Esc)" : "Enlarge chart"}
+              type="button"
+            >
+              {props.enlarged ? "✕" : "⤢"}
+            </button>
+          )}
         </div>
       </div>
       <div className="market-chart" ref={containerRef} />
@@ -204,6 +209,7 @@ function renderEventMarkers(
     priceToCoordinate: (price: number) => number | null;
   },
   events: TradeChartEvent[],
+  markerScale = 1,
 ) {
   const overlay = document.createElement("div");
   overlay.className = "event-cross-layer";
@@ -227,7 +233,7 @@ function renderEventMarkers(
     const layouts = layoutEventMarkers(positionedEvents, {
       width: container.clientWidth,
       height: container.clientHeight,
-    });
+    }, markerScale);
     for (const layout of layouts) {
       overlay.appendChild(createEventMarker(layout));
     }
@@ -248,12 +254,13 @@ function renderEventMarkers(
 export function layoutEventMarkers(
   events: PositionedTradeChartEvent[],
   size: { width: number; height: number },
+  scale = 1,
 ): EventMarkerLayout[] {
   const clusters = clusterEventMarkers(events);
-  const entries = layoutMarkerSide(clusters.filter((cluster) => cluster.kind === "entry"), size);
-  const exits = layoutMarkerSide(clusters.filter((cluster) => cluster.kind === "exit"), size);
+  const entries = layoutMarkerSide(clusters.filter((cluster) => cluster.kind === "entry"), size, scale);
+  const exits = layoutMarkerSide(clusters.filter((cluster) => cluster.kind === "exit"), size, scale);
   const layouts = [...entries, ...exits].sort((left, right) => left.anchorX - right.anchorX || left.anchorY - right.anchorY);
-  return assignRailGroups(layouts, size.width);
+  return assignRailGroups(layouts, size.width, scale);
 }
 
 function clusterEventMarkers(events: PositionedTradeChartEvent[]): EventMarkerCluster[] {
@@ -298,19 +305,22 @@ function eventClusterKey(event: PositionedTradeChartEvent): string {
 function layoutMarkerSide(
   clusters: EventMarkerCluster[],
   size: { width: number; height: number },
+  scale = 1,
 ): EventMarkerLayoutBase[] {
   const sorted = [...clusters].sort((left, right) => left.anchorX - right.anchorX || left.anchorY - right.anchorY);
-  return sorted.map((cluster) => markerLayoutCandidate(cluster, size.height));
+  return sorted.map((cluster) => markerLayoutCandidate(cluster, size, scale));
 }
 
-function markerLayoutCandidate(cluster: EventMarkerCluster, chartHeight: number): EventMarkerLayoutBase {
-  const markerWidth = MARKER_ARROW_WIDTH;
-  const markerHeight = MARKER_ARROW_HEIGHT;
+function markerLayoutCandidate(cluster: EventMarkerCluster, size: { width: number; height: number }, scale = 1): EventMarkerLayoutBase {
+  const chartHeight = size.height;
+  const markerWidth = MARKER_ARROW_WIDTH * scale;
+  const markerHeight = MARKER_ARROW_HEIGHT * scale;
   const tipX = markerWidth / 2;
   const tipY = cluster.kind === "entry" ? 0 : markerHeight;
   return {
     ...cluster,
     chartHeight,
+    chartWidth: size.width,
     markerX: cluster.anchorX - tipX,
     markerY: cluster.kind === "entry" ? cluster.anchorY : cluster.anchorY - markerHeight,
     markerWidth,
@@ -320,9 +330,10 @@ function markerLayoutCandidate(cluster: EventMarkerCluster, chartHeight: number)
   };
 }
 
-function assignRailGroups(layouts: EventMarkerLayoutBase[], chartWidth: number): EventMarkerLayout[] {
+function assignRailGroups(layouts: EventMarkerLayoutBase[], chartWidth: number, scale = 1): EventMarkerLayout[] {
   const railProps = new Map<EventMarkerLayoutBase, Pick<EventMarkerLayout, "showRail" | "railX" | "railWidth" | "railKind" | "railGrouped" | "railTitle">>();
   const sorted = [...layouts].sort((left, right) => left.anchorX - right.anchorX || left.anchorY - right.anchorY);
+  const railBaseWidth = MARKER_RAIL_WIDTH * scale;
   let currentGroup: EventMarkerLayoutBase[] = [];
   let currentMaxX = Number.NEGATIVE_INFINITY;
 
@@ -332,7 +343,7 @@ function assignRailGroups(layouts: EventMarkerLayoutBase[], chartWidth: number):
     }
     const minX = Math.min(...currentGroup.map((layout) => layout.anchorX));
     const maxX = Math.max(...currentGroup.map((layout) => layout.anchorX));
-    const naturalWidth = Math.max(MARKER_RAIL_WIDTH, maxX - minX + MARKER_RAIL_WIDTH);
+    const naturalWidth = Math.max(railBaseWidth, maxX - minX + railBaseWidth);
     const railWidth = Math.min(Math.max(0, chartWidth), naturalWidth);
     const railCenter = (minX + maxX) / 2;
     const railX = chartWidth > railWidth ? clamp(railCenter - railWidth / 2, 0, chartWidth - railWidth) : 0;
@@ -370,8 +381,8 @@ function assignRailGroups(layouts: EventMarkerLayoutBase[], chartWidth: number):
     ...layout,
     ...(railProps.get(layout) ?? {
       showRail: true,
-      railX: layout.anchorX - MARKER_RAIL_WIDTH / 2,
-      railWidth: MARKER_RAIL_WIDTH,
+      railX: layout.anchorX - railBaseWidth / 2,
+      railWidth: railBaseWidth,
       railKind: layout.kind,
       railGrouped: false,
       railTitle: layout.title,
@@ -445,10 +456,33 @@ function createEventMarker(layout: EventMarkerLayout): HTMLDivElement {
     marker.appendChild(rail);
   }
   marker.appendChild(createEventArrowSvg(layout));
+
+  // With enlarged markers there is room to print the label outright instead of
+  // hiding it in a hover tooltip — the whole point of the enlarge mode.
+  if (layout.markerWidth / MARKER_ARROW_WIDTH > 1.2 && layout.label) {
+    const text = document.createElement("span");
+    text.className = "trade-cross-label";
+    text.textContent = layout.label;
+    // Flip the label to the marker's left when it would clip the right edge.
+    const estimatedLabelWidth = layout.label.length * 7.5 + 8;
+    if (layout.markerX + layout.markerWidth + estimatedLabelWidth > layout.chartWidth) {
+      text.style.right = `${layout.markerWidth + 4}px`;
+    } else {
+      text.style.left = `${layout.markerWidth + 4}px`;
+    }
+    text.style.top = layout.kind === "entry" ? `${layout.markerHeight * 0.3}px` : `${layout.markerHeight * 0.45}px`;
+    marker.appendChild(text);
+  }
   return marker;
 }
 
 function createEventArrowSvg(layout: EventMarkerLayout): SVGSVGElement {
+  // Geometry scales with the layout's marker box (markerScale-aware): the
+  // viewBox is the scaled box, so the head/dot must scale by the same factor.
+  const scale = layout.markerWidth / MARKER_ARROW_WIDTH;
+  const headHalfWidth = MARKER_ARROW_HEAD_HALF_WIDTH * scale;
+  const headLength = MARKER_ARROW_HEAD_LENGTH * scale;
+
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute("viewBox", `0 0 ${layout.markerWidth} ${layout.markerHeight}`);
   svg.setAttribute("aria-hidden", "true");
@@ -466,23 +500,23 @@ function createEventArrowSvg(layout: EventMarkerLayout): SVGSVGElement {
   dot.setAttribute("class", "trade-cross-anchor-dot");
   dot.setAttribute("cx", String(layout.tipX));
   dot.setAttribute("cy", String(layout.tipY));
-  dot.setAttribute("r", "2.4");
+  dot.setAttribute("r", String(2.4 * scale));
 
   if (layout.kind === "entry") {
-    const baseY = layout.tipY + MARKER_ARROW_HEAD_LENGTH;
+    const baseY = layout.tipY + headLength;
     stem.setAttribute("y1", String(baseY + 1));
     stem.setAttribute("y2", String(layout.markerHeight - 2));
     head.setAttribute(
       "points",
-      `${layout.tipX},${layout.tipY} ${layout.tipX - MARKER_ARROW_HEAD_HALF_WIDTH},${baseY} ${layout.tipX + MARKER_ARROW_HEAD_HALF_WIDTH},${baseY}`,
+      `${layout.tipX},${layout.tipY} ${layout.tipX - headHalfWidth},${baseY} ${layout.tipX + headHalfWidth},${baseY}`,
     );
   } else {
-    const baseY = layout.tipY - MARKER_ARROW_HEAD_LENGTH;
+    const baseY = layout.tipY - headLength;
     stem.setAttribute("y1", "2");
     stem.setAttribute("y2", String(baseY - 1));
     head.setAttribute(
       "points",
-      `${layout.tipX},${layout.tipY} ${layout.tipX - MARKER_ARROW_HEAD_HALF_WIDTH},${baseY} ${layout.tipX + MARKER_ARROW_HEAD_HALF_WIDTH},${baseY}`,
+      `${layout.tipX},${layout.tipY} ${layout.tipX - headHalfWidth},${baseY} ${layout.tipX + headHalfWidth},${baseY}`,
     );
   }
 

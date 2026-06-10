@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { OpenInterestPoint, ReplayPayload, SpxBar, SpreadMark, SpreadRangeBar, TradeRecord, VolumePoint } from "../../shared/types";
 import { resampleBars } from "../../shared/resampleBars";
 import { MarketChart } from "./MarketChart";
@@ -22,12 +22,29 @@ type ReplayChartsProps = {
 const SPX_TIMEFRAME_OPTIONS = [2, 5] as const;
 type SpxTimeframe = (typeof SPX_TIMEFRAME_OPTIONS)[number];
 const DEFAULT_SPX_TIMEFRAME: SpxTimeframe = 2;
+type EnlargedChart = "spx" | "spread" | null;
+// Enlarged markers get ~1.7x geometry plus printed labels — the readability win.
+const ENLARGED_MARKER_SCALE = 1.7;
 
 export function ReplayCharts({ replay, replayIndex, replayMode, selectedTrade, selectedTrades, selectionLabel }: ReplayChartsProps) {
   const [volumeMode, setVolumeMode] = useState<VolumeMode>("both");
   const [spreadChartMode, setSpreadChartMode] = useState<SpreadChartMode>("line");
   const [timeframe, setTimeframe] = useState<SpxTimeframe>(DEFAULT_SPX_TIMEFRAME);
   const [cheatCode, setCheatCode] = useState(false);
+  const [enlargedChart, setEnlargedChart] = useState<EnlargedChart>(null);
+
+  useEffect(() => {
+    if (!enlargedChart) {
+      return;
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setEnlargedChart(null);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [enlargedChart]);
 
   const currentTime = replayCutoffTime(replay, replayIndex, replayMode);
   const chartTrades = useMemo(
@@ -68,8 +85,12 @@ export function ReplayCharts({ replay, replayIndex, replayMode, selectedTrade, s
     return <div className="empty-panel">Loading replay...</div>;
   }
 
+  const spxEnlarged = enlargedChart === "spx";
+  const spreadEnlarged = enlargedChart === "spread";
+
   return (
     <div className="replay-charts">
+      {enlargedChart && <div className="chart-enlarge-backdrop" onClick={() => setEnlargedChart(null)} />}
       <div className="replay-grid">
         <MarketChart
           kind="candles"
@@ -78,6 +99,9 @@ export function ReplayCharts({ replay, replayIndex, replayMode, selectedTrade, s
           accent="#2dd4bf"
           events={spxEvents}
           overlays={spxOverlays}
+          enlarged={spxEnlarged}
+          markerScale={spxEnlarged ? ENLARGED_MARKER_SCALE : 1}
+          onToggleEnlarge={() => setEnlargedChart(spxEnlarged ? null : "spx")}
           toolbar={<SpxChartControls cheatCode={cheatCode} onTimeframeChange={setTimeframe} onToggleCheat={() => setCheatCode((enabled) => !enabled)} timeframe={timeframe} />}
         />
         {spreadChartMode === "hl" ? (
@@ -87,6 +111,9 @@ export function ReplayCharts({ replay, replayIndex, replayMode, selectedTrade, s
             title={spreadTitle}
             accent="#f59e0b"
             events={spreadEvents}
+            enlarged={spreadEnlarged}
+            markerScale={spreadEnlarged ? ENLARGED_MARKER_SCALE : 1}
+            onToggleEnlarge={() => setEnlargedChart(spreadEnlarged ? null : "spread")}
             toolbar={<SpreadChartToggle mode={spreadChartMode} onChange={setSpreadChartMode} />}
           />
         ) : (
@@ -96,6 +123,9 @@ export function ReplayCharts({ replay, replayIndex, replayMode, selectedTrade, s
             title={spreadTitle}
             accent="#f59e0b"
             events={spreadEvents}
+            enlarged={spreadEnlarged}
+            markerScale={spreadEnlarged ? ENLARGED_MARKER_SCALE : 1}
+            onToggleEnlarge={() => setEnlargedChart(spreadEnlarged ? null : "spread")}
             toolbar={<SpreadChartToggle mode={spreadChartMode} onChange={setSpreadChartMode} />}
           />
         )}

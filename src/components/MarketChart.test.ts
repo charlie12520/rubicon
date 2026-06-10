@@ -59,6 +59,26 @@ describe("replay event marker layout", () => {
     }
   });
 
+  it("scales the marker geometry while keeping every tip anchored (enlarge mode)", () => {
+    const scale = 1.7;
+    const layouts = layoutEventMarkers(
+      [
+        marker("entry", "E1 09:31", 36, 138),
+        marker("exit", "X1 11:33", 128, 108),
+      ],
+      { width: 360, height: 220 },
+      scale,
+    );
+
+    for (const layout of layouts) {
+      expect(layout.markerWidth).toBeCloseTo(24 * scale, 5);
+      expect(layout.markerHeight).toBeCloseTo(30 * scale, 5);
+      expect(layout.railWidth).toBeGreaterThanOrEqual(3 * scale);
+      expect(layout.markerX + layout.tipX).toBeCloseTo(layout.anchorX, 5);
+      expect(layout.markerY + layout.tipY).toBeCloseTo(layout.anchorY, 5);
+    }
+  });
+
   it("groups overlapping vertical rails without merging the event arrows", () => {
     const layouts = layoutEventMarkers(
       [

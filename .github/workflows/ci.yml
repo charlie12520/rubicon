@@ -7,7 +7,10 @@ on:
 
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    # Rubicon is a Windows-only desktop app (WMI launcher, PowerShell toasts,
+    # Edge PWA) — several server tests assert Windows path shapes, so CI runs
+    # on the platform the app actually targets.
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

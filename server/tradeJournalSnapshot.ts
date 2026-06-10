@@ -1,5 +1,5 @@
 import type { TradeJournalSnapshotSaveResult } from "../shared/types.ts";
-import { writeJsonAtomic } from "./jsonStore.ts";
+import { readJson, writeJsonAtomic } from "./jsonStore.ts";
 import path from "node:path";
 
 const MAX_TEXT_LENGTH = 4000;
@@ -91,6 +91,53 @@ export async function writeTradeJournalSnapshot(value: unknown): Promise<TradeJo
     count: Object.keys(entries).length,
     generatedAt: new Date().toISOString(),
     message: `Saved ${Object.keys(entries).length} journal entries for Codex automation.`,
+    ok: true,
+  };
+}
+
+function entryUpdatedAtMs(entry: Record<string, unknown> | undefined): number | null {
+  const raw = entry?.updatedAt;
+  if (typeof raw !== "string" || !raw) {
+    return null;
+  }
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export async function mergeTradeJournalSnapshot(value: unknown): Promise<TradeJournalSnapshotSaveResult> {
+  // The client pushes its ENTIRE journal map on every change, seeded from that
+  // browser profile's localStorage — so a stale tab (or an empty profile)
+  // replacing the whole file could silently drop entries. Merge by tradeId
+  // instead: entries absent from the incoming payload survive, and an entry
+  // only updates when the incoming copy is not older than what's on disk.
+  // (`writeTradeJournalSnapshot` above stays as the explicit full-replace
+  // maintenance primitive.)
+  const incoming = sanitizeEntries(value);
+  const target = journalSnapshotPath();
+  const existingSnapshot = await readJson<{ entries?: unknown }>(target, {});
+  const existing = sanitizeEntries(existingSnapshot.entries);
+
+  const merged: Record<string, Record<string, unknown>> = { ...existing };
+  let applied = 0;
+  let keptNewerExisting = 0;
+  for (const [tradeId, entry] of Object.entries(incoming)) {
+    const existingMs = entryUpdatedAtMs(existing[tradeId]);
+    const incomingMs = entryUpdatedAtMs(entry);
+    if (existing[tradeId] && existingMs !== null && incomingMs !== null && existingMs > incomingMs) {
+      keptNewerExisting += 1;
+      continue;
+    }
+    merged[tradeId] = entry;
+    applied += 1;
+  }
+
+  await writeJsonAtomic(target, { generatedAt: new Date().toISOString(), entries: merged });
+  const count = Object.keys(merged).length;
+  const keptNote = keptNewerExisting > 0 ? `, kept ${keptNewerExisting} newer existing` : "";
+  return {
+    count,
+    generatedAt: new Date().toISOString(),
+    message: `Merged ${applied} journal entries (${count} total${keptNote}).`,
     ok: true,
   };
 }

@@ -29,7 +29,7 @@ import { armSpxLiveBarsAutoStart, getSpxLiveBarsStatus, loadSpxLiveBars, startSp
 import { armIndexReconcileAutoRun } from "./indexReconcile.ts";
 import { loadMorningBrief, loadMorningLiveUpdates, resolveTc2000Artifact } from "./morningBrief.ts";
 import { loadMorningAiNotes } from "./morningAiNotes.ts";
-import { writeTradeJournalSnapshot } from "./tradeJournalSnapshot.ts";
+import { mergeTradeJournalSnapshot } from "./tradeJournalSnapshot.ts";
 import { showCalendarDesktopAlert, showLiveUpdateDesktopToast } from "./desktopAlert.ts";
 import {
   getGodelAlertBridgeStatus,
@@ -654,7 +654,9 @@ app.put("/api/review-notes/:date", async (request, response, next) => {
 
 app.put("/api/journal-snapshot", async (request, response, next) => {
   try {
-    response.json(await writeTradeJournalSnapshot(request.body?.entries ?? request.body));
+    // Merge (not replace): a stale tab or another browser profile must not
+    // clobber entries it never loaded.
+    response.json(await mergeTradeJournalSnapshot(request.body?.entries ?? request.body));
   } catch (error) {
     next(error);
   }

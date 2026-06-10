@@ -8,8 +8,10 @@ RTH 1-minute SPX index bars via reqHistoricalData and writes them atomically to
 during the session — instead of waiting for the post-close daily pull.
 
 Decoupled from the heatmap loop on purpose (that file is heavily contended):
-its own process, its own client id (default 947, distinct from heatmap 941 /
-holdings 884), its own output file. Stops itself at 16:00 ET.
+its own process, its own client id (default 949, distinct from heatmap 941 /
+holdings 884 / TC2000 daily bars 947 / 0DTE chain 948), its own output file.
+Stops itself at 16:00 ET. (949 replaced 947 on 2026-06-09: 947 collided with
+refresh-tc2000-daily-bars.py, and IBKR allows one connection per client id.)
 """
 
 from __future__ import annotations
@@ -168,7 +170,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Live SPX intraday bar feed for the Rubicon Estimator chart.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--ports", default="7496,4001")
-    parser.add_argument("--client-id", type=int, default=947)
+    parser.add_argument("--client-id", type=int, default=949)
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     parser.add_argument("--interval", type=float, default=15.0, help="seconds between SPX bar pulls")
     parser.add_argument("--bar-size", default="1 min")

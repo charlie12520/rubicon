@@ -11,8 +11,10 @@ import { pathExists } from "./jsonStore.ts";
 // (scripts/refresh-spx-live-bars.py) re-pulls today's RTH 1-min SPX bars every
 // ~15s and writes data/spx-live-bars.json; the Estimator chart reads it so its
 // target-level line has a live SPX backdrop mid-session. Kept fully separate
-// from the heatmap loop (own process, own client id 947, own file) so the two
-// don't contend. Prefer the IBKR-history venv Python (known-good tz data).
+// from the heatmap loop (own process, own client id 949, own file) so the two
+// don't contend. (949 replaced 947 on 2026-06-09 — 947 belongs to the TC2000
+// daily-bars pull, and IBKR allows one connection per client id.)
+// Prefer the IBKR-history venv Python (known-good tz data).
 const serverDir = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(serverDir, "..");
 const AI_STUFF_ROOT = process.env.AI_STUFF_ROOT ?? path.resolve(APP_ROOT, "..");
@@ -22,7 +24,7 @@ const LIVE_PYTHON = process.env.SPX_LIVE_BARS_PYTHON ?? process.env.SPX_HEATMAP_
 const LIVE_LOG = path.join(APP_ROOT, "data", "spx-live-bars-feed.log");
 const DATA_FILE = "spx-live-bars.json";
 const DEFAULT_PORTS = process.env.SPX_LIVE_BARS_PORTS ?? process.env.SPX_HEATMAP_PORTS ?? "7496,4001";
-const DEFAULT_CLIENT_ID = Number(process.env.SPX_LIVE_BARS_CLIENT_ID ?? 947);
+const DEFAULT_CLIENT_ID = Number(process.env.SPX_LIVE_BARS_CLIENT_ID ?? 949);
 const LOG_TAIL_MAX = 60;
 
 const AUTO_START_ENABLED = String(process.env.SPX_LIVE_BARS_AUTO_START ?? "true").toLowerCase() !== "false";

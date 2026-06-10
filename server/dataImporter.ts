@@ -39,7 +39,7 @@ const ENTRY_CHART_DEVIATION_REL_THRESHOLD = 0.25;
 const DEFAULT_TRACKER_SNAPSHOT_CACHE_TTL_MS = 30_000;
 const REPLAY_SAFE_STATE_FILE = "rubicon_replay_safe_state.json";
 const REPLAY_SAFE_STATE_SCHEMA = "rubicon-replay-safe-state";
-const REPLAY_SAFE_STATE_VERSION = 3;
+const REPLAY_SAFE_STATE_VERSION = 4;
 
 type CsvRow = Record<string, string>;
 
@@ -1572,12 +1572,32 @@ async function loadSafeSpreadMarks(date: string, tradeIds: Set<string>): Promise
     .sort((a, b) => a.time - b.time);
 }
 
-function sanitizeSpreadMarksForTrades(spreadMarks: SpreadMark[], trades: TradeRecord[]): SpreadMark[] {
+// Trade-print marks past the close are pure forward-fill (expired 0DTE legs do
+// not print after 16:00) — the upstream series carries a frozen phantom tail to
+// ~16:14 on every spread.
+const SPREAD_MARK_SESSION_CLOSE_HHMM = "16:00";
+// A trade-print mark whose legs include a stale (non-printing) leg and which
+// jumps more than this fraction of the vertical width versus the last trusted
+// CO-PRINT mark is a fresh-print-paired-with-stale-print artifact, not a market
+// move — the signature sawtooth that flips between ~0 and ~-width on ITM 0DTE
+// spreads. Only co-print marks (staleLegCount 0) advance the trusted baseline,
+// so stale noise cannot staircase the baseline away.
+const SPREAD_MARK_STALE_FLIP_WIDTH_FRACTION = 0.25;
+
+function spreadMarkEtHhmm(timestampEt: string): string {
+  return timestampEt.length >= 16 ? timestampEt.slice(11, 16) : "";
+}
+
+function isTradePrintMarkSource(source: string): boolean {
+  return source.includes("TRADES");
+}
+
+export function sanitizeSpreadMarksForTrades(spreadMarks: SpreadMark[], trades: TradeRecord[]): SpreadMark[] {
   if (!spreadMarks.length || !trades.length) {
     return spreadMarks;
   }
   const tradesById = new Map(trades.map((trade) => [trade.id, trade]));
-  return spreadMarks.map((mark) => {
+  const clamped = spreadMarks.map((mark) => {
     const trade = tradesById.get(mark.tradeId);
     const bounds = trade ? spreadMarkBoundsForTrade(trade) : null;
     if (!bounds) {
@@ -1614,6 +1634,59 @@ function sanitizeSpreadMarksForTrades(spreadMarks: SpreadMark[], trades: TradeRe
       vwap: nextVwap,
     };
   });
+
+  // Sequential per-trade pass: drop the phantom post-close tail and carry the
+  // last trusted value over stale-leg full-width flips. Quote/midpoint-sourced
+  // marks are never touched — only the sparse-trade-print fallback misbehaves.
+  const byTrade = new Map<string, SpreadMark[]>();
+  for (const mark of clamped) {
+    const list = byTrade.get(mark.tradeId);
+    if (list) {
+      list.push(mark);
+    } else {
+      byTrade.set(mark.tradeId, [mark]);
+    }
+  }
+
+  const out: SpreadMark[] = [];
+  for (const [tradeId, marks] of byTrade) {
+    const trade = tradesById.get(tradeId);
+    const width = trade && Number.isFinite(trade.width) && trade.width > 0 ? trade.width : null;
+    marks.sort((a, b) => a.time - b.time);
+    let lastTrusted: number | null = null;
+    for (const mark of marks) {
+      const hhmm = spreadMarkEtHhmm(mark.timestampEt);
+      if (hhmm && hhmm > SPREAD_MARK_SESSION_CLOSE_HHMM) {
+        continue;
+      }
+      const staleLegs = (mark.staleLegCount ?? 0) >= 1;
+      if (
+        width !== null &&
+        staleLegs &&
+        isTradePrintMarkSource(mark.source) &&
+        lastTrusted !== null &&
+        Math.abs(mark.value - lastTrusted) > width * SPREAD_MARK_STALE_FLIP_WIDTH_FRACTION
+      ) {
+        out.push({
+          ...mark,
+          value: lastTrusted,
+          open: lastTrusted,
+          high: lastTrusted,
+          low: lastTrusted,
+          close: lastTrusted,
+          vwap: undefined,
+          source: appendSourceMarker(mark.source, "rubicon_stale_leg_carry"),
+        });
+        continue;
+      }
+      out.push(mark);
+      if (!staleLegs || !isTradePrintMarkSource(mark.source)) {
+        lastTrusted = mark.value;
+      }
+    }
+  }
+  out.sort((a, b) => a.time - b.time || a.tradeId.localeCompare(b.tradeId));
+  return out;
 }
 
 function spreadMarkBoundsForTrade(trade: TradeRecord): { lower: number; upper: number } | null {

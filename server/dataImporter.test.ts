@@ -493,7 +493,9 @@ describe("AI STUFF trade importer", () => {
     expect(marksByTrade.size).toBe(expectedTradeIds.size);
     for (const [tradeId, marks] of marksByTrade) {
       expect(tradeId).toMatch(/^IBKR-/);
-      expect(marks.length).toBe(405);
+      // 391 = 09:30 .. 16:00 inclusive. The upstream series carries ~14 more
+      // forward-filled phantom marks past the close; sanitize trims them.
+      expect(marks.length).toBe(391);
       expect(marks.every((mark) => mark.activeLegCount === 2)).toBe(true);
       expect(marks.some((mark) => Number.isFinite(mark.high) && Number.isFinite(mark.low) && mark.high !== mark.low)).toBe(true);
       const expectedLegs = expectedLegsByTrade.get(tradeId) ?? new Set();

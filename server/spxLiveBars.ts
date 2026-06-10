@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import type { SpxBar, SpxLiveBarsLiveStatus, SpxLiveBarsPayload } from "../shared/types.ts";
 import { easternClock, timeDeltaMinutes, type EasternClock } from "./easternClock.ts";
 import { pathExists } from "./jsonStore.ts";
+import { openRotatingLogStream } from "./logRotation.ts";
 
 // Dedicated live SPX intraday-bar sidecar. A long-running ib_insync process
 // (scripts/refresh-spx-live-bars.py) re-pulls today's RTH 1-min SPX bars every
@@ -180,8 +181,7 @@ export async function startSpxLiveBars(opts: { clientId?: number; ports?: string
   logTail.length = 0;
   pushLog(`[${startedAt}] launching ${LIVE_PYTHON} refresh-spx-live-bars.py --ports ${ports} --client-id ${clientId}`);
 
-  await fsp.mkdir(path.dirname(LIVE_LOG), { recursive: true });
-  const logStream = fs.createWriteStream(LIVE_LOG, { flags: "a" });
+  const logStream = await openRotatingLogStream(LIVE_LOG);
   logStream.write(`\n[${startedAt}] launching ${LIVE_PYTHON} ${args.join(" ")}\n`);
   logStream.on("error", (error) => pushLog(`log stream error: ${error.message}`));
 

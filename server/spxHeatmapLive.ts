@@ -1,12 +1,12 @@
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import fs from "node:fs";
-import fsp from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import type { SpxHeatmapLiveStatus } from "../shared/types.ts";
 import { easternClock, timeDeltaMinutes, type EasternClock } from "./easternClock.ts";
 import { pathExists } from "./jsonStore.ts";
+import { openRotatingLogStream } from "./logRotation.ts";
 
 // Long-running per-minute IBKR snapshot poller. It rewrites data/spx-heatmap.json
 // each minute so the Heatmap tab re-fetches a live map. It needs ib_insync — both
@@ -208,8 +208,7 @@ export async function startSpxHeatmapLive(opts: { clientId?: number; ports?: str
   logTail.length = 0;
   pushLog(`[${startedAt}] launching ${LIVE_PYTHON} refresh-spx-heatmap.py --source ibkr-live --indexes spx,qqq --ports ${ports} --client-id ${clientId}`);
 
-  await fsp.mkdir(path.dirname(LIVE_LOG), { recursive: true });
-  const logStream = fs.createWriteStream(LIVE_LOG, { flags: "a" });
+  const logStream = await openRotatingLogStream(LIVE_LOG);
   logStream.write(`\n[${startedAt}] launching ${LIVE_PYTHON} ${args.join(" ")}\n`);
   logStream.on("error", (error) => pushLog(`log stream error: ${error.message}`));
 

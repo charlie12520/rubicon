@@ -19,6 +19,7 @@ import { easternClock } from "./easternClock.ts";
 import { pathExists, readJson, writeJsonAtomic } from "./jsonStore.ts";
 import { loadMorningBrief } from "./morningBrief.ts";
 import { refreshRubiconDailySummary } from "./trackerSummary.ts";
+import { openRotatingLogStream } from "./logRotation.ts";
 
 const AI_STUFF_ROOT = process.env.AI_STUFF_ROOT ?? path.resolve(process.cwd(), "..");
 const IBKR_ROOT = path.join(AI_STUFF_ROOT, "IBKR Equity History Pull");
@@ -1276,8 +1277,7 @@ export async function startDailySync(input: DailySyncLaunchInput = {}): Promise<
     };
   }
 
-  await fsp.mkdir(path.dirname(DAILY_SYNC_LAUNCH_LOG), { recursive: true });
-  const logStream = fs.createWriteStream(DAILY_SYNC_LAUNCH_LOG, { flags: "a" });
+  const logStream = await openRotatingLogStream(DAILY_SYNC_LAUNCH_LOG);
   logStream.write(`\n[${startedAt}] Launching ${command.display.join(" ")}\n`);
 
   const child = spawn(command.command, command.args, {
@@ -1397,8 +1397,7 @@ export async function startDailyOptionPull(input: { date: string; scope?: DailyO
   const startedAt = new Date().toISOString();
   const stages = defaultDailyPipelineStages(startedAt, "running");
 
-  await fsp.mkdir(path.dirname(DAILY_SYNC_LAUNCH_LOG), { recursive: true });
-  const logStream = fs.createWriteStream(DAILY_SYNC_LAUNCH_LOG, { flags: "a" });
+  const logStream = await openRotatingLogStream(DAILY_SYNC_LAUNCH_LOG);
   logStream.write(`\n[${startedAt}] Launching failed/missing option retry ${command.display.join(" ")}\n`);
 
   const child = spawn(command.command, command.args, {

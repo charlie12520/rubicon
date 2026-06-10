@@ -7,6 +7,7 @@ import type { SpreadSpeedFrame, SpreadSpeedPayload, SpxLiveBarsLiveStatus } from
 import { easternClock, timeDeltaMinutes, type EasternClock } from "./easternClock.ts";
 import { pathExists } from "./jsonStore.ts";
 import { buildFrame, FAST, TARGET_NET_DELTA } from "./spreadSpeed.ts";
+import { openRotatingLogStream } from "./logRotation.ts";
 
 // Live SPXW 0DTE Signal-Stack feed. A long-running ib_insync process
 // (scripts/refresh-spx-0dte-chain.py) snapshots SPX spot + an at-the-money band
@@ -223,8 +224,7 @@ export async function startSpreadSpeedLive(opts: { clientId?: number; ports?: st
   logTail.length = 0;
   pushLog(`[${startedAt}] launching ${LIVE_PYTHON} refresh-spx-0dte-chain.py --ports ${ports} --client-id ${clientId}`);
 
-  await fsp.mkdir(path.dirname(LIVE_LOG), { recursive: true });
-  const logStream = fs.createWriteStream(LIVE_LOG, { flags: "a" });
+  const logStream = await openRotatingLogStream(LIVE_LOG);
   logStream.write(`\n[${startedAt}] launching ${LIVE_PYTHON} ${args.join(" ")}\n`);
   logStream.on("error", (error) => pushLog(`log stream error: ${error.message}`));
 

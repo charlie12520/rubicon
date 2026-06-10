@@ -1,11 +1,10 @@
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import fs from "node:fs";
-import fsp from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { FplLiveStatus } from "../shared/types.ts";
 import { easternClock, timeDeltaMinutes } from "./easternClock.ts";
 import { pathExists } from "./jsonStore.ts";
+import { openRotatingLogStream } from "./logRotation.ts";
 
 // The live predictor streams IBKR SPX bars and appends to predictions_<today>.csv.
 // It needs BOTH scikit-learn (the model) and ib_insync (streaming) — the system
@@ -213,8 +212,7 @@ export async function startFplLive(opts: { port?: number; clientId?: number } = 
   logTail.length = 0;
   pushLog(`[${startedAt}] launching ${LIVE_PYTHON} fpl_live_predict.py --live --port ${port} --client-id ${clientId}`);
 
-  await fsp.mkdir(path.dirname(LIVE_LOG), { recursive: true });
-  const logStream = fs.createWriteStream(LIVE_LOG, { flags: "a" });
+  const logStream = await openRotatingLogStream(LIVE_LOG);
   logStream.write(`\n[${startedAt}] launching ${LIVE_PYTHON} ${args.join(" ")}\n`);
   logStream.on("error", (error) => {
     pushLog(`log stream error: ${error.message}`);

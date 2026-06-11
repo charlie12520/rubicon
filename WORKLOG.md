@@ -2,7 +2,7 @@
 
 ```yaml
 current_phase: "Local MVP delivered"
-current_acceptance_id: "A185"
+current_acceptance_id: "A186"
 core_loop_status: "GREEN"
 last_validation_result: "GREEN"
 same_blocker_count: 0
@@ -38,13 +38,16 @@ Trader opens Rubicon -> Morning shows the macro/live/model premarket brief -> Re
 
 ## Acceptance Progress Summary
 
-- Green: A01-A12, A14-A19, A21-A185
+- Green: A01-A12, A14-A19, A21-A186
 - Yellow: none
 - Red: none
 - Deferred: A13 separate admin view, A20 AI feature fallback
 - Blocked: none
 
 ## Last Completed Change
+
+- A186 - **Godel Terminal news scraper** (user request: scrape the bottom-corner news, windowless). scripts/godel-news-scraper.mjs: off-screen headed Edge with dedicated profile defeats Cloudflare (headless impossible - all routes re-challenged); 5s DOM poll of streaming-table rows + breaking-banner detection + raw WS frame capture to Desktop\AI STUFF\godel-news\ (news.jsonl / latest.json / breaking.jsonl / ws-raw.log); restart-safe dedupe, crash-relaunch, --once and --login modes. Validated: 200 rows captured incl. same-hour items; lint clean. Watcher left running detached.
+
 
 - A185 - **TC2000 scanner export hardening and stale-source honesty.** Today's TC2000 scanner miss was a UI-state/OCR failure: the Post-Market Mode prompt covered the scanner table, OCR extracted 0 symbols, and daily bars then refreshed from old `*_latest.csv` membership without saying the membership was stale. Fix: the OCR script now classifies known blocking prompts (`failureReason: blocking_prompt`, exit 4); the TC2000 control panel dismisses known prompts via OK/close/Escape and retries the bounded scanner OCR before failing; the daily wrapper passes the TC2000 export start time into the daily-bars refresh and treats stale scanner sources as a warning; `tc2000-daily-bars.json` now carries non-breaking `screenerFreshnessStatus`, `staleSourceCount`, and `sourceDetails`; Morning preserves that metadata and downgrades TC2000 pulls to warning when scanner CSVs are stale. Validation: `python tests\test_tc2000_watchlist_ocr.py` 5/5; `python scripts\test_refresh_tc2000_daily_bars.py` 11/11; PowerShell parser OK for `tc2000_control_panel.ps1`, `run_tc2000_qullamaggie_export.ps1`, and `run_daily_spx_ibkr_sync_with_sheet_payload.ps1`; focused Vitest `server/dailySyncWrapper.test.ts server/morningBrief.test.ts` 21/21; `npm run typecheck`; full `npm test` 92 files / 584 tests; `npm run build` passed with the existing large-chunk warning. Note: the TC2000 controller/OCR and IBKR wrapper live in sibling non-git workspace paths, so the Rubicon commit covers the tracked metadata/tests while the local workspace carries the paired script edits.
 

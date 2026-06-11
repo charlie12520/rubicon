@@ -197,11 +197,52 @@ def select_export_files(root: Path, include_all: bool = False) -> list[Path]:
     return all_csvs[:1]
 
 
-def read_tc2000_export_symbols(root: Path, include_all: bool = False) -> tuple[list[str], list[str], list[str]]:
+def parse_fresh_after(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    parsed = datetime.fromisoformat(text)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def source_updated_at(path: Path) -> datetime:
+    return datetime.fromtimestamp(path.stat().st_mtime, timezone.utc)
+
+
+def source_freshness_status(source_details: list[dict[str, Any]], fresh_after: datetime | None) -> str:
+    if fresh_after is None:
+        return "unknown"
+    if not source_details:
+        return "stale"
+    fresh_count = sum(1 for detail in source_details if detail.get("fresh") is True)
+    if fresh_count == len(source_details):
+        return "fresh"
+    if fresh_count == 0:
+        return "stale"
+    return "partial-stale"
+
+
+def read_tc2000_export_symbols_with_details(
+    root: Path,
+    include_all: bool = False,
+    fresh_after: datetime | None = None,
+) -> tuple[list[str], list[str], list[str], list[dict[str, Any]]]:
     symbols: list[str] = []
     sources: list[str] = []
     rejected: list[str] = []
+    source_details: list[dict[str, Any]] = []
     for path in select_export_files(root, include_all=include_all):
+        updated_at: datetime | None = None
+        try:
+            updated_at = source_updated_at(path)
+        except OSError:
+            pass
         try:
             with path.open(newline="", encoding="utf-8-sig") as handle:
                 reader = csv.DictReader(handle)
@@ -209,17 +250,40 @@ def read_tc2000_export_symbols(root: Path, include_all: bool = False) -> tuple[l
                     continue
                 fields = {name.lower(): name for name in reader.fieldnames}
                 symbol_col = fields.get("symbol") or fields.get("ticker") or reader.fieldnames[0]
-                file_symbols = [clean_symbol(row.get(symbol_col, "")) for row in reader]
+                screen_col = fields.get("screen") or fields.get("scan") or fields.get("easyscan")
+                rows = list(reader)
+                file_symbols = [clean_symbol(row.get(symbol_col, "")) for row in rows]
+                screen_names = sorted({str(row.get(screen_col, "")).strip() for row in rows if screen_col and str(row.get(screen_col, "")).strip()})
         except Exception as exc:
             print(f"Skipping TC2000 export {path}: {exc}", file=sys.stderr)
             continue
         file_symbols = [symbol for symbol in file_symbols if symbol]
         kept = [symbol for symbol in file_symbols if is_plausible_ticker(symbol)]
-        rejected.extend(symbol for symbol in file_symbols if not is_plausible_ticker(symbol))
+        file_rejected = [symbol for symbol in file_symbols if not is_plausible_ticker(symbol)]
+        rejected.extend(file_rejected)
+        source_detail = {
+            "path": str(path),
+            "updatedAt": updated_at.isoformat() if updated_at else None,
+            "fresh": (updated_at >= fresh_after) if updated_at and fresh_after else None,
+            "rowCount": len(file_symbols),
+            "keptCount": len(kept),
+            "rejectedCount": len(file_rejected),
+            "screenNames": screen_names,
+        }
+        source_detail = {key: value for key, value in source_detail.items() if value is not None}
+        sources.append(str(path))
         if kept:
             symbols.extend(kept)
-            sources.append(str(path))
-    return unique_symbols(symbols), sources, unique_symbols(rejected)
+        source_details.append(source_detail)
+    return unique_symbols(symbols), sources, unique_symbols(rejected), source_details
+
+
+def read_tc2000_export_symbols(root: Path, include_all: bool = False) -> tuple[list[str], list[str], list[str]]:
+    symbols, sources, rejected, _source_details = read_tc2000_export_symbols_with_details(
+        root,
+        include_all=include_all,
+    )
+    return symbols, sources, rejected
 
 
 def dataframe_to_json(df, max_bars: int) -> dict[str, list[dict[str, Any]]]:
@@ -435,6 +499,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="legacy behavior: union symbols from every export CSV instead of *_latest.csv only",
     )
+    parser.add_argument("--fresh-after", help="mark selected TC2000 export CSVs stale when older than this ISO timestamp")
+    parser.add_argument(
+        "--require-fresh-sources",
+        action="store_true",
+        help="write bars but exit 2 when selected TC2000 export CSVs are stale",
+    )
     return parser
 
 
@@ -459,9 +529,18 @@ def read_extra_symbols(args: argparse.Namespace) -> list[str]:
 
 
 def run_refresh(args: argparse.Namespace) -> int:
-    export_symbols, sources, rejected_symbols = read_tc2000_export_symbols(
-        TC2000_EXPORT_ROOT, include_all=args.all_exports
+    try:
+        fresh_after = parse_fresh_after(args.fresh_after)
+    except ValueError as exc:
+        print(f"Invalid --fresh-after timestamp {args.fresh_after!r}: {exc}", file=sys.stderr)
+        return 2
+    export_symbols, sources, rejected_symbols, source_details = read_tc2000_export_symbols_with_details(
+        TC2000_EXPORT_ROOT,
+        include_all=args.all_exports,
+        fresh_after=fresh_after,
     )
+    screener_freshness_status = source_freshness_status(source_details, fresh_after)
+    stale_source_count = sum(1 for detail in source_details if detail.get("fresh") is False)
     if rejected_symbols:
         print(
             f"Rejected non-ticker tokens from TC2000 exports: {', '.join(rejected_symbols)}",
@@ -477,12 +556,21 @@ def run_refresh(args: argparse.Namespace) -> int:
             "profileIndustrySource": None,
             "profilesBySymbol": {},
             "rejectedSymbols": rejected_symbols,
+            "screenerFreshnessStatus": screener_freshness_status,
             "source": str(TC2000_EXPORT_ROOT),
+            "sourceDetails": source_details,
             "sources": sources,
+            "staleSourceCount": stale_source_count,
             "symbols": [],
         }
         write_json_atomic(args.out, payload)
         print(f"Wrote empty TC2000 daily bars snapshot to {args.out}")
+        if args.require_fresh_sources and screener_freshness_status != "fresh":
+            print(
+                f"TC2000 screener sources are {screener_freshness_status}; no fresh scanner symbols were available.",
+                file=sys.stderr,
+            )
+            return 2
         return 0
 
     sys.path.insert(0, str(IBKR_ROOT))
@@ -516,17 +604,24 @@ def run_refresh(args: argparse.Namespace) -> int:
             fetch_gap_s=max(0.0, args.profile_fetch_gap_s),
             refresh=args.refresh_profiles,
         )
+    note = f"Daily bars available for {len(bars_by_symbol)} / {len(symbols)} TC2000 symbols."
+    if screener_freshness_status in {"stale", "partial-stale"}:
+        threshold = fresh_after.isoformat() if fresh_after else "the requested threshold"
+        note = f"{note} TC2000 screener sources are {screener_freshness_status} ({stale_source_count}/{len(source_details)} stale before {threshold})."
     payload = {
         "barsBySymbol": bars_by_symbol,
         "generatedAt": datetime.now(timezone.utc).isoformat(),
         "missingSymbols": missing,
-        "note": f"Daily bars available for {len(bars_by_symbol)} / {len(symbols)} TC2000 symbols.",
+        "note": note,
         "profileIndustrySource": profile_industry_source,
         "profileSource": "StockAnalysis company pages and local StockAnalysis industry CSV" if profiles else None,
         "profilesBySymbol": profiles,
         "rejectedSymbols": rejected_symbols,
+        "screenerFreshnessStatus": screener_freshness_status,
         "source": str(args.cache_dir),
+        "sourceDetails": source_details,
         "sources": sources,
+        "staleSourceCount": stale_source_count,
         "symbols": symbols,
     }
     write_json_atomic(args.out, payload)
@@ -534,6 +629,12 @@ def run_refresh(args: argparse.Namespace) -> int:
     print(f"Wrote {args.out}")
     if missing:
         print(f"Missing symbols: {', '.join(missing)}", file=sys.stderr)
+    if args.require_fresh_sources and screener_freshness_status != "fresh":
+        print(
+            f"TC2000 screener sources are {screener_freshness_status}; daily bars were refreshed from stale scanner membership.",
+            file=sys.stderr,
+        )
+        return 2
     return 0
 
 

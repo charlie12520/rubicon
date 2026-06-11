@@ -90,6 +90,52 @@ class ReadTc2000ExportSymbolsTest(unittest.TestCase):
             symbols, _sources, _rejected = mod.read_tc2000_export_symbols(root)
             self.assertEqual(symbols, ["AAPL"])
 
+    def test_reports_source_freshness_details(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_csv(root / "qullamaggie_latest.csv", ["AAPL"], mtime_offset_s=-120)
+            write_csv(root / "staircase_latest.csv", ["MSFT"], mtime_offset_s=60)
+            fresh_after = mod.source_updated_at(root / "qullamaggie_latest.csv")
+
+            symbols, sources, _rejected, details = mod.read_tc2000_export_symbols_with_details(
+                root,
+                fresh_after=fresh_after,
+            )
+
+            self.assertEqual(symbols, ["MSFT", "AAPL"])
+            self.assertEqual(len(sources), 2)
+            self.assertEqual(len(details), 2)
+            self.assertEqual(mod.source_freshness_status(details, fresh_after), "fresh")
+            self.assertTrue(all(detail["fresh"] for detail in details))
+
+    def test_marks_stale_and_partial_stale_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_csv(root / "old_latest.csv", ["AAPL"], mtime_offset_s=-120)
+            write_csv(root / "new_latest.csv", ["MSFT"], mtime_offset_s=60)
+            fresh_after = mod.source_updated_at(root / "new_latest.csv")
+
+            _symbols, _sources, _rejected, details = mod.read_tc2000_export_symbols_with_details(
+                root,
+                fresh_after=fresh_after,
+            )
+
+            self.assertEqual(mod.source_freshness_status(details, fresh_after), "partial-stale")
+            self.assertEqual(sum(1 for detail in details if detail.get("fresh") is False), 1)
+
+    def test_no_sources_are_stale_when_freshness_is_required(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fresh_after = mod.parse_fresh_after("2026-06-11T12:00:00Z")
+
+            _symbols, _sources, _rejected, details = mod.read_tc2000_export_symbols_with_details(
+                root,
+                fresh_after=fresh_after,
+            )
+
+            self.assertEqual(details, [])
+            self.assertEqual(mod.source_freshness_status(details, fresh_after), "stale")
+
 
 if __name__ == "__main__":
     sys.exit(unittest.main(verbosity=2))

@@ -125,6 +125,55 @@ describe("morning brief parsers", () => {
     }
   });
 
+  it("carries stale TC2000 screener source metadata into Morning pulls", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "rubicon-morning-tc2000-stale-"));
+    const appRoot = path.join(tempDir, "app");
+    const exportRoot = path.join(tempDir, "IBKR Equity History Pull", "data", "tc2000_exports");
+    await fs.mkdir(path.join(appRoot, "data"), { recursive: true });
+    await fs.mkdir(exportRoot, { recursive: true });
+    const exportPath = path.join(exportRoot, "qullamaggie_latest.csv");
+    await fs.writeFile(exportPath, "symbol,screen\nUIS,Three Bar Rule Spike\n", "utf8");
+    await fs.writeFile(
+      path.join(appRoot, "data", "tc2000-daily-bars.json"),
+      JSON.stringify(
+        {
+          barsBySymbol: {
+            UIS: [{ close: 20, date: "2026-06-01", high: 21, low: 19, open: 20, volume: 1000 }],
+          },
+          generatedAt: "2026-06-02T12:00:00.000Z",
+          note: "Daily bars available for 1 / 1 TC2000 symbols. TC2000 screener sources are stale.",
+          screenerFreshnessStatus: "stale",
+          source: "cache",
+          sourceDetails: [
+            {
+              fresh: false,
+              keptCount: 1,
+              path: exportPath,
+              rowCount: 1,
+              updatedAt: "2026-06-01T12:00:00.000Z",
+            },
+          ],
+          staleSourceCount: 1,
+          symbols: ["UIS"],
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    try {
+      const pulls = await loadTc2000Pulls(appRoot);
+
+      expect(pulls.dailyBarsScreenerFreshnessStatus).toBe("stale");
+      expect(pulls.dailyBarsStaleSourceCount).toBe(1);
+      expect(pulls.dailyBarsSourceDetails?.[0]).toMatchObject({ fresh: false, keptCount: 1, path: exportPath });
+      expect(pulls.note).toContain("TC2000 scanner CSV sources are stale");
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("refreshes live Morning data and saves it as state for later normal reads", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "rubicon-morning-refresh-state-"));
     const appRoot = path.join(tempDir, "app");

@@ -1752,11 +1752,16 @@ function validLiveUpdates(items: MorningLiveUpdate[]): MorningLiveUpdate[] {
   return items.filter((item) => item.source !== "Godel" || isValidGodelLiveUpdate(item));
 }
 
-function isValidGodelLiveUpdate(item: MorningLiveUpdate): boolean {
-  if (isMostlyNumericGodelText(item.text)) {
+export function isValidGodelLiveUpdate(item: MorningLiveUpdate): boolean {
+  const author = (item.author ?? "").trim().toLowerCase();
+  if (author === "godel dom bridge") {
     return false;
   }
-  return (item.author ?? "").trim().toLowerCase() !== "godel dom bridge";
+  // The mostly-numeric guard exists to reject DOM-bridge price-ladder garbage.
+  // Scraper rows attributed to a real wire (Benzinga, MarketLine, ...) are
+  // exempt — dense earnings/CPI headlines must not be silently dropped.
+  const bridgeLike = !author || author.includes("godel");
+  return !(bridgeLike && isMostlyNumericGodelText(item.text));
 }
 
 function isMostlyNumericGodelText(text: string): boolean {
@@ -1774,15 +1779,49 @@ function isMostlyNumericGodelText(text: string): boolean {
   return alphaWords.length < 3 || alphaRatio < 0.22 || numericRatio > 0.62 || priceLikeTokens.length >= 5;
 }
 
-function sortLiveUpdates(items: MorningLiveUpdate[]): MorningLiveUpdate[] {
-  return [...items]
-    .sort((a, b) => {
-      const aTime = a.publishedAt ? new Date(a.publishedAt).getTime() : 0;
-      const bTime = b.publishedAt ? new Date(b.publishedAt).getTime() : 0;
-      if (aTime !== bTime) {
-        return bTime - aTime;
+const LIVE_UPDATE_CAP = 24;
+const LIVE_UPDATE_SOURCE_FLOOR = 8;
+
+function compareLiveUpdatesByTimeDesc(a: MorningLiveUpdate, b: MorningLiveUpdate): number {
+  const aTime = a.publishedAt ? new Date(a.publishedAt).getTime() : 0;
+  const bTime = b.publishedAt ? new Date(b.publishedAt).getTime() : 0;
+  if (aTime !== bTime) {
+    return bTime - aTime;
+  }
+  return a.id.localeCompare(b.id);
+}
+
+/**
+ * Newest LIVE_UPDATE_CAP items, but with a per-source floor: a high-volume
+ * source (the Godel wire firehose) must not starve the other (FirstSquawk)
+ * out of the tape entirely. Each source is guaranteed its newest
+ * min(floor, available) rows; the remainder fills chronologically.
+ */
+export function sortLiveUpdates(items: MorningLiveUpdate[]): MorningLiveUpdate[] {
+  const byTimeDesc = [...items].sort(compareLiveUpdatesByTimeDesc);
+  const sources = [...new Set(byTimeDesc.map((item) => item.source))];
+  if (sources.length <= 1 || byTimeDesc.length <= LIVE_UPDATE_CAP) {
+    return byTimeDesc.slice(0, LIVE_UPDATE_CAP);
+  }
+
+  const picked = new Set<string>();
+  for (const source of sources) {
+    let count = 0;
+    for (const item of byTimeDesc) {
+      if (count >= LIVE_UPDATE_SOURCE_FLOOR) {
+        break;
       }
-      return a.id.localeCompare(b.id);
-    })
-    .slice(0, 24);
+      if (item.source === source) {
+        picked.add(item.id);
+        count += 1;
+      }
+    }
+  }
+  for (const item of byTimeDesc) {
+    if (picked.size >= LIVE_UPDATE_CAP) {
+      break;
+    }
+    picked.add(item.id);
+  }
+  return byTimeDesc.filter((item) => picked.has(item.id)).slice(0, LIVE_UPDATE_CAP);
 }

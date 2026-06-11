@@ -41,15 +41,29 @@ const RUBICON_CAPTURE = path.join(REPO_ROOT, "data", "godel-live-news.json");
 const RUBICON_CAPTURE_MAX = 24;
 
 const POLL_MS = 5_000;
-const ONCE = process.argv.includes("--once");
 // --login: show the window on-screen so you can sign in to Godel (and arrange
 // the news panel you want scraped); the layout/session persist in the profile.
 const LOGIN = process.argv.includes("--login");
+// --once contradicts --login (it would exit before you can sign in) — login wins.
+const ONCE = process.argv.includes("--once") && !LOGIN;
+// relaunch the browser if the page serves zero news rows this long (session
+// expired / in-page re-challenge / panel closed — none of these throw on their own)
+const STALE_POLLS_BEFORE_RELAUNCH = 60;
+const SEEN_CAP = 10_000;
+const SEEN_BREAKING_CAP = 500;
 
 fs.mkdirSync(PROFILE, { recursive: true });
 
 const seen = new Set();
 const latest = [];
+
+// FIFO-capped Set add: prevents unbounded growth over multi-week watches.
+function addCapped(set, value, cap) {
+  set.add(value);
+  if (set.size > cap) {
+    set.delete(set.values().next().value);
+  }
+}
 
 function log(message) {
   console.log(`[${new Date().toISOString()}] ${message}`);
@@ -61,15 +75,18 @@ function loadSeenFromDisk() {
     for (const line of lines) {
       try {
         const item = JSON.parse(line);
-        if (item.id) {
-          seen.add(item.id);
+        if (item && typeof item === "object" && item.id) {
+          addCapped(seen, item.id, SEEN_CAP);
+          latest.push(item);
         }
-        latest.push(item);
       } catch {
         // skip corrupt line
       }
     }
     latest.splice(0, Math.max(0, latest.length - 50));
+    // file order is oldest-first; runtime unshifts newest-first — normalize so
+    // latest[0] is always the newest and splice(50) evicts the oldest
+    latest.reverse();
     log(`warm start: ${seen.size} known ids from news.jsonl`);
   } catch {
     log("cold start: no existing news.jsonl");
@@ -86,15 +103,23 @@ function recordNews(items) {
     if (!item.id || seen.has(item.id)) {
       continue;
     }
-    seen.add(item.id);
-    appendJsonl(NEWS_JSONL, item);
+    item.capturedAtMs = Date.now();
+    try {
+      appendJsonl(NEWS_JSONL, item);
+    } catch (error) {
+      // transient lock (OneDrive/AV on the Desktop folder): do NOT mark seen,
+      // so the headline retries next poll instead of vanishing forever
+      log(`news append failed (will retry): ${error instanceof Error ? error.message : String(error)}`);
+      continue;
+    }
+    addCapped(seen, item.id, SEEN_CAP);
     latest.unshift(item);
     fresh += 1;
     log(`NEWS ${item.time ?? ""} [${item.symbol ?? "-"}] ${item.headline}`);
   }
   if (fresh > 0) {
     latest.splice(50);
-    fs.writeFileSync(LATEST_JSON, JSON.stringify(latest, null, 1), "utf8");
+    writeJsonAtomic(LATEST_JSON, latest);
     writeRubiconCapture();
   }
   return fresh;
@@ -102,7 +127,44 @@ function recordNews(items) {
 
 function newsTimeMs(item) {
   const ms = Date.parse(item.time);
-  return Number.isNaN(ms) ? 0 : ms;
+  // unparseable times fall back to capture wall-clock, NOT 0 — a 0 would sort
+  // the newest headline below everything and silently drop it from the capture
+  return Number.isNaN(ms) ? (item.capturedAtMs ?? 0) : ms;
+}
+
+function writeJsonAtomic(target, value) {
+  try {
+    const tmp = `${target}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(value, null, 1), "utf8");
+    renameWithRetry(tmp, target);
+  } catch (error) {
+    log(`atomic write failed for ${path.basename(target)}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+function renameWithRetry(from, to, attempts = 4) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      fs.renameSync(from, to);
+      return;
+    } catch (error) {
+      const code = error?.code;
+      if (attempt >= attempts || !["EPERM", "EACCES", "EBUSY"].includes(code)) {
+        try {
+          fs.unlinkSync(from);
+        } catch {
+          // leave the tmp; next write reuses the same name
+        }
+        throw error;
+      }
+      // Windows: rename onto a file the server is reading throws transiently
+      const waitMs = 50 * attempt;
+      const end = Date.now() + waitMs;
+      while (Date.now() < end) {
+        // tiny sync spin — callers are sync and the wait is <=200ms total
+      }
+    }
+  }
 }
 
 // Atomic write of the newest items into the Rubicon capture file. Sorts by
@@ -111,19 +173,24 @@ function newsTimeMs(item) {
 // the server (polling every 10s) never reads a half-written array.
 function writeRubiconCapture() {
   try {
+    fs.mkdirSync(path.dirname(RUBICON_CAPTURE), { recursive: true });
     const rows = [...latest]
       .sort((a, b) => newsTimeMs(b) - newsTimeMs(a))
       .slice(0, RUBICON_CAPTURE_MAX)
-      .map((item) => ({
-        id: item.id,
-        headline: item.headline,
-        time: item.time,
-        ticker: item.symbol || undefined,
-        source: item.source,
-      }));
-    const tmp = `${RUBICON_CAPTURE}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify({ generatedAt: new Date().toISOString(), items: rows }, null, 1), "utf8");
-    fs.renameSync(tmp, RUBICON_CAPTURE);
+      .map((item) => {
+        // emit ISO when parseable: this machine's local tz is the only place
+        // the DOM's naive "6/11/26 15:01:28" stamp is authoritative — the
+        // server must not have to share our timezone to get publishedAt right
+        const ms = Date.parse(item.time);
+        return {
+          id: item.id,
+          headline: item.headline,
+          time: Number.isNaN(ms) ? item.time : new Date(ms).toISOString(),
+          ticker: item.symbol || undefined,
+          source: item.source,
+        };
+      });
+    writeJsonAtomic(RUBICON_CAPTURE, { generatedAt: new Date().toISOString(), items: rows });
   } catch (error) {
     log(`rubicon capture write failed: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -169,26 +236,31 @@ async function scrapeOnce(page) {
     // breaking banner: red band pinned near the viewport bottom, or anything
     // godel labels "breaking" outright
     const vh = window.innerHeight;
+    const vw = window.innerWidth;
     for (const el of document.querySelectorAll('[class*="breaking" i], [id*="breaking" i]')) {
       const text = (el.textContent ?? "").trim().replace(/\s+/g, " ");
       if (text.length > 12) {
         out.breaking.push(text.slice(0, 500));
       }
     }
-    for (const el of document.querySelectorAll("body *")) {
-      if (el.children.length > 6) {
-        continue;
-      }
-      const r = el.getBoundingClientRect();
-      if (r.height < 14 || r.height > 70 || r.bottom < vh - 90 || r.width < 400) {
-        continue;
-      }
-      const bg = getComputedStyle(el).backgroundColor;
-      const match = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(bg);
-      if (match && Number(match[1]) > 140 && Number(match[2]) < 80 && Number(match[3]) < 80) {
-        const text = (el.textContent ?? "").trim().replace(/\s+/g, " ");
-        if (text.length > 12) {
-          out.breaking.push(text.slice(0, 500));
+    // red-band detection by SAMPLING the bottom strip (elementFromPoint returns
+    // the innermost element, which also avoids parent/child duplicate text) —
+    // a full body-* style scan every poll was a layout-thrash hog on this DOM
+    const sampled = new Set();
+    for (const yOffset of [22, 55]) {
+      for (let frac = 0.1; frac <= 0.9; frac += 0.1) {
+        const el = document.elementFromPoint(vw * frac, vh - yOffset);
+        if (!el || sampled.has(el)) {
+          continue;
+        }
+        sampled.add(el);
+        const bg = getComputedStyle(el).backgroundColor;
+        const match = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(bg);
+        if (match && Number(match[1]) > 140 && Number(match[2]) < 80 && Number(match[3]) < 80) {
+          const text = (el.textContent ?? "").trim().replace(/\s+/g, " ");
+          if (text.length > 12) {
+            out.breaking.push(text.slice(0, 500));
+          }
         }
       }
     }
@@ -204,8 +276,12 @@ function recordBreaking(texts) {
     if (seenBreaking.has(key)) {
       continue;
     }
-    seenBreaking.add(key);
-    appendJsonl(BREAKING_JSONL, { capturedAt: new Date().toISOString(), text });
+    addCapped(seenBreaking, key, SEEN_BREAKING_CAP);
+    try {
+      appendJsonl(BREAKING_JSONL, { capturedAt: new Date().toISOString(), text });
+    } catch (error) {
+      log(`breaking append failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
     log(`BREAKING ${text.slice(0, 160)}`);
   }
 }
@@ -267,7 +343,9 @@ async function launchSession() {
     if (LOGIN) {
       log("LOGIN MODE: window is on-screen — sign in / arrange your panels, then Ctrl+C here. Scraping continues meanwhile.");
     }
-    await page.waitForSelector('tr[id*="streaming-table"]', { timeout: 120_000 });
+    // LOGIN: no deadline — a 2min timeout here would close the window while
+    // the user is mid-sign-in and relaunch-loop over them
+    await page.waitForSelector('tr[id*="streaming-table"]', { timeout: LOGIN ? 0 : 120_000 });
     log("session up: Godel app loaded, news rows present");
     return { context, page };
   } catch (error) {
@@ -294,6 +372,7 @@ while (!stopping) {
     // refresh the Rubicon capture from the warm-started snapshot at boot, so the
     // panel has current rows even before the next new headline lands
     writeRubiconCapture();
+    let emptyPolls = 0;
     for (;;) {
       const { news, breaking } = await scrapeOnce(page);
       const fresh = recordNews(news.reverse());
@@ -306,13 +385,26 @@ while (!stopping) {
       if (stopping) {
         break;
       }
+      // staleness watchdog: a logged-out / re-challenged / blanked page returns
+      // zero rows without ever throwing — relaunch instead of polling it forever
+      emptyPolls = news.length === 0 ? emptyPolls + 1 : 0;
+      if (emptyPolls >= STALE_POLLS_BEFORE_RELAUNCH) {
+        throw new Error(`no news rows for ${Math.round((STALE_POLLS_BEFORE_RELAUNCH * POLL_MS) / 60000)}min — relaunching`);
+      }
       await page.waitForTimeout(POLL_MS);
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    log(`session error: ${message}${stopping ? "" : " — relaunching in 30s"}`);
-    if (!stopping) {
-      await new Promise((resolve) => setTimeout(resolve, 30_000));
+    if (ONCE) {
+      // --once promises capture-or-fail, never an infinite relaunch loop
+      process.exitCode = 1;
+      stopping = true;
+      log(`once mode failed: ${message}`);
+    } else {
+      log(`session error: ${message}${stopping ? "" : " — relaunching in 30s"}`);
+      if (!stopping) {
+        await new Promise((resolve) => setTimeout(resolve, 30_000));
+      }
     }
   } finally {
     try {

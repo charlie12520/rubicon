@@ -4,7 +4,9 @@ import path from "node:path";
 import type { GodelAlertBridgeStatus } from "../shared/types.ts";
 import { writeJsonAtomic } from "./jsonStore.ts";
 
-const DEFAULT_CAPTURE_PATH = path.join(process.cwd(), "data", "godel-live-news.json");
+// Own file — the scraper (scripts/godel-news-scraper.mjs) now owns
+// data/godel-live-news.json; sharing it caused mutual clobbering.
+const DEFAULT_CAPTURE_PATH = path.join(process.cwd(), "data", "godel-bridge-alerts.json");
 const DEFAULT_STATUS_PATH = path.join(process.cwd(), "data", "godel-alert-bridge-status.json");
 const BRIDGE_TOKEN_HEADER = "X-Rubicon-Bridge-Token";
 const MAX_ROWS = 80;
@@ -367,7 +369,9 @@ async function writeBridgeStatus(update: BridgeStatusFile): Promise<void> {
 }
 
 function bridgeCapturePath(): string {
-  return process.env.RUBICON_GODEL_BRIDGE_CAPTURE_PATH || process.env.RUBICON_GODEL_NEWS_CAPTURE_PATH || DEFAULT_CAPTURE_PATH;
+  // No RUBICON_GODEL_NEWS_CAPTURE_PATH fallback: that env points the NEWS
+  // reader at the scraper file, which the bridge must never write.
+  return process.env.RUBICON_GODEL_BRIDGE_CAPTURE_PATH || DEFAULT_CAPTURE_PATH;
 }
 
 function bridgeStatusPath(): string {

@@ -91,13 +91,19 @@ async function fetchGodelNewsText(url: string): Promise<string> {
 }
 
 async function readGodelCaptureFallback(capturePath: string): Promise<MorningLiveUpdate[]> {
+  let raw: string;
   try {
-    const raw = await fs.readFile(capturePath, "utf8");
+    raw = await fs.readFile(capturePath, "utf8");
+  } catch (error) {
+    // transient read errors (ENOENT, EBUSY mid-rename) are not corruption
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      console.warn(`Godel capture read failure at ${capturePath}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    return [];
+  }
+  try {
     return parseGodelLiveNews(raw, capturePath);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return [];
-    }
     const parseErrorText = error instanceof Error ? error.message : String(error);
     console.warn(`Godel capture parse failure at ${capturePath}: ${parseErrorText}`);
     await quarantineCorruptGodelCapture(capturePath, parseErrorText);
@@ -109,8 +115,9 @@ async function quarantineCorruptGodelCapture(capturePath: string, reason: string
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   const quarantinePath = `${capturePath}${GODEL_JSON_QUARANTINE_SUFFIX}-${timestamp}.json`;
   try {
-    const originalText = await fs.readFile(capturePath, "utf8");
-    await fs.writeFile(quarantinePath, originalText, "utf8");
+    // MOVE the corrupt file aside (a copy would re-quarantine on every 10s
+    // poll forever); the writer's next atomic rename recreates a clean one.
+    await fs.rename(capturePath, quarantinePath);
     console.warn(`Godel capture quarantined to ${quarantinePath}: ${reason}`);
   } catch {
     return;

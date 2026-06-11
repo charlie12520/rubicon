@@ -52,6 +52,7 @@ import { buildUploadReceiptCheck } from "./uploadReceiptCheck";
 import { buildDailyPullChecklist, type DailyPullChecklistStep, type DailyPullCoverageItem, type DailyPullStepStatus } from "./dailyPullChecklist";
 import { buildDailyPullReviewModel, type DailyPullIssueBucket, type DailyPullIssueEntry, type DailyPullViewModel } from "./dailyPullReviewModel";
 import { refreshToLatestVersion } from "./appRefresh";
+import { AppUpdateButton } from "./components/AppUpdateButton";
 import { canAttemptClipboardCopy, copyTextToClipboard } from "./clipboard";
 import { coverageImpactSummary } from "./reviewImpact";
 import { easternDateOffset } from "./easternDate";
@@ -782,16 +783,7 @@ function App() {
           <span className={`refresh-status ${refreshing ? "active" : ""}`} title="Automatic local import check">
             {refreshing ? "Scanning" : lastImportCheck ? `Checked ${lastImportCheck}` : "Auto import on"}
           </span>
-          <button
-            aria-label="Refresh to latest version"
-            className="version-refresh-button"
-            onClick={refreshToLatestVersion}
-            title="Reload the desktop app shell and fetch the newest built bundle"
-            type="button"
-          >
-            <RefreshCcw size={14} />
-            Latest
-          </button>
+          <AppUpdateButton onBundleRefresh={refreshToLatestVersion} />
           <button
             aria-label="Refresh local import"
             className="icon-button"

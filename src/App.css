@@ -204,6 +204,24 @@ h2 {
   outline: none;
 }
 
+/* GitHub update available: amber pulse so it stands out from routine refresh. */
+.version-refresh-button.update-available {
+  border-color: rgba(245, 158, 11, 0.55);
+  color: #fcd34d;
+  background: rgba(45, 32, 8, 0.65);
+}
+
+.version-refresh-button.update-available:hover,
+.version-refresh-button.update-available:focus-visible {
+  border-color: rgba(245, 158, 11, 0.85);
+  background: rgba(64, 44, 10, 0.85);
+}
+
+.version-refresh-button.busy {
+  opacity: 0.7;
+  cursor: progress;
+}
+
 .portion-toggle {
   border-color: rgba(34, 211, 238, 0.22);
   background: rgba(5, 10, 15, 0.86);

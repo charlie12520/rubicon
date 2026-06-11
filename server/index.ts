@@ -11,6 +11,7 @@ import { refreshGoogleDriveSnapshot } from "../scripts/refresh-google-drive-snap
 import { refreshIbkrWalletSnapshot } from "./ibkrWalletRefresh.ts";
 import { armIbkrHoldingsAutoRefresh, readIbkrHoldingsSnapshot, refreshIbkrHoldingsSnapshot } from "./ibkrHoldings.ts";
 import { getDailySyncStatus, startDailyOptionPull, startDailySync } from "./dailySync.ts";
+import { getAppVersionStatus, runAppUpdate } from "./selfUpdate.ts";
 import { getDailySyncCatchupStatus, maybeRunDailySyncCatchup } from "./dailySyncCatchup.ts";
 import { maybeAutoRefreshGoogleDriveSnapshot } from "./googleSnapshotAutoRefresh.ts";
 import { loadSpreadSpeed, loadSpreadSpeedWithFallback } from "./spreadSpeed.ts";
@@ -74,6 +75,26 @@ app.get("/api/health", (_request, response) => {
     pid: process.pid,
     startedAt: serverStartedAt,
   });
+});
+
+app.get("/api/app-version", async (request, response, next) => {
+  try {
+    const refresh = String(request.query.refresh ?? "1") !== "0";
+    response.json(await getAppVersionStatus({ refresh }));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/app-update", async (request, response) => {
+  try {
+    const force = Boolean(request.body?.force);
+    const result = await runAppUpdate({ force });
+    response.status(result.ok ? 200 : 409).json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    response.status(400).json({ ok: false, message, generatedAt: new Date().toISOString() });
+  }
 });
 
 app.get("/api/tracker", async (_request, response, next) => {

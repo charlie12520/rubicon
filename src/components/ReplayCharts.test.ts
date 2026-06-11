@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ReplayPayload, SpreadMark, SpxBar } from "../../shared/types";
-import { chartCountLabel } from "./MarketChart";
-import { aggregateSpxBars, buildSelectedSpreadMarks, replayCutoffTime, replayEventLabel, takeThrough } from "./ReplayCharts";
+import { chartCountLabel } from "./marketChartMarkers";
+import { aggregateSpxBars, buildSelectedSpreadMarks, replayCutoffTime, replayEventLabel, takeThrough } from "./replayChartsData";
 
 describe("replay chart visibility", () => {
   it("uses the full session until replay mode is explicitly enabled", () => {

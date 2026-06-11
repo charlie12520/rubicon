@@ -37,12 +37,9 @@ function safeScore(value: unknown): number {
 
 function safeAspectChecks(value: unknown): Record<(typeof JOURNAL_ASPECT_KEYS)[number], boolean> {
   const record = asRecord(value);
-  return {
-    entryStructure: record.entryStructure === true,
-    priceAction: record.priceAction === true,
-    volumeNode: record.volumeNode === true,
-    orderflow: record.orderflow === true,
-  };
+  return Object.fromEntries(
+    JOURNAL_ASPECT_KEYS.map((key) => [key, record[key] === true]),
+  ) as Record<(typeof JOURNAL_ASPECT_KEYS)[number], boolean>;
 }
 
 function sanitizeEntry(tradeId: string, value: unknown): Record<string, unknown> | null {

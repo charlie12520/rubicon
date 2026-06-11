@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { layoutCompactEventTicks, layoutEventMarkers } from "./MarketChart";
+import { layoutCompactEventTicks, layoutEventMarkers } from "./marketChartMarkers";
 
 describe("replay event marker layout", () => {
   it("collapses duplicate same-point exits into one compact label", () => {

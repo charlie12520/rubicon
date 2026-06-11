@@ -46,6 +46,9 @@ Trader opens Rubicon -> Morning shows the macro/live/model premarket brief -> Re
 
 ## Last Completed Change
 
+- A184 (merge of PR #1, branch id "A179") - **Code-quality pass merged to main.** Lint 73->0 (zero disables), lint gated in validate:mvp + CI, component/logic separation (marketChartMarkers / replayChartsData / reviewEntryExitChartLogic / estimatorClock), hook-correctness fixes incl. two real bugs (EstimatorSpxChart refs-in-render, SpxHeatmapPanel React Compiler bailout) and one dead App.tsx effect deleted. dailySync.ts and App.tsx auto-merged with main's A179-A183 work (disjoint regions); ledger renumbered A179->A184. Post-merge gates re-run on the merged tree: typecheck + lint + full suite + build + browser smoke (results below in this entry's commit).
+
+
 - A183 - **Self-update gate hardening.** The update gate now hard-refuses (force cannot override) while a daily sync holds the lock with a live pid - the A181 launcher is attached, so a restart mid-pull would kill the wrapper. Runtime data/ churn (heatmap-classification-auto.json etc.) is excluded from the blocking dirty list so only source changes block updates. selfUpdate tests 9/9, button tests 4/4, typecheck + lint clean.
 
 

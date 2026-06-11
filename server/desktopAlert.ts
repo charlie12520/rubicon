@@ -11,8 +11,13 @@ export type DesktopAlertPayload = {
 };
 
 export function sanitizeDesktopAlertText(value: unknown, maxLength: number): string {
-  return String(value ?? "")
-    .replace(/[\u0000-\u001f\u007f]+/g, " ")
+  // Strip C0 control characters + DEL without a control-char regex (lint:
+  // no-control-regex): they break the PowerShell toast argument round-trip.
+  const withoutControlChars = Array.from(String(value ?? ""), (ch) => {
+    const code = ch.charCodeAt(0);
+    return code <= 0x1f || code === 0x7f ? " " : ch;
+  }).join("");
+  return withoutControlChars
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, maxLength);

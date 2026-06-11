@@ -443,7 +443,7 @@ function absoluteNitterUrl(value: string, feedUrl = FIRSTSQUAWK_TIMELINE_URL): s
   if (/^https?:\/\//i.test(value)) {
     return value;
   }
-  let origin = "https://nitter.net";
+  let origin: string;
   try {
     origin = new URL(feedUrl).origin;
   } catch {
@@ -992,7 +992,7 @@ function preferScreenerName(current: string, next: string): string {
 async function loadTc2000ExportScreeners(appRoot: string): Promise<MorningTc2000Screener[]> {
   const exportRoot = path.join(aiStuffRoot(appRoot), "IBKR Equity History Pull", "data", "tc2000_exports");
   const grouped = new Map<string, MorningTc2000Screener>();
-  let entries: string[] = [];
+  let entries: string[];
   try {
     entries = await fs.readdir(exportRoot);
   } catch {
@@ -1001,7 +1001,7 @@ async function loadTc2000ExportScreeners(appRoot: string): Promise<MorningTc2000
 
   for (const entry of entries.filter((name) => name.toLowerCase().endsWith(".csv"))) {
     const fullPath = path.join(exportRoot, entry);
-    let records: Record<string, string>[] = [];
+    let records: Record<string, string>[];
     let stat;
     try {
       stat = await fs.stat(fullPath);

@@ -159,7 +159,7 @@ export function SpxHeatmapPanel({ index = "spx" }: { index?: HeatmapIndex } = {}
   const [liveBusy, setLiveBusy] = useState(false);
   const [metric, setMetric] = useState<"pct" | "sigma">("pct"); // tile colour: raw % or IV-normalized σ
   const [timeframe, setTimeframe] = useState<HeatmapTimeframe>("day"); // % vs prior close (Day) or a trailing 1h/30m/5m window
-  const tf = timeframeDef(timeframe);
+  const tf = useMemo(() => timeframeDef(timeframe), [timeframe]);
   const windowMinutes = tf.minutes;
   const sigmaMinutes = tf.gap ? 0 : windowMinutes; // gap σ uses the daily scale (the gap is an overnight, daily-scale move)
   const [earningsOverlay, setEarningsOverlay] = useState(true); // outline earnings names — ON by default
@@ -195,16 +195,21 @@ export function SpxHeatmapPanel({ index = "spx" }: { index?: HeatmapIndex } = {}
     };
   }, [mapReady]);
 
-  // Initial load + periodic re-fetch so a running live feed keeps the map current.
-  // The follow-live effect below re-pins the scrubber to each new frontier.
-  useEffect(() => {
-    let cancelled = false;
-    // Switching index (SPY↔QQQ) clears the old map so we show a loading state
-    // rather than stale tiles while the new payload arrives.
+  // Switching index (SPY↔QQQ) clears the old map so we show a loading state
+  // rather than stale tiles while the new payload arrives.
+  const [prevIndex, setPrevIndex] = useState(index);
+  if (prevIndex !== index) {
+    setPrevIndex(index);
     setPayload(null);
     setLoadError(null);
     setFocusedSector(null);
     setHover(null);
+  }
+
+  // Initial load + periodic re-fetch so a running live feed keeps the map current.
+  // The follow-live guard below re-pins the scrubber to each new frontier.
+  useEffect(() => {
+    let cancelled = false;
     const load = (initial: boolean) => {
       fetchHeatmap(index)
         .then((next) => {
@@ -273,9 +278,12 @@ export function SpxHeatmapPanel({ index = "spx" }: { index?: HeatmapIndex } = {}
 
   // Follow-live: while following (and not replaying), pin the scrubber to the
   // latest minute so new sweeps from the live feed appear automatically.
-  useEffect(() => {
-    if (followLive && !playing) setTimeIndex(frontierIndex);
-  }, [followLive, frontierIndex, playing]);
+  const pinnedIndex = followLive && !playing ? frontierIndex : null;
+  const [prevPinnedIndex, setPrevPinnedIndex] = useState(pinnedIndex);
+  if (prevPinnedIndex !== pinnedIndex) {
+    setPrevPinnedIndex(pinnedIndex);
+    if (pinnedIndex !== null) setTimeIndex(pinnedIndex);
+  }
 
   // Layout depends only on the universe + which sector is focused — NOT on the
   // scrubbed time — so playback just recolours tiles instead of relaying out.
@@ -358,10 +366,13 @@ export function SpxHeatmapPanel({ index = "spx" }: { index?: HeatmapIndex } = {}
   }, [payload, clampedIndex, lastIndex, tf]);
 
   // The hovered tile's sub-industry peers (Finviz-style hover detail), heaviest
-  // first; recomputed only when the hovered industry changes, not on cursor move.
+  // first; keyed on the hovered sector/industry (extracted into locals) so the
+  // memo recomputes only when the hovered industry changes, not on cursor move.
+  const hoverSector = hover ? hover.tile.sector : null;
+  const hoverIndustry = hover ? hover.tile.industry : null;
   const hoverPeers = useMemo(
-    () => (payload && hover ? industryPeers(payload.tiles, hover.tile.sector, hover.tile.industry) : []),
-    [payload, hover?.tile.sector, hover?.tile.industry],
+    () => (payload && hoverSector !== null && hoverIndustry !== null ? industryPeers(payload.tiles, hoverSector, hoverIndustry) : []),
+    [payload, hoverSector, hoverIndustry],
   );
 
   // Whether the live IBKR sweep has populated any implied vols; gates the σ view.
@@ -382,14 +393,15 @@ export function SpxHeatmapPanel({ index = "spx" }: { index?: HeatmapIndex } = {}
     return map;
   }, [payload]);
   const hasEarnings = earningsBySymbol.size > 0;
-  // If IV goes away (feed stopped / backfill-only), drop back to % so the map never
-  // silently greys out while stuck in σ mode.
-  useEffect(() => {
-    // σ needs live IV; if it disappears (feed stopped / backfill-only) drop back to %
-    // so the map never silently greys out while stuck in σ. σ now works on every
-    // timeframe — windowSigma scales the IV denominator to the selected window.
+  // σ needs live IV; if it goes away (feed stopped / backfill-only) drop back to %
+  // so the map never silently greys out while stuck in σ. σ works on every
+  // timeframe — windowSigma scales the IV denominator to the selected window.
+  // (The σ button is disabled while !hasIv, so only an IV loss can trip this.)
+  const [prevHasIv, setPrevHasIv] = useState(hasIv);
+  if (prevHasIv !== hasIv) {
+    setPrevHasIv(hasIv);
     if (!hasIv && metric === "sigma") setMetric("pct");
-  }, [hasIv, metric]);
+  }
 
   // Playback: walk the minute forward one tick at a time until the close.
   useEffect(() => {

@@ -566,7 +566,7 @@ export function MorningDashboard({
   const dateBrief = brief?.date === selectedDate ? brief : null;
   const dateSources = dateBrief?.sources ?? [];
   const dateAiNotes = aiNotes?.date === selectedDate ? aiNotes : null;
-  const calendarEvents = dateBrief?.combinedEvents ?? [];
+  const calendarEvents = useMemo(() => dateBrief?.combinedEvents ?? [], [dateBrief]);
   const nextCalendarAlert = useMemo(
     () => nextCalendarAlertGroup(calendarEvents, new Date(calendarClockTick)),
     [calendarClockTick, calendarEvents],

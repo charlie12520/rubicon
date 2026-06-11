@@ -219,7 +219,7 @@ async function runHoldingsRefresh(): Promise<PythonHoldingsRefreshResult> {
     const detail = [commandError.stderr?.trim(), commandError.stdout?.trim(), commandError.message]
       .filter(Boolean)
       .join(" ");
-    throw new Error(detail || "IBKR holdings refresh failed.");
+    throw new Error(detail || "IBKR holdings refresh failed.", { cause: error });
   }
 }
 

@@ -93,11 +93,18 @@ export function RrgPanel() {
   const [playing, setPlaying] = useState(false);
   const idxRef = useRef(0);
 
+  // Switching universe clears the old plot immediately so a loading state shows
+  // instead of stale symbols while the fetch effect below loads the new payload.
+  const [prevUniverse, setPrevUniverse] = useState(universe);
+  if (prevUniverse !== universe) {
+    setPrevUniverse(universe);
+    setBars(null);
+    setLoadError(null);
+  }
+
   useEffect(() => {
     const controller = new AbortController();
     const fetcher = universe === "sectors" ? fetchSectorRrgBars : fetchRrgBars;
-    setBars(null);
-    setLoadError(null);
     fetcher(controller.signal)
       .then((payload) => {
         const defaults = universeDefaults(payload, universe);

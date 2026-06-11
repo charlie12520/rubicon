@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TradeRecord, WalletSnapshot } from "../shared/types";
-import { chartCountLabel, SPREAD_HL_BAR_OPTIONS } from "./components/MarketChart";
+import { chartCountLabel, SPREAD_HL_BAR_OPTIONS } from "./components/marketChartMarkers";
 import {
   aggregateReviewBars,
   buildReviewMarkers,
@@ -18,8 +18,8 @@ import {
   reviewArrowBox,
   reviewArrowDimensions,
   type MarkerEvent,
-} from "./components/ReviewEntryExitChart";
-import { buildSpreadRangeBars } from "./components/ReplayCharts";
+} from "./components/reviewEntryExitChartLogic";
+import { buildSpreadRangeBars } from "./components/replayChartsData";
 import { buildDailyReview, REPLAY_SPEEDS, summarizeTrades } from "./stats";
 
 const WALLET: WalletSnapshot = { netLiquidation: 100000, source: "test", updatedAt: null };

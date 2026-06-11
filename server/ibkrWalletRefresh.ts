@@ -153,6 +153,6 @@ export async function refreshIbkrWalletSnapshot(): Promise<IbkrWalletRefreshSumm
     const detail = [commandError.stderr?.trim(), commandError.stdout?.trim(), commandError.message]
       .filter(Boolean)
       .join(" ");
-    throw new Error(detail || "IBKR wallet refresh failed.");
+    throw new Error(detail || "IBKR wallet refresh failed.", { cause: error });
   }
 }

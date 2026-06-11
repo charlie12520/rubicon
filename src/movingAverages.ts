@@ -4,7 +4,7 @@
  * can be unit-tested without any chart dependency.
  */
 
-import type { MaOverlay } from "./components/MarketChart";
+import type { MaOverlay } from "./components/marketChartMarkers";
 
 export type MaKind = "ema" | "sma";
 

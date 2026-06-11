@@ -130,6 +130,9 @@ export function FplIndicatorPanel({ initialDate }: Props) {
   const live = liveStatus?.running ?? false;
   const wantTodayRef = useRef(false);
   const dateRef = useRef(date);
+  // The date the panel mounted with — the mount-only manifest fetch clamps
+  // against this snapshot (later date changes have their own fetch effect).
+  const initialDateRef = useRef(date);
   const todayEt = useMemo(() => easternDateOffset(0), []);
 
   const chartContainer = useRef<HTMLDivElement | null>(null);
@@ -162,13 +165,14 @@ export function FplIndicatorPanel({ initialDate }: Props) {
         setManifest(m.dates);
         if (!m.dates.length) return;
         const latest = m.dates[m.dates.length - 1];
-        if (!date) {
+        const requested = initialDateRef.current;
+        if (!requested) {
           setDate(latest);
-        } else if (!m.dates.includes(date)) {
+        } else if (!m.dates.includes(requested)) {
           // Caller asked for a date that has no prediction CSV (model lags
           // the cockpit's IBKR data). Clamp to the latest available and
           // surface a note so the user knows why.
-          setStaleNote(`Predictions unavailable for ${date}; showing latest (${latest}).`);
+          setStaleNote(`Predictions unavailable for ${requested}; showing latest (${latest}).`);
           setDate(latest);
         } else {
           setStaleNote(null);
@@ -178,17 +182,27 @@ export function FplIndicatorPanel({ initialDate }: Props) {
     return () => controller.abort();
   }, []);
 
+  // Clear a stale error banner the moment a new (date, mode) fetch is about to
+  // start; the manifest-poll refetches below instead reconcile the error when
+  // they land, so a transient failure still heals on the next successful poll.
+  const fetchKey = date && manifest.includes(date) ? `${date}|${live ? "live" : "eod"}` : null;
+  const [prevFetchKey, setPrevFetchKey] = useState<string | null>(null);
+  if (fetchKey !== prevFetchKey) {
+    setPrevFetchKey(fetchKey);
+    if (fetchKey !== null) setError(null);
+  }
+
   useEffect(() => {
     // Wait for the manifest before fetching: fetching a date the model has not
     // predicted yet (e.g. the cockpit's latest IBKR date) 500s. The manifest
     // effect clamps `date` to the newest available session, so gate on it.
     if (!date || !manifest.includes(date)) return;
     const controller = new AbortController();
-    setError(null);
     fetchFplIndicator(date, live, controller.signal)
       .then((p) => {
         setPayload(p);
         setCursorIndex(Math.max(0, p.bars.length - 1));
+        setError(null);
       })
       .catch((err: Error) => {
         if (err.name !== "AbortError") setError(err.message);

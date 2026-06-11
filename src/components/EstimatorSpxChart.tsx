@@ -11,7 +11,7 @@ import {
 } from "lightweight-charts";
 import type { SpxBar } from "../../shared/types";
 import type { ExpectedMoveCone } from "../expectedMoveCone";
-import { aggregateSpxBars } from "./ReplayCharts";
+import { aggregateSpxBars } from "./replayChartsData";
 import { rubiconChartOptions, toCandlestickData } from "./lightweightChartHelpers";
 
 // SPX intraday 2-min candles with two horizontal price lines:
@@ -62,9 +62,10 @@ export function EstimatorSpxChart({ bars, targetLevel, spot, pnlSign, emptyNote,
   const coneSeriesRef = useRef<Array<{ k: number; upper: ISeriesApi<"Line">; lower: ISeriesApi<"Line"> }>>([]);
   const fittedRef = useRef(false);
   const coneFittedRef = useRef(false);
-  // Latest props for the once-only mount effect to read without re-subscribing.
+  // Mount-time props for the once-only chart-create effect. The initializer runs
+  // exactly once, which is all that effect can ever observe (it never re-runs);
+  // later target/spot/sign changes flow through the applyOptions effects below.
   const initial = useRef({ targetLevel, spot, pnlSign });
-  initial.current = { targetLevel, spot, pnlSign };
 
   // Create the chart + series + price lines + cone series exactly once.
   useEffect(() => {

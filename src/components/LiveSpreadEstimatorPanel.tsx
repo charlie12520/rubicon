@@ -7,6 +7,7 @@ import {
   selectOpenZeroDteSpxSpreads,
   todayClosedSpxSpreads,
 } from "../spreadEstimator";
+import { currentMinutesToClose } from "../estimatorClock";
 import { minutesToCloseFromLabel } from "../spreadResponse";
 import { coneScaleFromSpreads, expectedMoveCone, type ExpectedMoveCone } from "../expectedMoveCone";
 import { buildThetaSpeedCurve, resolveMoveScale } from "../thetaSpeedCurve";
@@ -41,18 +42,6 @@ type SpxFeedControl = {
 
 const muted: CSSProperties = { fontSize: 11, color: "#9ca3af" };
 
-export function currentMinutesToClose(now = new Date()): number {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).formatToParts(now);
-  const hour = parts.find((p) => p.type === "hour")?.value ?? "00";
-  const minute = parts.find((p) => p.type === "minute")?.value ?? "00";
-  return minutesToCloseFromLabel(`${hour === "24" ? "00" : hour}:${minute}`) ?? 60;
-}
-
 function interpPnl(points: Array<{ level: number; pnl: number }>, level: number): number {
   if (points.length === 0) return 0;
   if (level <= points[0].level) return points[0].pnl;
@@ -83,7 +72,7 @@ export function LiveSpreadEstimatorPanel({ holdings, todayEt, refreshing, onRefr
   // When there are no open SPX positions to read spot from (e.g. studying a
   // closed trade after flatting), fall back to the latest SPX bar so the chart
   // and curve still have a price reference.
-  const bars = spxBars ?? [];
+  const bars = useMemo(() => spxBars ?? [], [spxBars]);
   const spot = useMemo(() => {
     if (selection.spot != null) return selection.spot;
     if (bars.length > 0) return bars[bars.length - 1].close;
@@ -118,12 +107,15 @@ export function LiveSpreadEstimatorPanel({ holdings, todayEt, refreshing, onRefr
   const [focusedSpreadId, setFocusedSpreadId] = useState<string | null>(null);
   const [coneEnabled, setConeEnabled] = useState(true);
   // Auto-clear focus if the focused spread leaves the available set (e.g. a live
-  // pull removes the open spread, or the user changes the selected date).
-  useEffect(() => {
+  // pull removes the open spread, or the user changes the selected date). Focus
+  // is only ever set from ids in the set, so a change to the set is the trigger.
+  const [prevAllOptions, setPrevAllOptions] = useState(allOptions);
+  if (prevAllOptions !== allOptions) {
+    setPrevAllOptions(allOptions);
     if (focusedSpreadId && !allOptions.some((option) => option.spread.id === focusedSpreadId)) {
       setFocusedSpreadId(null);
     }
-  }, [focusedSpreadId, allOptions]);
+  }
   const focusedOption = useMemo(
     () => (focusedSpreadId ? allOptions.find((option) => option.spread.id === focusedSpreadId) ?? null : null),
     [focusedSpreadId, allOptions],
@@ -174,7 +166,13 @@ export function LiveSpreadEstimatorPanel({ holdings, todayEt, refreshing, onRefr
   }, [spot, minutesToClose, coneScale]);
 
   const [level, setLevel] = useState<number | null>(null);
-  useEffect(() => setLevel(spot), [spot]);
+  // The slider tracks spot until the user drags: each new spot tick re-pins the
+  // level (matching the old mirror effect), so a drag holds until the next tick.
+  const [prevSpot, setPrevSpot] = useState(spot);
+  if (prevSpot !== spot) {
+    setPrevSpot(spot);
+    setLevel(spot);
+  }
   const activeLevel = level ?? spot ?? 0;
 
   const refreshBtn = (

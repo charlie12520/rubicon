@@ -46,6 +46,9 @@ Trader opens Rubicon -> Morning shows the macro/live/model premarket brief -> Re
 
 ## Last Completed Change
 
+- A183 - **Self-update gate hardening.** The update gate now hard-refuses (force cannot override) while a daily sync holds the lock with a live pid - the A181 launcher is attached, so a restart mid-pull would kill the wrapper. Runtime data/ churn (heatmap-classification-auto.json etc.) is excluded from the blocking dirty list so only source changes block updates. selfUpdate tests 9/9, button tests 4/4, typecheck + lint clean.
+
+
 - A182 - **Header "Latest" button now self-updates from GitHub.** New server/selfUpdate.ts: GET /api/app-version (fetch + rev compare + tracked-dirty + ET market-hours) and POST /api/app-update with a strict gate (refuses over uncommitted tracked changes, unpushed local commits, up-to-date, and market hours without force - the client confirm carries the live-feeds warning). Update = pull --ff-only, npm ci only when package-lock changed, build BEFORE restart (failure leaves the old server running), then a detached PowerShell relauncher waits on our pid and runs the "Rubicon Server" scheduled task; steps logged to data/app-update.log. Client AppUpdateButton: amber "Update (n)" when actionable, tooltip-explained blocked states fall back to plain bundle refresh, restart-polls /api/app-version?refresh=0 then hard-reloads. Validation: 7+4 new unit/component tests, App.test 16/16, typecheck/build/lint(new files) clean, scratch :5191 proved the 409 dirty-tree refusal against the real repo state. Live server gets the routes at next restart. (Ledger note: this entry rides uncommitted alongside the in-flight A179-A181 session work; the A182 code commit is code-only.)
 
 

@@ -14,6 +14,12 @@ import { easternClock } from "./easternClock.ts";
 const execFileAsync = promisify(execFile);
 const APP_ROOT = process.cwd();
 const APP_UPDATE_LOG = path.join(APP_ROOT, "data", "app-update.log");
+const DAILY_SYNC_LOCK_PATH = path.join(
+  process.env.AI_STUFF_ROOT ?? path.resolve(APP_ROOT, ".."),
+  "IBKR Equity History Pull",
+  "data",
+  "daily_sync.lock.json",
+);
 const RELAUNCH_TASK_NAME = "Rubicon Server";
 const MARKET_OPEN_GUARD_HHMM = "09:20";
 const MARKET_CLOSE_GUARD_HHMM = "16:05";
@@ -28,6 +34,7 @@ export type AppVersionStatus = {
   aheadCount: number;
   dirtyFiles: string[];
   marketHours: boolean;
+  syncRunId: string | null;
   error?: string;
 };
 
@@ -50,6 +57,39 @@ export function parseTrackedDirtyFiles(porcelain: string): string[] {
     .filter(Boolean);
 }
 
+/**
+ * Runtime data the live app rewrites continuously (heatmap classifications,
+ * status json, ...) must not hold updates hostage — only source changes block.
+ */
+export function filterUpdateBlockingDirtyFiles(files: string[]): string[] {
+  return files.filter((file) => !file.replaceAll("\\", "/").startsWith("data/"));
+}
+
+type DailySyncLockShape = { pid?: number; runId?: string };
+
+function pidIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** runId of a LIVE daily sync (lock file present and its pid still running). */
+export async function activeDailySyncRunId(): Promise<string | null> {
+  try {
+    const raw = await fsp.readFile(DAILY_SYNC_LOCK_PATH, "utf8");
+    const lock = JSON.parse(raw) as DailySyncLockShape;
+    if (typeof lock.pid === "number" && pidIsAlive(lock.pid)) {
+      return lock.runId ?? `pid ${lock.pid}`;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export function isMarketHoursEt(clock: { weekday: number; time: string }): boolean {
   const isWeekday = clock.weekday >= 1 && clock.weekday <= 5;
   return isWeekday && clock.time >= MARKET_OPEN_GUARD_HHMM && clock.time < MARKET_CLOSE_GUARD_HHMM;
@@ -66,7 +106,16 @@ export function evaluateUpdateGate(input: {
   dirtyFiles: string[];
   marketHours: boolean;
   force: boolean;
+  syncRunId?: string | null;
 }): UpdateGateDecision {
+  if (input.syncRunId) {
+    // Hard refusal — force does NOT override: restarting now would kill the
+    // attached daily-sync wrapper mid-pull.
+    return {
+      allowed: false,
+      reason: `A daily sync is running (${input.syncRunId}) — wait for it to finish before updating.`,
+    };
+  }
   if (input.dirtyFiles.length > 0) {
     const preview = input.dirtyFiles.slice(0, 4).join(", ");
     const more = input.dirtyFiles.length > 4 ? ` (+${input.dirtyFiles.length - 4} more)` : "";
@@ -141,7 +190,7 @@ export async function getAppVersionStatus({ refresh = true }: { refresh?: boolea
     const remoteRev = await git(["rev-parse", "origin/main"]);
     const behindCount = Number.parseInt(await git(["rev-list", "--count", "HEAD..origin/main"]), 10) || 0;
     const aheadCount = Number.parseInt(await git(["rev-list", "--count", "origin/main..HEAD"]), 10) || 0;
-    const dirtyFiles = parseTrackedDirtyFiles(await git(["status", "--porcelain"]));
+    const dirtyFiles = filterUpdateBlockingDirtyFiles(parseTrackedDirtyFiles(await git(["status", "--porcelain"])));
     return {
       ok: true,
       checkedAt,
@@ -152,6 +201,7 @@ export async function getAppVersionStatus({ refresh = true }: { refresh?: boolea
       aheadCount,
       dirtyFiles,
       marketHours: isMarketHoursEt(clock),
+      syncRunId: await activeDailySyncRunId(),
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -165,6 +215,7 @@ export async function getAppVersionStatus({ refresh = true }: { refresh?: boolea
       aheadCount: 0,
       dirtyFiles: [],
       marketHours: isMarketHoursEt(clock),
+      syncRunId: await activeDailySyncRunId(),
       error: message,
     };
   }
@@ -182,6 +233,7 @@ export async function runAppUpdate({ force = false }: { force?: boolean } = {}):
     dirtyFiles: status.dirtyFiles,
     marketHours: status.marketHours,
     force,
+    syncRunId: status.syncRunId,
   });
   if (!gate.allowed) {
     return { ok: false, message: gate.reason, generatedAt };

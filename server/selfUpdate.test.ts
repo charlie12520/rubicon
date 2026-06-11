@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildRelauncherArgs, evaluateUpdateGate, isMarketHoursEt, parseTrackedDirtyFiles } from "./selfUpdate.ts";
+import { buildRelauncherArgs, evaluateUpdateGate, filterUpdateBlockingDirtyFiles, isMarketHoursEt, parseTrackedDirtyFiles } from "./selfUpdate.ts";
 
 describe("self-update guards", () => {
   it("counts tracked modifications but ignores untracked files", () => {
@@ -61,6 +61,29 @@ describe("self-update guards", () => {
 
     const evening = evaluateUpdateGate({ aheadCount: 0, behindCount: 2, dirtyFiles: [], marketHours: false, force: false });
     expect(evening.allowed).toBe(true);
+  });
+
+  it("ignores runtime data churn but keeps source changes blocking", () => {
+    expect(filterUpdateBlockingDirtyFiles([
+      "data/heatmap-classification-auto.json",
+      "data\\daily-sync-status.json",
+      "server/dailySync.ts",
+      "WORKLOG.md",
+    ])).toEqual(["server/dailySync.ts", "WORKLOG.md"]);
+  });
+
+  it("hard-refuses while a daily sync is running, even with force", () => {
+    const gate = evaluateUpdateGate({
+      aheadCount: 0,
+      behindCount: 5,
+      dirtyFiles: [],
+      marketHours: false,
+      force: true,
+      syncRunId: "daily-2026-06-10-20260611164630",
+    });
+    expect(gate.allowed).toBe(false);
+    expect(gate.reason).toContain("daily sync is running");
+    expect(gate.reason).toContain("daily-2026-06-10");
   });
 
   it("builds a relauncher that waits for this pid then runs the scheduled task", () => {

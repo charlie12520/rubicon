@@ -26,7 +26,7 @@
     "tc2000:daily-bars": "python scripts/refresh-tc2000-daily-bars.py",
     "test": "vitest run",
     "typecheck": "tsc -b",
-    "validate:mvp": "npm run typecheck && npm run test && npm run build"
+    "validate:mvp": "npm run typecheck && npm run lint && npm run test && npm run build"
   },
   "dependencies": {
     "csv-parse": "^6.2.1",

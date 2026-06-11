@@ -1,7 +1,9 @@
-import { existsSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { closeSync, existsSync, openSync } from "node:fs";
+import fsp from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { buildDailySyncCommand, buildDailySyncTargetPlan, dailySyncCompletionAllowsDerivedStateRefresh, dailySyncSourceHealth, mergeDailySyncCompletionStatus, refreshDailySyncDerivedState, resolveDailySyncGoogleUploaded, resolveDailySyncRuntimeState, selectDailySyncPreferredLogPath, spxHeatmapPayloadIsFilled, startDailySync, summaryGoogleUploaded } from "./dailySync.ts";
+import { buildDailySyncCommand, buildDailySyncProcessLaunch, buildDailySyncTargetPlan, dailySyncCompletionAllowsDerivedStateRefresh, dailySyncSourceHealth, mergeDailySyncCompletionStatus, refreshDailySyncDerivedState, resolveDailySyncGoogleUploaded, resolveDailySyncRuntimeState, selectDailySyncPreferredLogPath, spxHeatmapPayloadIsFilled, startDailySync, summaryGoogleUploaded } from "./dailySync.ts";
 
 // Preflight + source-health hit the real wrapper in the sibling IBKR project,
 // which only exists on the trading machine — skip (don't fail) on CI runners.
@@ -19,6 +21,56 @@ describe("daily SPX/IBKR sync launcher", () => {
     expect(command.display).toContain("--date");
     expect(command.display).toContain("2026-05-29");
     expect(command.display.some((part) => part.endsWith("run_daily_spx_ibkr_sync_with_sheet_payload.ps1"))).toBe(true);
+  });
+
+  it("launches full daily sync as the monitored wrapper process", () => {
+    const wrapper = buildDailySyncCommand({ date: "2026-06-10", runId: "daily-test" });
+    const launch = buildDailySyncProcessLaunch(wrapper, "C:\\logs\\daily-sync-launch.log");
+
+    expect(launch.command).toBe("powershell.exe");
+    expect(launch.detached).toBe(false);
+    expect(launch.args).toEqual(wrapper.args);
+    expect(launch.args).not.toContain("-EncodedCommand");
+    expect(launch.args.some((part) => part.endsWith("run_daily_spx_ibkr_sync_with_sheet_payload.ps1"))).toBe(true);
+    expect(launch.args).toContain("--date");
+    expect(launch.args).toContain("2026-06-10");
+    expect(launch.args).toContain("--run-id");
+    expect(launch.args).toContain("daily-test");
+    expect(launch.logPath).toBe("C:\\logs\\daily-sync-launch.log");
+  });
+
+  it.skipIf(process.platform !== "win32")("waits for the launched PowerShell process and writes UTF-8 log output", async () => {
+    const logPath = path.join(process.cwd(), "data", "daily-sync-launcher-test.log");
+    await fsp.rm(logPath, { force: true });
+    const command = {
+      command: "powershell.exe",
+      args: ["-NoProfile", "-Command", "Start-Sleep -Milliseconds 350; Write-Output 'launcher-test-done'"],
+      cwd: process.cwd(),
+      display: ["powershell.exe", "-NoProfile", "-Command", "launcher-test"],
+    };
+    const launch = buildDailySyncProcessLaunch(command, logPath);
+    const logFd = openSync(launch.logPath, "a");
+    const startedAt = Date.now();
+    const child = spawn(launch.command, launch.args, {
+      cwd: launch.cwd,
+      windowsHide: true,
+      detached: launch.detached,
+      stdio: ["ignore", logFd, logFd],
+    });
+
+    const exitCode = await new Promise<number | null>((resolve, reject) => {
+      child.once("error", reject);
+      child.once("close", resolve);
+    });
+    closeSync(logFd);
+    const elapsedMs = Date.now() - startedAt;
+    const logText = await fsp.readFile(logPath, "utf8");
+    await fsp.rm(logPath, { force: true });
+
+    expect(exitCode).toBe(0);
+    expect(elapsedMs).toBeGreaterThanOrEqual(300);
+    expect(logText).toContain("launcher-test-done");
+    expect(logText).not.toContain("\u0000");
   });
 
   it("builds an option-sidecars-only command for manual failed-or-missing retries", () => {

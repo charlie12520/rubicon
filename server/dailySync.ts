@@ -36,8 +36,8 @@ const SPX_HEATMAP_SCRIPT = path.join("scripts", "refresh-spx-heatmap.py");
 const SECTOR_RRG_FILE = "sector-rrg-bars.json";
 const SECTOR_RRG_SCRIPT = path.join("scripts", "refresh-sector-rrg.py");
 
-// ChildProcess (not ...WithoutNullStreams): the sync child is spawned detached
-// with fd stdio, so its stream properties are null by design.
+// ChildProcess (not ...WithoutNullStreams): the full daily sync child writes
+// stdout/stderr directly to the launch log through file handles.
 let activeDailySync: ChildProcess | null = null;
 
 type DailySyncLaunchInput = {
@@ -53,6 +53,15 @@ type DailySyncCommand = {
   args: string[];
   cwd: string;
   display: string[];
+};
+
+type DailySyncProcessLaunch = {
+  command: string;
+  args: string[];
+  cwd: string;
+  detached: false;
+  display: string[];
+  logPath: string;
 };
 
 type LatestSummary = {
@@ -178,6 +187,19 @@ function shortOutput(stdout: string, stderr: string): string {
     .map((line) => line.trim())
     .filter(Boolean);
   return lines.slice(-6).join(" | ");
+}
+
+async function writeRotatingLogEntry(target: string, text: string): Promise<void> {
+  const stream = await openRotatingLogStream(target);
+  await new Promise<void>((resolve, reject) => {
+    stream.once("error", reject);
+    stream.end(text, resolve);
+  });
+}
+
+async function appendLogEntry(target: string, text: string): Promise<void> {
+  await fsp.mkdir(path.dirname(target), { recursive: true });
+  await fsp.appendFile(target, text, "utf8");
 }
 
 function runHeatmapBackfill(appRoot: string): Promise<void> {
@@ -981,6 +1003,17 @@ export function buildDailySyncCommand({ date = "auto", optionScope, optionSideca
   };
 }
 
+export function buildDailySyncProcessLaunch(command: DailySyncCommand, logPath = DAILY_SYNC_LAUNCH_LOG): DailySyncProcessLaunch {
+  return {
+    command: command.command,
+    args: command.args,
+    cwd: command.cwd,
+    detached: false,
+    display: command.display,
+    logPath,
+  };
+}
+
 async function readAnalysisLogTail(logPath: string): Promise<{ path: string; updatedAt: string; tail: string } | undefined> {
   try {
     const stat = await fsp.stat(logPath);
@@ -1279,28 +1312,40 @@ export async function startDailySync(input: DailySyncLaunchInput = {}): Promise<
     };
   }
 
-  const logStream = await openRotatingLogStream(DAILY_SYNC_LAUNCH_LOG);
-  logStream.write(`\n[${startedAt}] Launching ${command.display.join(" ")}\n`);
+  await writeRotatingLogEntry(DAILY_SYNC_LAUNCH_LOG, `\n[${startedAt}] Launching ${command.display.join(" ")}\n`);
 
-  // Detached + file-descriptor stdio: a Rubicon server restart (tsx watch respawn,
-  // desktop relaunch, headless task restart) must NOT silently kill a running sync.
-  // The 2026-06-08 full sync died exactly this way — five log lines, then nothing:
-  // the non-detached child went down with the server and its piped output was lost.
-  // The wrapper owns its own completion status (Write-RubiconSyncStatus) and lock,
-  // so an orphaned sync still finishes and reports; the close handler below only
-  // fires when this server instance outlives the run (the normal case).
-  const childLogFd = fs.openSync(DAILY_SYNC_LAUNCH_LOG, "a");
-  const child = spawn(command.command, command.args, {
-    cwd: command.cwd,
-    windowsHide: true,
-    detached: true,
-    stdio: ["ignore", childLogFd, childLogFd],
-  });
+  // Direct file-handle logging keeps the monitored process as the real wrapper.
+  // Windows detached PowerShell launches can report exit code 0 immediately
+  // without running the nested command, which made the full daily pull look
+  // finished before Data Collection started.
+  const processLaunch = buildDailySyncProcessLaunch(command);
+  const logFd = fs.openSync(processLaunch.logPath, "a");
+  let logFdOpen = true;
+  const closeLogFd = () => {
+    if (!logFdOpen) {
+      return;
+    }
+    logFdOpen = false;
+    try {
+      fs.closeSync(logFd);
+    } catch (error) {
+      console.warn(`Daily sync launch log close failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+  let child: ChildProcess;
+  try {
+    child = spawn(processLaunch.command, processLaunch.args, {
+      cwd: processLaunch.cwd,
+      windowsHide: true,
+      detached: processLaunch.detached,
+      stdio: ["ignore", logFd, logFd],
+    });
+  } catch (error) {
+    closeLogFd();
+    throw error;
+  }
   child.unref();
   activeDailySync = child;
-  logStream.on("error", (error) => {
-    console.warn(`Daily sync launch log write failed: ${error.message}`);
-  });
 
   const launched: DailySyncStatusResult = {
     ok: true,
@@ -1324,13 +1369,12 @@ export async function startDailySync(input: DailySyncLaunchInput = {}): Promise<
 
   child.on("close", async (exitCode) => {
     const finishedAt = new Date().toISOString();
+    closeLogFd();
     try {
-      fs.closeSync(childLogFd);
-    } catch {
-      // already closed
+      await appendLogEntry(DAILY_SYNC_LAUNCH_LOG, `\n[${finishedAt}] Daily sync exited with code ${exitCode ?? "unknown"}\n`);
+    } catch (error) {
+      console.warn(`Daily sync launch log write failed: ${error instanceof Error ? error.message : String(error)}`);
     }
-    logStream.write(`\n[${finishedAt}] Daily sync exited with code ${exitCode ?? "unknown"}\n`);
-    logStream.end();
     activeDailySync = null;
     const persisted = await readJson<DailySyncStatusResult | null>(DAILY_SYNC_STATUS_PATH, null);
     const completionStatus = mergeDailySyncCompletionStatus({
@@ -1353,8 +1397,12 @@ export async function startDailySync(input: DailySyncLaunchInput = {}): Promise<
 
   child.on("error", async (error) => {
     const finishedAt = new Date().toISOString();
-    logStream.write(`\n[${finishedAt}] Daily sync launch error: ${error.message}\n`);
-    logStream.end();
+    closeLogFd();
+    try {
+      await appendLogEntry(DAILY_SYNC_LAUNCH_LOG, `\n[${finishedAt}] Daily sync launch error: ${error.message}\n`);
+    } catch (logError) {
+      console.warn(`Daily sync launch log write failed: ${logError instanceof Error ? logError.message : String(logError)}`);
+    }
     activeDailySync = null;
     await writeStatus({
       ...launched,

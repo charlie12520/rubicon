@@ -57,4 +57,17 @@ describe.skipIf(!fs.existsSync(WRAPPER_PATH))("daily sync PowerShell wrapper", (
     expect(googleUploadFinishedIndex).toBeGreaterThanOrEqual(0);
     expect(finalRetryIndex).toBeGreaterThan(googleUploadFinishedIndex);
   });
+
+  it("runs bounded SPX spread-leg repair with chunk-first 25s option requests", () => {
+    const wrapper = readWrapper();
+    const configIndex = wrapper.indexOf('StepId = "option-spx-spread-legs"; Label = "SPX spread-leg option pull"; Scope = "spx-spread-legs"; SoftBudgetSeconds = 480; HardBudgetSeconds = 540');
+    const stepIndex = wrapper.indexOf("function Invoke-OptionSidecarStep");
+    const commandIndex = wrapper.indexOf('"--option-history-window-mode", $HistoryWindowMode', stepIndex);
+
+    expect(configIndex).toBeGreaterThanOrEqual(0);
+    expect(stepIndex).toBeGreaterThanOrEqual(0);
+    expect(wrapper.slice(stepIndex, commandIndex)).toContain('$HistoryWindowMode = if ($Config.Scope -eq "spx-spread-legs") { "chunk-first" } else { "full-first" }');
+    expect(wrapper.slice(stepIndex, commandIndex)).toContain('"--option-request-timeout-s", "25"');
+    expect(commandIndex).toBeGreaterThan(stepIndex);
+  });
 });

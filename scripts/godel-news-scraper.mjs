@@ -20,6 +20,7 @@
 import { chromium } from "playwright-core";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const ROOT = "C:/Users/charl/Desktop/AI STUFF/godel-news";
 const PROFILE = path.join(ROOT, "profile");
@@ -28,6 +29,16 @@ const LATEST_JSON = path.join(ROOT, "latest.json");
 const BREAKING_JSONL = path.join(ROOT, "breaking.jsonl");
 const WS_RAW_LOG = path.join(ROOT, "ws-raw.log");
 const WS_RAW_CAP_BYTES = 5 * 1024 * 1024;
+
+// Rubicon integration: the server's readGodelLiveNewsSource() reads
+// data/godel-live-news.json by default and feeds it into the Morning > Live
+// Updates panel (merged with FirstSquawk). Writing there makes the scraped
+// feed appear in Rubicon with no server config — replacing the old manual
+// DOM-bridge bookmarklet as the Godel source. Rows here are mapped by the
+// reader: headline->title, time->publishedAt, source->author.
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const RUBICON_CAPTURE = path.join(REPO_ROOT, "data", "godel-live-news.json");
+const RUBICON_CAPTURE_MAX = 24;
 
 const POLL_MS = 5_000;
 const ONCE = process.argv.includes("--once");
@@ -84,8 +95,38 @@ function recordNews(items) {
   if (fresh > 0) {
     latest.splice(50);
     fs.writeFileSync(LATEST_JSON, JSON.stringify(latest, null, 1), "utf8");
+    writeRubiconCapture();
   }
   return fresh;
+}
+
+function newsTimeMs(item) {
+  const ms = Date.parse(item.time);
+  return Number.isNaN(ms) ? 0 : ms;
+}
+
+// Atomic write of the newest items into the Rubicon capture file. Sorts by
+// timestamp desc itself, so it's correct regardless of whether `latest` is in
+// warm-start (oldest-first) or runtime (newest-first) order. Atomic rename so
+// the server (polling every 10s) never reads a half-written array.
+function writeRubiconCapture() {
+  try {
+    const rows = [...latest]
+      .sort((a, b) => newsTimeMs(b) - newsTimeMs(a))
+      .slice(0, RUBICON_CAPTURE_MAX)
+      .map((item) => ({
+        id: item.id,
+        headline: item.headline,
+        time: item.time,
+        ticker: item.symbol || undefined,
+        source: item.source,
+      }));
+    const tmp = `${RUBICON_CAPTURE}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify({ generatedAt: new Date().toISOString(), items: rows }, null, 1), "utf8");
+    fs.renameSync(tmp, RUBICON_CAPTURE);
+  } catch (error) {
+    log(`rubicon capture write failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 function appendWsRaw(text) {
@@ -250,6 +291,9 @@ while (!stopping) {
     const session = await launchSession();
     context = session.context;
     const { page } = session;
+    // refresh the Rubicon capture from the warm-started snapshot at boot, so the
+    // panel has current rows even before the next new headline lands
+    writeRubiconCapture();
     for (;;) {
       const { news, breaking } = await scrapeOnce(page);
       const fresh = recordNews(news.reverse());

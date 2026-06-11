@@ -88,6 +88,44 @@ describe("Godel live news ingestion", () => {
     });
   });
 
+  it("normalizes the godel-news-scraper capture shape (items[], time, ticker)", () => {
+    // exact output of scripts/godel-news-scraper.mjs -> data/godel-live-news.json
+    const updates = parseGodelLiveNews(
+      JSON.stringify({
+        generatedAt: "2026-06-11T21:00:00.000Z",
+        items: [
+          {
+            id: "202606111501BENZINGANEWSOPEN_53153136.xml",
+            headline: "Nvidia Millionaires Can't Afford To Sell, ETFs May Be Their Escape Route",
+            time: "6/11/26 15:01:28",
+            ticker: "NVDA",
+            source: "Benzinga Lightning Feed",
+          },
+          {
+            id: "202606111430BENZINGANEWSOPEN_53152453.xml",
+            headline: "Stock Market Whipsawed on Trump Statements, ECB Rate Hike, Hotter PPI",
+            time: "6/11/26 14:32:24",
+            ticker: "SPY",
+            source: "Benzinga Lightning Feed",
+          },
+        ],
+      }),
+      "data/godel-live-news.json",
+    );
+
+    expect(updates).toHaveLength(2);
+    expect(updates[0]).toMatchObject({
+      id: "godel-202606111501BENZINGANEWSOPEN_53153136.xml",
+      source: "Godel",
+      author: "Benzinga Lightning Feed",
+      text: "Nvidia Millionaires Can't Afford To Sell, ETFs May Be Their Escape Route",
+    });
+    // the scraper's "M/D/YY H:M:S" stamp parses to a real instant
+    expect(updates[0].publishedAt).not.toBeNull();
+    expect(updates[0].timeLabel).not.toBe("Time TBD");
+    expect(updates.every((u) => u.source === "Godel")).toBe(true);
+  });
+
   it("drops unmarked broad DOM bridge rows from Godel live updates", () => {
     const updates = parseGodelLiveNews(
       JSON.stringify({

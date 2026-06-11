@@ -46,6 +46,9 @@ Trader opens Rubicon -> Morning shows the macro/live/model premarket brief -> Re
 
 ## Last Completed Change
 
+- A187 - **Godel scraper wired into Rubicon's Live Updates panel.** scripts/godel-news-scraper.mjs now also writes data/godel-live-news.json (the default path readGodelLiveNewsSource() already reads) in the reader's mapped shape; atomic write, timestamp-desc sort, boot + per-headline refresh. Zero server changes - loadMorningLiveUpdates() already merges Godel + FirstSquawk. Verified end-to-end on the live server (:5174): /api/morning/live-updates reported 'ok - Loaded 24 staged Godel items' with 8 Godel rows in the merged tape; panel renders them. godelLiveNews.test.ts +1 (scraper-shape parse, 7/7); lint clean. Replaces the manual DOM-bridge bookmarklet as the Godel source. Logged-out demo feed lags FirstSquawk so Godel rows sort below the 24-cap; run --login once for the real-time firehose + breaking ticker. Watcher running detached (off-screen Edge, pid persists in profile).
+
+
 - A186 - **Godel Terminal news scraper** (user request: scrape the bottom-corner news, windowless). scripts/godel-news-scraper.mjs: off-screen headed Edge with dedicated profile defeats Cloudflare (headless impossible - all routes re-challenged); 5s DOM poll of streaming-table rows + breaking-banner detection + raw WS frame capture to Desktop\AI STUFF\godel-news\ (news.jsonl / latest.json / breaking.jsonl / ws-raw.log); restart-safe dedupe, crash-relaunch, --once and --login modes. Validated: 200 rows captured incl. same-hour items; lint clean. Watcher left running detached.
 
 

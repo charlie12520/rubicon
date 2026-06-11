@@ -64,7 +64,7 @@ export async function loadSpxMaContext(date: string, options: LoadOptions = {}):
     if (sessionBars.length >= maxSessions || coarseCount >= warmupBars) {
       break;
     }
-    let bars: SpxBar[] = [];
+    let bars: SpxBar[];
     try {
       bars = await loadBars(priorDate);
     } catch {

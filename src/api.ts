@@ -38,7 +38,7 @@ async function readJson<T>(url: string, init?: RequestInit): Promise<T> {
       throw new Error(parsed.message ?? parsed.error ?? response.statusText);
     } catch (error) {
       if (error instanceof SyntaxError) {
-        throw new Error(body || response.statusText);
+        throw new Error(body || response.statusText, { cause: error });
       }
       throw error;
     }

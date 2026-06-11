@@ -317,7 +317,7 @@ async function readDailySyncLock(): Promise<DailySyncLockInfo> {
     };
   }
 
-  let lockMtimeMs = 0;
+  let lockMtimeMs: number;
   try {
     lockMtimeMs = (await fsp.stat(DAILY_SYNC_LOCK_PATH)).mtimeMs;
   } catch {

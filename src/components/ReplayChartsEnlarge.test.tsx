@@ -22,7 +22,6 @@ vi.mock("./MarketChart", () => ({
       )}
     </section>
   ),
-  chartCountLabel: () => "",
 }));
 
 import { ReplayCharts } from "./ReplayCharts";

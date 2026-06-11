@@ -9,7 +9,8 @@ import type { IbkrHoldingPosition, IbkrHoldingsSnapshot } from "../../shared/typ
 // subtitle, and P/L readout — stub the chart child so jsdom doesn't choke.
 vi.mock("./EstimatorSpxChart", () => ({ EstimatorSpxChart: () => null }));
 
-import { LiveSpreadEstimatorPanel, currentMinutesToClose } from "./LiveSpreadEstimatorPanel";
+import { currentMinutesToClose } from "../estimatorClock";
+import { LiveSpreadEstimatorPanel } from "./LiveSpreadEstimatorPanel";
 
 function pos(overrides: Partial<IbkrHoldingPosition>): IbkrHoldingPosition {
   return {

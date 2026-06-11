@@ -202,6 +202,11 @@ function App() {
     [selectedTradeId, tradesForSelectedDate],
   );
   const quickSpreadGroups = useMemo(() => buildQuickSpreadGroups(tradesForSelectedDate), [tradesForSelectedDate]);
+  // Forget a stale quick-spread selection as soon as its group disappears from the
+  // current date (guarded render-time reset; see react.dev "you might not need an effect").
+  if (selectedSpreadKey && !quickSpreadGroups.some((group) => group.key === selectedSpreadKey)) {
+    setSelectedSpreadKey(undefined);
+  }
   const activeSpreadKey = selectedSpreadKey ?? (selectedTrade ? quickSpreadKey(selectedTrade) : undefined);
   const selectedSpreadGroup = useMemo(
     () => quickSpreadGroups.find((group) => group.key === activeSpreadKey) ?? null,
@@ -265,6 +270,23 @@ function App() {
   const freshness = useMemo(() => (snapshot ? marketFreshness(snapshot, selectedDate) : null), [selectedDate, snapshot]);
   const dateScopedReplay = replay?.date === selectedDate ? replay : null;
   const needsReplayPayload = portion === "replay" && (view === "replay" || view === "review");
+  // Render-time mirror of the replay-fetch effect below: when its inputs change,
+  // reflect the new request state immediately (loading for the imminent fetch,
+  // cleared payload once the replay views no longer need one) instead of setting
+  // state from inside the effect.
+  const replayFetchKey = `${needsReplayPayload}|${replayRefreshToken}|${selectedDate}`;
+  const [prevReplayFetchKey, setPrevReplayFetchKey] = useState(replayFetchKey);
+  if (prevReplayFetchKey !== replayFetchKey) {
+    setPrevReplayFetchKey(replayFetchKey);
+    if (selectedDate && needsReplayPayload) {
+      setReplayLoading(true);
+    } else {
+      setReplayLoading(false);
+      if (!needsReplayPayload) {
+        setReplay(null);
+      }
+    }
+  }
 
   const refreshSnapshot = useCallback(
     async ({ silent = false }: { silent?: boolean } = {}) => {
@@ -307,31 +329,14 @@ function App() {
   );
 
   useEffect(() => {
-    if (!selectedTrade && tradesForSelectedDate[0]) {
-      setSelectedTradeId(tradesForSelectedDate[0].id);
-    }
-  }, [selectedTrade, tradesForSelectedDate]);
-
-  useEffect(() => {
-    if (selectedSpreadKey && !quickSpreadGroups.some((group) => group.key === selectedSpreadKey)) {
-      setSelectedSpreadKey(undefined);
-    }
-  }, [quickSpreadGroups, selectedSpreadKey]);
-
-  useEffect(() => {
     replayIntentRef.current = { playing, replayIndex, replayMode };
   }, [playing, replayIndex, replayMode]);
 
   useEffect(() => {
     if (!selectedDate || !needsReplayPayload) {
-      setReplayLoading(false);
-      if (!needsReplayPayload) {
-        setReplay(null);
-      }
       return;
     }
     const controller = new AbortController();
-    setReplayLoading(true);
     fetchReplay(selectedDate, undefined, controller.signal)
       .then((nextReplay) => {
         if (controller.signal.aborted || nextReplay.date !== selectedDate) {
@@ -363,9 +368,18 @@ function App() {
     return () => controller.abort();
   }, [needsReplayPayload, replayRefreshToken, selectedDate]);
 
-  useEffect(() => {
+  // Clear the EOD spread stack when the Morning date is cleared (guarded
+  // render-time reset; the fetch effect below only handles non-empty dates).
+  const [prevMorningDate, setPrevMorningDate] = useState(morningDate);
+  if (prevMorningDate !== morningDate) {
+    setPrevMorningDate(morningDate);
     if (!morningDate) {
       setMorningSpreadSpeed(null);
+    }
+  }
+
+  useEffect(() => {
+    if (!morningDate) {
       return;
     }
     const controller = new AbortController();
@@ -384,11 +398,18 @@ function App() {
 
   // Live SPXW 0DTE Signal-Stack feed: only while tracking today. Polls the live
   // snapshot (and feed status) every 20s; when it reports `available`, the live
-  // payload is preferred over the EOD fallback below.
-  useEffect(() => {
+  // payload is preferred over the EOD fallback below. Leaving "today" drops the
+  // live state via a guarded render-time reset before the effect re-runs.
+  const [prevMorningTracksToday, setPrevMorningTracksToday] = useState(morningTracksToday);
+  if (prevMorningTracksToday !== morningTracksToday) {
+    setPrevMorningTracksToday(morningTracksToday);
     if (!morningTracksToday) {
       setMorningLiveSpreadSpeed(null);
       setMorningLiveStatus(null);
+    }
+  }
+  useEffect(() => {
+    if (!morningTracksToday) {
       return;
     }
     let cancelled = false;
@@ -1213,14 +1234,20 @@ function JournalScreen({
   const requiredAspectComplete = aspectChecklist.filter((item) => !item.optional && draft?.aspectChecks[item.key]).length;
   const countsByDate = useMemo(() => countTradesByDate(allTrades), [allTrades]);
 
-  useEffect(() => {
-    if (!selectedTrade) {
+  // Re-seed the local draft whenever the selected trade or its saved entry
+  // changes (guarded render-time reset keyed on both inputs).
+  const [prevSelectedTrade, setPrevSelectedTrade] = useState<TradeRecord | null>(null);
+  const [prevCurrentEntry, setPrevCurrentEntry] = useState<TradeJournalEntry | undefined>(undefined);
+  if (prevSelectedTrade !== selectedTrade || prevCurrentEntry !== currentEntry) {
+    setPrevSelectedTrade(selectedTrade);
+    setPrevCurrentEntry(currentEntry);
+    if (selectedTrade) {
+      setDraft(currentEntry ?? defaultJournalEntry(selectedTrade));
+      setSaveStatus("idle");
+    } else {
       setDraft(null);
-      return;
     }
-    setDraft(currentEntry ?? defaultJournalEntry(selectedTrade));
-    setSaveStatus("idle");
-  }, [currentEntry, selectedTrade]);
+  }
 
   function updateDraft(patch: Partial<TradeJournalEntry>) {
     setDraft((current) => {
@@ -2320,10 +2347,14 @@ function DailyReviewScreen({
   const countsByDate = useMemo(() => countTradesByDate(allTrades), [allTrades]);
   const sideRows: TradeRecord["side"][] = ["Call", "Put", "Mixed"];
 
-  useEffect(() => {
+  // Reset the export feedback when the review date changes (guarded render-time
+  // reset; the initial values already come from the matching lazy initializers).
+  const [prevExportDate, setPrevExportDate] = useState(selectedDate);
+  if (prevExportDate !== selectedDate) {
+    setPrevExportDate(selectedDate);
     setExportStatus("idle");
     setCanCopyReview(canAttemptClipboardCopy());
-  }, [selectedDate]);
+  }
 
   const reviewExportMarkdown = useMemo(
     () =>

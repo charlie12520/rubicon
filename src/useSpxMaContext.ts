@@ -44,11 +44,9 @@ export function useSpxMaContext(date: string | null, enabled: boolean): SpxMaCon
     if (!enabled || !date) {
       return;
     }
-    const cached = cache.get(date);
-    if (cached) {
-      setContext(cached);
-      return;
-    }
+    // Cache hits resolve synchronously inside loadContext, so the state sync
+    // lands in the promise continuation below; renders in the meantime are
+    // served straight from the cache by the return expression.
     let active = true;
     const controller = new AbortController();
     loadContext(date, controller.signal)

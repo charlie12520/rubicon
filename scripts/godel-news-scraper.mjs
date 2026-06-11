@@ -49,6 +49,12 @@ const ONCE = process.argv.includes("--once") && !LOGIN;
 // relaunch the browser if the page serves zero news rows this long (session
 // expired / in-page re-challenge / panel closed — none of these throw on their own)
 const STALE_POLLS_BEFORE_RELAUNCH = 60;
+// Observed repeatedly: a hard-killed profile gets re-challenged by Cloudflare
+// and STAYS stuck, while a fresh profile clears in seconds. After this many
+// consecutive interstitial failures, reset the profile — but never one that
+// holds a login session (marker written by --login).
+const CF_FAILURES_BEFORE_PROFILE_RESET = 3;
+const LOGIN_MARKER = path.join(ROOT, "profile-logged-in.flag");
 const SEEN_CAP = 10_000;
 const SEEN_BREAKING_CAP = 500;
 
@@ -347,6 +353,11 @@ async function launchSession() {
     // the user is mid-sign-in and relaunch-loop over them
     await page.waitForSelector('tr[id*="streaming-table"]', { timeout: LOGIN ? 0 : 120_000 });
     log("session up: Godel app loaded, news rows present");
+    if (LOGIN) {
+      // this profile now (presumably) holds a signed-in session — the
+      // CF-stuck self-heal must never delete it
+      fs.writeFileSync(LOGIN_MARKER, new Date().toISOString(), "utf8");
+    }
     return { context, page };
   } catch (error) {
     // never leak the browser: a zombie keeps the profile locked for relaunch
@@ -363,12 +374,27 @@ process.on("SIGINT", () => {
   log("stopping...");
 });
 
+let cfStuckCount = 0;
+let resetProfilePending = false;
+
 while (!stopping) {
   let context = null;
+  if (resetProfilePending) {
+    resetProfilePending = false;
+    cfStuckCount = 0;
+    try {
+      fs.rmSync(PROFILE, { recursive: true, force: true });
+      fs.mkdirSync(PROFILE, { recursive: true });
+      log("profile reset: Cloudflare kept challenging it and it held no login session — fresh profiles clear instantly");
+    } catch (error) {
+      log(`profile reset failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
   try {
     const session = await launchSession();
     context = session.context;
     const { page } = session;
+    cfStuckCount = 0;
     // refresh the Rubicon capture from the warm-started snapshot at boot, so the
     // panel has current rows even before the next new headline lands
     writeRubiconCapture();
@@ -401,6 +427,18 @@ while (!stopping) {
       stopping = true;
       log(`once mode failed: ${message}`);
     } else {
+      if (message.includes("Cloudflare interstitial")) {
+        cfStuckCount += 1;
+        if (cfStuckCount >= CF_FAILURES_BEFORE_PROFILE_RESET) {
+          if (fs.existsSync(LOGIN_MARKER)) {
+            log(`CF-stuck x${cfStuckCount} but the profile holds a login session — keeping it; backing off 5min`);
+            cfStuckCount = 0;
+            await new Promise((resolve) => setTimeout(resolve, 270_000));
+          } else {
+            resetProfilePending = true;
+          }
+        }
+      }
       log(`session error: ${message}${stopping ? "" : " — relaunching in 30s"}`);
       if (!stopping) {
         await new Promise((resolve) => setTimeout(resolve, 30_000));

@@ -5,14 +5,15 @@ trader, on one Windows machine. React 19 + Vite client (`src/`), Express 5 + `ts
 (`server/`), shared types (`shared/`), automation scripts (`scripts/`). It may take inspiration
 from reference products but must never copy competitor branding, exact UI/CSS, icons, or wording.
 
-Start every session: read this file, then `codebase.md` (repo map), then the TOP of `WORKLOG.md`
-(current state) and the yaml header of `naive_acceptance.md` (current acceptance ID). Use `rg` to
-jump; never read the big logs end-to-end.
+Start every session: read this file, then `codebase.md` (repo map), `TASKS.md` (active agent
+board), the TOP of `WORKLOG.md` (landed state), and the yaml header of `naive_acceptance.md`
+(latest accepted A-id). Use `rg` to jump; never read the big logs end-to-end.
 
-First user-visible reply in a session/task must include an `A###` token. For repo-changing work,
-claim the next free acceptance ID first and open with it (for example, `A196 - ...`). For read-only
-status/questions where no new ID is claimed, report the current active ID as context (for example,
-`A195 context - ...`). This keeps cross-agent transcripts tied to the ledger from the first message.
+First user-visible reply in a session/task must include an ID token. Section agents use the assigned
+or newly claimed `TASK-###` token (for example, `TASK-014 - ...`). Read-only status/questions use
+the current active A-id as context (for example, `A197 context - ...`). Only the final merge/landing
+agent claims new `A###` acceptance IDs. This keeps parallel transcripts tied to the task board
+without racing the final acceptance ledger.
 
 This file is the SHARED rulebook for every agent runtime (Codex reads it natively; Claude imports
 it via CLAUDE.md). Shell on this machine is Windows PowerShell 5.1 — no `&&` chaining, no `??`;
@@ -34,26 +35,47 @@ The user's live app serves THIS folder. At logon, the "Rubicon Server" scheduled
   down the user's app). Never touch TWS, the live server, or the Godel watcher (an invisible
   off-screen Edge + node pair; it has its own Startup-folder shortcut and single-instance lock).
 
-## 2. Concurrent agents (Codex + Claude often run here simultaneously)
+## 2. Task-first concurrent agents (Codex + Claude often run here simultaneously)
+
+The default parallel workflow is:
+
+1. The user assigns a Rubicon section or improvement to a `TASK-###` in `TASKS.md`.
+2. One agent claims that task from a fresh read, records owner/branch/worktree/status, and works only
+   that task's scope.
+3. Section agents record progress, focused validation, risks, and handoff notes in `TASKS.md` or a
+   linked task note. They do not mark `A###` rows GREEN and do not prepend `WORKLOG.md`.
+4. A final merge agent integrates the finished task branches/worktrees, resolves conflicts, runs the
+   broader validation, then assigns the next free `A###` ID(s) in `naive_acceptance.md`, updates
+   `WORKLOG.md` and `naive_validation.md`, and commits the integrated result.
+
+`TASKS.md` is the live coordination board. `naive_acceptance.md` and `WORKLOG.md` are final-history
+ledgers. If a branch already contains a stale or colliding `A###` row, the final merge agent must
+renumber or rewrite that branch's row before landing it; the first committed/landed A-id wins.
 
 Treat every file and the git state as liable to change under you:
 
+- The live `spx-spread-replay-tracker` checkout is production-only after the dirty-checkout
+  transition is complete: keep it on `main`, let the live server and Latest button operate only
+  there, and do not edit source files there directly.
+- For repo-changing work, create a sibling worktree under `../rubicon-worktrees/`:
+  `npm run worktree:create -- --id TASK-### --slug short-name` for section work, or
+  `npm run worktree:create -- --id A### --slug short-name` for a final merge branch. Future
+  worktrees start from fresh `origin/main`; use branches named `agent/TASK-###-short-name` or
+  `agent/A###-short-name`.
+- Land completed branches through `npm run land -- --branch agent/...`; add `--push` only when the
+  user explicitly wants the validated merge pushed to `origin/main`. The landing script uses a
+  temporary integration worktree and must not checkout local `main` in the live folder.
+- Install repo hooks with `npm run hooks:install` in a checkout that has the guardrail files.
+  Hooks block direct commits/merges on `main`, duplicate/regressed acceptance IDs, and broad
+  archive rotations mixed with source edits.
 - `git branch --show-current` BEFORE committing — another session may have switched the checkout
   to its feature branch. Commit where you are; never switch branches out from under a session.
 - Uncommitted changes you didn't make are someone's in-flight work. Stage ONLY files you touched
   (`git add <paths>`, never `-A` blindly); never `checkout -- .`, stash, or reset.
-- Acceptance IDs race. Read `naive_acceptance.md`'s yaml fresh at claim time, take the next free
-  ID, add your row + bump the yaml. Never renumber or rewrite another session's rows. If a ledger
-  file changed since your read, re-read and re-apply — anchored string edits only, never
-  line-number splicing (a bad splice once destroyed the ledger).
-- ID collisions still happen despite the protocol. Resolution: the id that is COMMITTED first
-  wins; the loser renumbers their own row to the next free id (this has been done before —
-  branch row "A179" became A184 at merge). Start every WORKLOG entry with its A-id so prepend
-  order never matters.
-- **Never run `npm run build` while another agent might be building or validating** — `dist/` is
-  what the live server serves; interleaved builds corrupt the production bundle. When another
-  session is active, prefer focused tests + typecheck and leave the full `validate:mvp` (which
-  builds) to the session landing last.
+- `TASKS.md` claims race too. Re-read it immediately before claiming or changing a task row; edit
+  by anchored text, not line-number splices. If the board changed under you, re-apply cleanly.
+- Never bypass the build lock. `npm run build` is lock-protected; `build:raw` is only for the
+  lock wrapper. If another build/validation is active, wait or run focused non-build checks.
 - Scratch ports can collide too: probe before binding (`Get-NetTCPConnection -LocalPort <p>`)
   or pick randomly within 5189–5199. Name temp scripts uniquely (`<task>-<something>.tmp.mjs`).
 - `data/` is runtime state, written by the live app at any moment (e.g. the daily index-reconcile
@@ -63,18 +85,31 @@ Treat every file and the git state as liable to change under you:
   pid-probed), Godel watcher (`../godel-news/watcher.lock.json`), and the server's pre-bind port
   probe (a second instance on an owned port exits cleanly — that's by design).
 
-## 3. Per-change ritual
+## 3. Per-task and merge rituals
 
-1. Map the change to an acceptance criterion: claim the next ID in `naive_acceptance.md`
-   (row + yaml bump).
+Section-agent ritual:
+
+1. Claim or confirm your `TASK-###` in `TASKS.md` from a fresh read. If the project section is
+   unclear, use `codebase.md` / `detailedcodebase.md` first, then narrow the task.
 2. Write/update tests — nearly every `server/*.ts` and `src/` logic module has a co-located
    `*.test.ts(x)`; match that. Display-only components are the usual exception.
-3. Validate: narrowest check first, then `npm run validate:mvp`
-   (= typecheck && lint && test && build). Lint is zero-tolerance and gated in CI
-   (windows-latest, push to main + PRs; CI runs typecheck/lint/test).
-4. Prepend the entry under `## Last Completed Change` in `WORKLOG.md`.
-   (Ignore WORKLOG's own yaml header — it drifts; `naive_acceptance.md` is the ID authority.)
-5. Commit only your files, with a clear message. Push only when the user asks.
+3. Validate with the narrowest meaningful proof first. Prefer focused tests + typecheck while other
+   agents are active; leave build/full `validate:mvp` to the final merge agent unless you know it is
+   safe to build.
+4. Update only your task row/note with files touched, validation proof, known risks, and merge notes.
+5. Commit only your files if asked to commit. Push only when the user asks.
+
+Final merge-agent ritual:
+
+1. Read `TASKS.md`, `WORKLOG.md` top, and `naive_acceptance.md` yaml fresh.
+2. Integrate finished task branches/worktrees without sweeping unrelated dirty files.
+3. Resolve duplicate task/acceptance wording, then run the agreed validation ladder. Use the full
+   `npm run validate:mvp` when the integrated change touches shipped behavior and no other build is
+   active.
+4. Claim the next free `A###` ID(s), update `naive_acceptance.md`, prepend `WORKLOG.md`, and add
+   compact proof to `naive_validation.md`.
+5. Commit only the integrated files; push only when the user asks. Use `npm run land -- --branch ...`
+   for the final push to `origin/main`; do not merge by checking out `main` in the live folder.
 
 ## 4. Run / verify
 
@@ -103,11 +138,15 @@ Treat every file and the git state as liable to change under you:
 | Doc | Read when |
 |---|---|
 | `codebase.md` (→ `detailedcodebase.md` for depth) | finding the right module — don't spelunk blind |
-| `WORKLOG.md` — top block only | every session: current state, recent changes |
-| `naive_acceptance.md` — yaml + recent rows | claiming an acceptance ID |
-| `naive_validation.md` | validation commands / latest evidence |
-| `PLAN-improvement-roadmap-2026-06-09.md` | picking up roadmap work (R2–R5 remain) |
+| `TASKS.md` | claiming section work, checking active worktrees/owners, leaving handoff notes |
+| `WORKLOG.md` — top block only | landed state and recent accepted changes |
+| `naive_acceptance.md` — yaml + recent rows | final merge/landing acceptance IDs |
+| `naive_validation.md` | validation commands and final proof summary |
+| `archive/PLAN-improvement-roadmap-2026-06-09.md` | historical roadmap snapshot; re-verify before using any item |
 | `DECISIONS.md` | before reversing an architecture decision |
 | `archive/`, `docs/` | history; point-in-time audits and shipped plans |
 
-Done means: validated per §3, ledger + WORKLOG updated, app still serves the user's live workflow.
+Done for a section agent means: task note updated, focused validation recorded, no unrelated files
+staged, and merge risks called out. Done for the final merge agent means: integrated validation
+passed, acceptance/worklog/validation ledgers updated, and the app still serves the user's live
+workflow.

@@ -8,13 +8,20 @@ npm run typecheck
 npm run build
 ```
 
-`npm run validate:mvp` runs typecheck, full Vitest, and build.
+`npm run validate:mvp` runs typecheck, lint (zero-tolerance), full Vitest, and build.
+
+## Task vs Final Proof
+
+Section agents record focused validation and known risks in `TASKS.md` for their `TASK-###`.
+This file is for final or broadly reusable proof after a merge/landing agent integrates one or more
+tasks and assigns the final `A###` acceptance ID. Do not paste every section-agent scratch run here.
 
 ## Local Targets
 
-- API/app server: `http://[::1]:5174`
-- Dev web server: `http://[::1]:5173`
-- Use `http://[::1]:5174` when another project owns `127.0.0.1:5174`.
+- Live app/API server: `http://127.0.0.1:5174` — the user's running instance; never kill or restart it during market hours.
+- Dev web server: `http://127.0.0.1:5173` (`npm run dev`; `/api` proxied to 5174).
+- For your own verification, serve a scratch port on `127.0.0.1` (use 5189-5199, never reuse 5174):
+  `$env:PORT="5189"; $env:RUBICON_LISTEN_HOST="127.0.0.1"; npx tsx server/index.ts` — build first if you need the client UI; kill the exact PID when done.
 
 ## Latest Validation - 2026-06-04 Canonical 5-Wide SPX Verticals
 
@@ -41,6 +48,10 @@ Proof:
 
 | ID | Focus | Result |
 |---|---|---|
+| A199 | Godel breaking-banner-only watcher | `node --check scripts\godel-news-scraper.mjs`; `npm run test -- scripts/godel-news-scraper.test.mjs server/godelLiveNews.test.ts` passed 13/13; prior section-agent full `npm run validate:mvp` passed with typecheck, lint, full tests, and locked build. |
+| A198 | Task-first multi-agent workflow docs | Active-doc drift sweep for stale "claim acceptance ID first" wording passed; `git diff --check` clean aside from existing CRLF warnings. Docs reconciled with A196 worktree/landing guardrails. |
+| A197 | Deprecated docs/archive cleanup | Docs/assets-only validation: active-doc drift checks for stale MiniOS docs, removed Godel bridge/capture/scrape paths, root QA artifacts, and archived references passed; `git diff --check` clean aside from existing CRLF warnings. No app tests/build run per docs-only scope. |
+| A196 | Multi-agent safety hardening | Focused guardrail tests passed 5 files / 29 tests: `server/selfUpdate.test.ts`, `src/components/AppUpdateButton.test.tsx`, `scripts/git-safety-core.test.mjs`, `scripts/build-lock.test.mjs`, `scripts/worktree-tools.test.mjs`. `npm run typecheck` passed. `npm run lint` passed. Full build intentionally not run outside the new lock workflow while concurrent-agent work remains active. |
 | A194 | Latest/app-version dirty-file parser fix | `npm run test -- server/selfUpdate.test.ts` passed 11/11; `npm run typecheck` passed; `npm run lint` passed; full `npm test` passed 91 files / 585 tests. Live non-restart check: `/api/health` stayed healthy on PID 22180. Direct patched-module probe preserved `WORKLOG.md`, exempted first-position `data/heatmap-classification-auto.json`, and blocked only `WORKLOG.md` + `server/selfUpdate.ts`; the running server will show corrected `/api/app-version` dirty names after the next safe restart. |
 | A192 | Rubicon logon autostart backup + midday live-feed recovery | Live `/api/health` stayed healthy on PID 22180 with one listener on `127.0.0.1:5174`; POSTed `/api/spx-live-bars/live/start`, `/api/spx-heatmap/live/start`, `/api/qqq-heatmap/live/start`, `/api/spread-speed/live/start`, and `/api/fpl-indicator/live/start` with all returning `running:true`; SPX bars wrote 221 bars at 13:10 ET, spread-speed wrote spot 7433.76 / 42 rows at 13:10 ET, and heatmap connected to TWS after SPX/QQQ Yahoo backfill. Created Startup-folder `Rubicon Server.lnk` -> `wscript.exe //B scripts\serve-headless.vbs`; invoking it while the server was already running left exactly one listener and logged the single-instance guard. Task Scheduler Operational history enable was attempted but failed with access denied (`wevtutil` exit 5). |
 | A181 | Full Daily Pull real-wrapper launch | Focused launcher test passed 22/22, including the new Windows smoke that waits for a fake sleeping PowerShell command and verifies UTF-8 log output; focused daily-sync tests passed 3 files / 34 tests; `npm run typecheck` passed; full `npm test` passed 90 files / 568 tests; `npm run build` passed with the existing chunk-size warning only; Rubicon headless server restarted and `/api/daily-sync/run` dry-run returned `ok: true` for target `2026-06-11`. |
@@ -81,7 +92,7 @@ Use the smallest relevant check:
 | Pure logic | Focused `npm run test -- path/to/test.ts` |
 | Type or cross-file app change | Focused tests + `npm run typecheck` |
 | Shipped frontend or CSS change | Focused tests if relevant + `npm run build` |
-| UI behavior/layout change | Browser smoke on `http://[::1]:5174` after tests/build |
+| UI behavior/layout change | Browser smoke on a `127.0.0.1` scratch port (5189-5199) after tests/build |
 | Importer/data contract change | Focused importer tests + API smoke for `/api/tracker` |
 
 ## Browser Smoke Checklist

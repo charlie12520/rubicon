@@ -2,18 +2,25 @@
 
 ```yaml
 current_phase: "Local MVP delivered + post-MVP hardening"
-current_acceptance_id: "A194"
+current_acceptance_id: "A199"
 core_loop_status: "GREEN"
 last_validation_result: "GREEN"
 same_blocker_count: 0
 blocked: false
 # Summary only - naive_acceptance.md yaml is the acceptance-ID authority (this header drifts):
-last_green_ids_summary: "A01-A12, A14-A19, A21-A194"
+last_green_ids_summary: "A01-A12, A14-A19, A21-A194, A196-A199"
 last_yellow_ids: []
 last_red_ids: []
 last_deferred_ids: ["A13", "A20"]
 last_blocker_signature: ""
 ```
+
+## Workflow Note
+
+`WORKLOG.md` is landed history, not the active multi-agent task board. Section agents should record
+claims, progress, focused validation, and merge notes in `TASKS.md`. The final merge agent updates
+this file only after integrating task branches/worktrees, resolving any duplicate `A###` IDs, and
+running the agreed validation.
 
 ## Current Objective
 
@@ -25,7 +32,7 @@ Trader opens Rubicon -> Morning shows the macro/live/model premarket brief -> Re
 
 - Framework: React + TypeScript + Vite
 - Package manager: npm
-- API: Express on port `5174` when available; the desktop launcher verifies `/api/health` reports `rubicon` and can use `http://[::1]:5174` when `127.0.0.1:5174` belongs to another project.
+- API: Express on port `5174`; the live desktop/server normally listens on `http://127.0.0.1:5174`.
 - Data layer: local CSV/JSON importer in `server/dataImporter.ts`
 - Database/local storage: AI STUFF trade archive plus app-local `data/wallet.json` and `data/review-notes.json`
 - Auth: none for local MVP
@@ -39,13 +46,25 @@ Trader opens Rubicon -> Morning shows the macro/live/model premarket brief -> Re
 
 ## Acceptance Progress Summary
 
-- Green: A01-A12, A14-A19, A21-A194
+- Green: A01-A12, A14-A19, A21-A194, A196-A199
 - Yellow: none
 - Red: none
 - Deferred: A13 separate admin view, A20 AI feature fallback
 - Blocked: none
 
 ## Last Completed Change
+
+- A199 - **Godel watcher is breaking-banner-only with a shell-health watchdog.** `scripts/godel-news-scraper.mjs` now polls every 3s and captures only the transient `div.truncate` time-pipe banner (`H:MM:SS AM/PM | headline`), with a page-side `MutationObserver` buffer so short flashes between polls are drained on the next tick. Red / `.fade-in-animation` ancestry is recorded as severity only; it is not a filter, preserving non-red flashes like the confirmed ADBE banner. Banner rows attach the local capture date to the time-of-day, handle midnight rollover, emit `source:"Godel Breaking"` with no ticker, append structured rows to `breaking.jsonl`, and dedupe by same-day headline hash so a persistent banner records once. Warm start now filters `news.jsonl` to prior `Godel Breaking` rows so old streaming-table/AAPL rows cannot repopulate Rubicon. The watchdog now treats banner absence as normal and keys health off the persistent Godel app shell (`tr[id*="streaming-table"]` count) or Cloudflare title, avoiding quiet-period relaunch loops. Added `scripts/godel-news-scraper.test.mjs` and a no-ticker `Godel Breaking` reader case in `server/godelLiveNews.test.ts`. Rollout: restarted only the Godel watcher (old lock PID 29540; new lock PID 60740), stopped only the matching Godel Edge profile PIDs, and did not restart 5174; the new watcher reset the non-login CF-stuck profile and logged `session up: Godel app loaded, news rows present`; `data/godel-live-news.json` is currently `{items:[]}` because no banner is visible, with no old AAPL rows. Validation: `node --check scripts\godel-news-scraper.mjs`; focused `npm run test -- scripts/godel-news-scraper.test.mjs server/godelLiveNews.test.ts` 13/13; full `npm run validate:mvp` passed (typecheck, lint, 92 test files / 590 tests, build; large-chunk warning only).
+
+- A198 - **Task-first multi-agent workflow documented.** Added `TASKS.md` as Rubicon's active section-agent board and rewrote the active Markdown guidance so section agents claim/update `TASK-###` rows while final merge agents assign `A###` acceptance IDs after integration. Updated AGENTS.md and CLAUDE.md first-reply rules, marked WORKLOG/naive_acceptance/naive_validation as final-history/final-proof docs, added D020 to DECISIONS.md, and refreshed README/codebase maps so agents discover the flow. Reconciled this with the already-landed A196 production-only worktree/landing guardrails: live checkout stays on main, repo-changing work uses sibling worktrees, landing uses the script, and builds stay lock-protected. Validation: active-doc drift sweep for stale "claim acceptance ID first" wording; `git diff --check` clean aside from existing CRLF warnings.
+
+- A197 - **Deprecated Markdown and root proof artifacts archived** (docs/assets-only; no source behavior touched). Moved `HEARTBEAT.md`, `GOAL.txt`, `GOAL-perf-safety-fixes.md`, and `PLAN-improvement-roadmap-2026-06-09.md` into `archive/` with historical notes pointing current startup work back to `AGENTS.md`, `codebase.md`, `WORKLOG.md`, `naive_acceptance.md`, and `naive_validation.md`. Moved root `qa-*.png` screenshots and `qa-server.*.log` files into `archive/artifacts/`; deleted the 2-byte `.tmp.patch` leftover. Refreshed active references: `codebase.md` no longer treats the perf-safety goal as an active outstanding-fixes doc, `README.md` QA Artifacts points to `archive/artifacts/`, and `AGENTS.md` names the improvement roadmap only as a historical archive snapshot. Validation: targeted `rg` drift checks found no active-root startup/reference references to nonexistent MiniOS docs or removed Godel bridge/capture/scrape paths; root artifact check returned clean for `qa-*.png`, `qa-server.*.log`, and `.tmp.patch`; `git diff --check` clean aside from pre-existing CRLF warnings. No app tests/build run per the cleanup plan.
+
+- A196 - **Multi-agent guardrails are now mechanical, not only advisory.** Bootstrap implementation lives on branch `agent/A196-multi-agent-safety` in sibling worktree `..\rubicon-worktrees\agent-A196-multi-agent-safety`, leaving the live checkout and concurrent dirty docs untouched. Added sibling worktree creation (`npm run worktree:create`), detached integration landing (`npm run land -- --branch ...`, with push only under `--push`), repo-local hook install (`npm run hooks:install`), hook checks for direct `main` commits/merges, duplicate/regressed acceptance IDs, and broad archive/source mixed commits, plus a shared build lock around `npm run build` (raw build moved to `build:raw`). `/api/app-version` now reports branch/main/remote short-hash status, `/api/app-update` refuses off-main, and the Latest button shows `Dev branch` with branch/HEAD/origin/ahead/behind/dirty detail. AGENTS.md/CLAUDE.md now document the post-A196 operating model: live folder on `main`, agents in sibling worktrees, one landing path to `origin/main`. Validation: focused guardrail tests 5 files / 29 tests passed; `npm run typecheck` passed; `npm run lint` passed. Full build not run outside the new lock workflow while concurrent-agent work remains active.
+
+
+
+
 
 - A194 - **Latest dirty-file names no longer lose their first character.** Root cause: the self-update git helper used `stdout.trim()`, which stripped the leading porcelain status space from the first unstaged row before `parseTrackedDirtyFiles()` sliced status columns (`WORKLOG.md` became `ORKLOG.md`; with the current dirty tree, live `/api/app-version` also showed `DECISIONS.md` as `ECISIONS.md`). Fix: `server/selfUpdate.ts` now normalizes git stdout by stripping trailing newlines only, preserving leading porcelain columns; `server/selfUpdate.test.ts` adds regressions for the first unstaged file, first-position runtime `data/...` exemption, and existing mixed staged/unstaged/untracked parsing. Validation: `npm run test -- server/selfUpdate.test.ts` 11/11; `npm run typecheck`; `npm run lint`; full `npm test` 91 files / 585 tests. Non-restart proof: `/api/health` stayed healthy on PID 22180; direct patched-module probe returned full `WORKLOG.md`, exempted `data/heatmap-classification-auto.json`, and blocked only real source/doc changes. No build or live restart during concurrent-agent/RTH work; live `/api/app-version` gets the corrected parser after the next safe server restart.
 

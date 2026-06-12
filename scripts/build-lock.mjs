@@ -16,7 +16,29 @@ export function defaultBuildLockPath(cwd = process.cwd(), env = process.env) {
 }
 
 export function npmCommandForPlatform(platform = process.platform) {
-  return platform === "win32" ? "npm.cmd" : "npm";
+  return platform === "win32" ? "npm" : "npm";
+}
+
+export function spawnSpecForCommand(command, args = [], { platform = process.platform, env = process.env, execPath = process.execPath } = {}) {
+  if (command === "npm" && platform === "win32" && env.npm_execpath) {
+    return {
+      command: execPath,
+      args: [env.npm_execpath, ...args],
+      shell: false,
+    };
+  }
+  if (command === "npm" && platform === "win32") {
+    return {
+      command: npmCommandForPlatform(platform),
+      args,
+      shell: true,
+    };
+  }
+  return {
+    command,
+    args,
+    shell: false,
+  };
 }
 
 export function isPidAlive(pid) {
@@ -100,12 +122,12 @@ export async function releaseBuildLock(lockPath = defaultBuildLockPath(), pid = 
 }
 
 export function runCommand(command, args, { cwd = process.cwd(), env = process.env, stdio = "inherit" } = {}) {
-  const actualCommand = command === "npm" ? npmCommandForPlatform() : command;
+  const spawnSpec = spawnSpecForCommand(command, args, { env });
   return new Promise((resolve, reject) => {
-    const child = spawn(actualCommand, args, {
+    const child = spawn(spawnSpec.command, spawnSpec.args, {
       cwd,
       env,
-      shell: false,
+      shell: spawnSpec.shell,
       stdio,
       windowsHide: true,
     });

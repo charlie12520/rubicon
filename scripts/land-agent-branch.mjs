@@ -2,6 +2,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSpecForCommand } from "./build-lock.mjs";
 import { defaultWorktreeRoot, directoryNameForBranch, timestampForPath } from "./worktree-tools.mjs";
 
 function usage() {
@@ -30,8 +31,12 @@ function git(args, options = {}) {
 }
 
 function run(command, args, options = {}) {
-  const actualCommand = command === "npm" && process.platform === "win32" ? "npm.cmd" : command;
-  const result = spawnSync(actualCommand, args, { stdio: "inherit", shell: false, windowsHide: true, ...options });
+  const env = options.env ?? process.env;
+  const spawnSpec = spawnSpecForCommand(command, args, { env });
+  const result = spawnSync(spawnSpec.command, spawnSpec.args, { stdio: "inherit", shell: spawnSpec.shell, windowsHide: true, ...options, env });
+  if (result.error) {
+    throw result.error;
+  }
   if (result.status !== 0) {
     throw new Error(`${command} ${args.join(" ")} exited with ${result.status ?? result.signal}`);
   }

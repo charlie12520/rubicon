@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { acquireBuildLock, defaultBuildLockPath, releaseBuildLock } from "./build-lock.mjs";
+import { acquireBuildLock, defaultBuildLockPath, releaseBuildLock, spawnSpecForCommand } from "./build-lock.mjs";
 
 describe("Rubicon build lock", () => {
   it("uses a shared AI STUFF lock for the live checkout and sibling worktrees", () => {
@@ -48,5 +48,19 @@ describe("Rubicon build lock", () => {
     expect(next).toMatchObject({ pid: 789, command: "npm", args: ["run", "build:raw"] });
     expect(await releaseBuildLock(lockPath, 789)).toBe(true);
     await rm(dir, { recursive: true, force: true });
+  });
+
+  it("spawns npm through node on Windows when npm exposes its cli path", () => {
+    expect(
+      spawnSpecForCommand("npm", ["run", "build:raw"], {
+        platform: "win32",
+        env: { npm_execpath: "C:\\node\\node_modules\\npm\\bin\\npm-cli.js" },
+        execPath: "C:\\node\\node.exe",
+      }),
+    ).toEqual({
+      command: "C:\\node\\node.exe",
+      args: ["C:\\node\\node_modules\\npm\\bin\\npm-cli.js", "run", "build:raw"],
+      shell: false,
+    });
   });
 });

@@ -66,6 +66,21 @@ describe("self-update guards", () => {
     expect(gate.reason).toContain("not on GitHub");
   });
 
+  it("refuses self-update when the live checkout is not on main", () => {
+    const gate = evaluateUpdateGate({
+      currentBranch: "agent/A196-multi-agent-safety",
+      isMainBranch: false,
+      aheadCount: 0,
+      behindCount: 2,
+      dirtyFiles: [],
+      marketHours: false,
+      force: true,
+    });
+    expect(gate.allowed).toBe(false);
+    expect(gate.reason).toContain("Dev branch: update blocked");
+    expect(gate.reason).toContain("agent/A196-multi-agent-safety");
+  });
+
   it("reports up to date when not behind", () => {
     const gate = evaluateUpdateGate({ aheadCount: 0, behindCount: 0, dirtyFiles: [], marketHours: false, force: false });
     expect(gate.allowed).toBe(false);

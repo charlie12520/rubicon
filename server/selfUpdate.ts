@@ -27,9 +27,13 @@ const MARKET_CLOSE_GUARD_HHMM = "16:05";
 export type AppVersionStatus = {
   ok: boolean;
   checkedAt: string;
+  currentBranch: string | null;
+  isMainBranch: boolean;
   localRev: string | null;
   localRevShort: string | null;
+  remoteBranch: string;
   remoteRev: string | null;
+  remoteRevShort: string | null;
   behindCount: number;
   aheadCount: number;
   dirtyFiles: string[];
@@ -101,6 +105,8 @@ export type UpdateGateDecision = {
 };
 
 export function evaluateUpdateGate(input: {
+  currentBranch?: string | null;
+  isMainBranch?: boolean;
   aheadCount: number;
   behindCount: number;
   dirtyFiles: string[];
@@ -114,6 +120,12 @@ export function evaluateUpdateGate(input: {
     return {
       allowed: false,
       reason: `A daily sync is running (${input.syncRunId}) — wait for it to finish before updating.`,
+    };
+  }
+  if (input.isMainBranch === false) {
+    return {
+      allowed: false,
+      reason: `Dev branch: update blocked on ${input.currentBranch || "detached HEAD"}. The live checkout must be on main before pulling origin/main.`,
     };
   }
   if (input.dirtyFiles.length > 0) {
@@ -186,21 +198,27 @@ async function appendUpdateLog(message: string): Promise<void> {
 export async function getAppVersionStatus({ refresh = true }: { refresh?: boolean } = {}): Promise<AppVersionStatus> {
   const checkedAt = new Date().toISOString();
   const clock = easternClock();
+  const remoteBranch = "origin/main";
   try {
     if (refresh) {
       await git(["fetch", "origin", "main", "--quiet"]);
     }
+    const currentBranch = (await git(["branch", "--show-current"])) || null;
     const localRev = await git(["rev-parse", "HEAD"]);
-    const remoteRev = await git(["rev-parse", "origin/main"]);
-    const behindCount = Number.parseInt(await git(["rev-list", "--count", "HEAD..origin/main"]), 10) || 0;
-    const aheadCount = Number.parseInt(await git(["rev-list", "--count", "origin/main..HEAD"]), 10) || 0;
+    const remoteRev = await git(["rev-parse", remoteBranch]);
+    const behindCount = Number.parseInt(await git(["rev-list", "--count", `HEAD..${remoteBranch}`]), 10) || 0;
+    const aheadCount = Number.parseInt(await git(["rev-list", "--count", `${remoteBranch}..HEAD`]), 10) || 0;
     const dirtyFiles = filterUpdateBlockingDirtyFiles(parseTrackedDirtyFiles(await git(["status", "--porcelain"])));
     return {
       ok: true,
       checkedAt,
+      currentBranch,
+      isMainBranch: currentBranch === "main",
       localRev,
       localRevShort: localRev.slice(0, 7),
+      remoteBranch,
       remoteRev,
+      remoteRevShort: remoteRev.slice(0, 7),
       behindCount,
       aheadCount,
       dirtyFiles,
@@ -212,9 +230,13 @@ export async function getAppVersionStatus({ refresh = true }: { refresh?: boolea
     return {
       ok: false,
       checkedAt,
+      currentBranch: null,
+      isMainBranch: false,
       localRev: null,
       localRevShort: null,
+      remoteBranch,
       remoteRev: null,
+      remoteRevShort: null,
       behindCount: 0,
       aheadCount: 0,
       dirtyFiles: [],
@@ -232,6 +254,8 @@ export async function runAppUpdate({ force = false }: { force?: boolean } = {}):
     return { ok: false, message: `Version check failed: ${status.error ?? "unknown error"}`, generatedAt };
   }
   const gate = evaluateUpdateGate({
+    currentBranch: status.currentBranch,
+    isMainBranch: status.isMainBranch,
     aheadCount: status.aheadCount,
     behindCount: status.behindCount,
     dirtyFiles: status.dirtyFiles,

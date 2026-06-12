@@ -7,6 +7,10 @@ Local-first morning-intelligence + SPX 0DTE trade tracker / replay cockpit (Reac
 @AGENTS.md
 @codebase.md
 
+First user-visible reply in every session/task must include an `A###` token. For repo-changing
+work, claim the next free acceptance ID first and open with it (for example, `A197 - ...`). For
+read-only status/questions where no new ID is claimed, report the current active ID as context.
+
 Then skim only the **top / current** portion of these (they are large — do NOT read end-to-end; use `rg` to jump to a specific acceptance ID, feature name, or blocker):
 
 - `WORKLOG.md` — current work state, recent changes, known blockers

@@ -9,6 +9,11 @@ Start every session: read this file, then `codebase.md` (repo map), then the TOP
 (current state) and the yaml header of `naive_acceptance.md` (current acceptance ID). Use `rg` to
 jump; never read the big logs end-to-end.
 
+This file is the SHARED rulebook for every agent runtime (Codex reads it natively; Claude imports
+it via CLAUDE.md). Shell on this machine is Windows PowerShell 5.1 — no `&&` chaining, no `??`;
+all recipes below are PS syntax. Durable repo knowledge belongs in these md files, never in any
+one runtime's private memory.
+
 ## 1. The working tree IS production
 
 The user's live app serves THIS folder. At logon, the "Rubicon Server" scheduled task runs
@@ -36,6 +41,16 @@ Treat every file and the git state as liable to change under you:
   ID, add your row + bump the yaml. Never renumber or rewrite another session's rows. If a ledger
   file changed since your read, re-read and re-apply — anchored string edits only, never
   line-number splicing (a bad splice once destroyed the ledger).
+- ID collisions still happen despite the protocol. Resolution: the id that is COMMITTED first
+  wins; the loser renumbers their own row to the next free id (this has been done before —
+  branch row "A179" became A184 at merge). Start every WORKLOG entry with its A-id so prepend
+  order never matters.
+- **Never run `npm run build` while another agent might be building or validating** — `dist/` is
+  what the live server serves; interleaved builds corrupt the production bundle. When another
+  session is active, prefer focused tests + typecheck and leave the full `validate:mvp` (which
+  builds) to the session landing last.
+- Scratch ports can collide too: probe before binding (`Get-NetTCPConnection -LocalPort <p>`)
+  or pick randomly within 5189–5199. Name temp scripts uniquely (`<task>-<something>.tmp.mjs`).
 - `data/` is runtime state, written by the live app at any moment (e.g. the daily index-reconcile
   rewrites the tracked `data/heatmap-classification-auto.json`). Never treat `data/` churn as a
   blocker or sweep it into commits; the self-update gate already ignores it (A183).

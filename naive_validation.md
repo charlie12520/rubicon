@@ -48,6 +48,7 @@ Proof:
 
 | ID | Focus | Result |
 |---|---|---|
+| A200 | Out-of-section edit notes | Docs-only check: `AGENTS.md`, `CLAUDE.md`, and `TASKS.md` now require path/reason/risk notes for cross-section edits; acceptance ledger duplicate check passed; `git diff --check` clean aside from line-ending warnings. |
 | A199 | Godel breaking-banner-only watcher | `node --check scripts\godel-news-scraper.mjs`; `npm run test -- scripts/godel-news-scraper.test.mjs server/godelLiveNews.test.ts` passed 13/13; prior section-agent full `npm run validate:mvp` passed with typecheck, lint, full tests, and locked build. |
 | A198 | Task-first multi-agent workflow docs | Active-doc drift sweep for stale "claim acceptance ID first" wording passed; `git diff --check` clean aside from existing CRLF warnings. Docs reconciled with A196 worktree/landing guardrails. |
 | A197 | Deprecated docs/archive cleanup | Docs/assets-only validation: active-doc drift checks for stale MiniOS docs, removed Godel bridge/capture/scrape paths, root QA artifacts, and archived references passed; `git diff --check` clean aside from existing CRLF warnings. No app tests/build run per docs-only scope. |

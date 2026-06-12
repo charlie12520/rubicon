@@ -2,9 +2,9 @@
 
 ```yaml
 core_loop_status: GREEN
-active_acceptance_id: A199
-green_count: 196
-green_id_summary: "A01-A12, A14-A19, A21-A194, A196-A199"
+active_acceptance_id: A200
+green_count: 197
+green_id_summary: "A01-A12, A14-A19, A21-A194, A196-A200"
 yellow_count: 0
 red_count: 0
 deferred_count: 2
@@ -29,6 +29,7 @@ blocked_count: 0
 
 | ID | Requirement | Status | Proof |
 |---|---|---:|---|
+| A200 | Multi-agent task workflow requires explicit notes for out-of-section edits so cross-section overlap is visible before final landing | GREEN | Tightened `AGENTS.md`, `CLAUDE.md`, and `TASKS.md`: section agents must record any file touched outside their claimed section with path, reason, and coordination risk; task templates now include `Out-of-section changes`; final merge agents must inspect those notes before landing and treat missing notes as a merge risk. Validation: docs-only drift/ledger checks and `git diff --check`. |
 | A199 | Godel watcher captures the transient time-pipe breaking banner only, with banner-safe dedup and app-shell watchdog | GREEN | `scripts/godel-news-scraper.mjs` now polls every 3s and captures only `div.truncate` text matching `H:MM:SS AM/PM | headline`; a page-side `MutationObserver` buffers fast flashes between polls; red/fade-in metadata is recorded as severity only and never gates capture. Banner rows attach the local capture date to the time-of-day, handle midnight rollover, emit `source:"Godel Breaking"` with no ticker, and dedupe by same-day headline hash so a persistent banner is recorded once. Warm start filters `news.jsonl` to prior `Godel Breaking` rows so old table/AAPL rows cannot repopulate Rubicon. Watchdog now keys off the persistent app shell (`tr[id*="streaming-table"]` count) or Cloudflare title, so quiet periods with zero banners do not relaunch. Rollout: restarted only the Godel watcher (old lock PID 29540; new lock PID 60740), stopped only the matching Godel Edge profile PIDs, and did not restart 5174; the new watcher reset the non-login CF-stuck profile and logged `session up: Godel app loaded, news rows present`; `data/godel-live-news.json` is currently `{items:[]}` because no banner is visible, with no old AAPL rows. Tests: `node --check scripts\godel-news-scraper.mjs`; `npm run test -- scripts/godel-news-scraper.test.mjs server/godelLiveNews.test.ts` (13/13); `npm run validate:mvp` passed: typecheck, lint, 92 files / 590 tests, build (large-chunk warning only). |
 | A198 | Rubicon active docs use a task-first multi-agent workflow so section agents claim `TASK-###` work while final merge agents assign `A###` acceptance IDs | GREEN | Added `TASKS.md` as the active multi-agent board; updated `AGENTS.md`, `CLAUDE.md`, `README.md`, `codebase.md`, `detailedcodebase.md`, `WORKLOG.md`, `naive_acceptance.md`, and `naive_validation.md` so task work records scope/owner/status/proof in `TASKS.md` and final merge agents update acceptance/worklog/validation only after integration. Added decision D020. Reconciled the wording with the already-landed A196 production-only worktree/landing guardrails. Validation: active-doc drift sweep for stale "claim acceptance ID first" wording; `git diff --check` clean aside from existing CRLF warnings. |
 | A197 | Deprecated Rubicon Markdown and root proof artifacts are archived so active startup/docs no longer point at stale MiniOS goals, superseded roadmaps, or root QA clutter | GREEN | Docs/assets-only cleanup: moved `HEARTBEAT.md`, `GOAL.txt`, `GOAL-perf-safety-fixes.md`, and `PLAN-improvement-roadmap-2026-06-09.md` to `archive/` with historical notes; moved root `qa-*.png` and `qa-server.*.log` proof artifacts to `archive/artifacts/`; deleted disposable `.tmp.patch`; refreshed active `AGENTS.md`, `codebase.md`, and `README.md` references. Drift checks: active startup/reference docs have no live references to nonexistent MiniOS docs, removed Godel bridge scripts/routes, or root QA artifacts; root cleanup check returned clean; `git diff --check` clean aside from existing CRLF warnings. No app tests/build run per docs-only plan. |

@@ -8,6 +8,7 @@ Active Rubicon multi-agent board. Use this for parallel section work; do not use
 - Refresh this file immediately before claiming or changing a task row.
 - One section agent owns one `TASK-###` at a time.
 - Section agents update task status, branch/worktree, touched files, validation proof, and merge notes here.
+- If you edit outside the claimed section, write the file path and reason here immediately.
 - Section agents do not claim new `A###` IDs and do not mark acceptance rows GREEN.
 - The final merge agent assigns `A###` IDs only after integrating finished tasks and running the agreed validation.
 - If a branch already contains a colliding `A###` row, the final merge agent renumbers or rewrites that row before landing it.
@@ -33,6 +34,7 @@ Active Rubicon multi-agent board. Use this for parallel section work; do not use
 | TASK-002 | Godel / Live Updates | Breaking-banner-only Godel watcher and reader test coverage | Branch `agent/A198-live-cleanup`; files `scripts/godel-news-scraper.mjs`, `scripts/godel-news-scraper.test.mjs`, `server/godelLiveNews.test.ts`, plus plan note | merged | Final merge agent renumbered the stale dirty A196 label to A199. |
 | TASK-003 | Docs / Archive | Archive deprecated root docs and QA artifacts; refresh active references | Branch `agent/A198-live-cleanup`; docs/archive moves | merged | Final merge agent kept this as A197. |
 | TASK-004 | Governance docs | Rewrite active Markdown copy for task-first section agents and final merge acceptance IDs | Branch `agent/A198-live-cleanup`; active docs + `TASKS.md` | merged | Final merge agent kept the user's A198 label and reconciled it with the already-landed A196 worktree/landing guardrails. |
+| TASK-005 | Governance docs | Require explicit notes for out-of-section edits in task handoffs | Branch `agent/A198-live-cleanup`; active docs + `TASKS.md` | merged | Landed as A200 so overlap risks are visible before final merge. |
 
 ## Section Routing
 
@@ -70,6 +72,7 @@ Status:
 Scope:
 Out of scope:
 Files touched:
+Out-of-section changes:
 Validation:
 Merge notes:
 Blockers:
@@ -81,8 +84,9 @@ The final merge agent should:
 
 1. Re-read `TASKS.md`, `WORKLOG.md` top, and `naive_acceptance.md` yaml.
 2. Inspect each `ready_for_merge` branch/worktree and confirm its focused validation.
-3. Merge or cherry-pick only intentional files.
-4. Resolve conflicts and duplicate/colliding `A###` wording.
-5. Run the validation ladder appropriate to the integrated diff.
-6. Assign final `A###` IDs, update `naive_acceptance.md`, prepend `WORKLOG.md`, and add compact proof to `naive_validation.md`.
-7. Mark integrated tasks `merged` with the final acceptance ID.
+3. Review `Out-of-section changes` before landing.
+4. Merge or cherry-pick only intentional files.
+5. Resolve conflicts and duplicate/colliding `A###` wording.
+6. Run the validation ladder appropriate to the integrated diff.
+7. Assign final `A###` IDs, update `naive_acceptance.md`, prepend `WORKLOG.md`, and add compact proof to `naive_validation.md`.
+8. Mark integrated tasks `merged` with the final acceptance ID.

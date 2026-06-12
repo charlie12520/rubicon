@@ -44,7 +44,8 @@ The default parallel workflow is:
    that task's scope.
 3. Section agents record progress, focused validation, risks, and handoff notes in `TASKS.md` or a
    linked task note. They do not mark `A###` rows GREEN and do not prepend `WORKLOG.md`.
-4. A final merge agent integrates the finished task branches/worktrees, resolves conflicts, runs the
+4. If you edit outside the claimed section, write the file path and reason in `TASKS.md` immediately.
+5. A final merge agent integrates the finished task branches/worktrees, resolves conflicts, runs the
    broader validation, then assigns the next free `A###` ID(s) in `naive_acceptance.md`, updates
    `WORKLOG.md` and `naive_validation.md`, and commits the integrated result.
 
@@ -97,6 +98,7 @@ Section-agent ritual:
    agents are active; leave build/full `validate:mvp` to the final merge agent unless you know it is
    safe to build.
 4. Update only your task row/note with files touched, validation proof, known risks, and merge notes.
+   Put any out-of-section edit under `Out-of-section changes`.
 5. Commit only your files if asked to commit. Push only when the user asks.
 
 Final merge-agent ritual:
@@ -106,9 +108,10 @@ Final merge-agent ritual:
 3. Resolve duplicate task/acceptance wording, then run the agreed validation ladder. Use the full
    `npm run validate:mvp` when the integrated change touches shipped behavior and no other build is
    active.
-4. Claim the next free `A###` ID(s), update `naive_acceptance.md`, prepend `WORKLOG.md`, and add
+4. Check each task's `Out-of-section changes` before landing it.
+5. Claim the next free `A###` ID(s), update `naive_acceptance.md`, prepend `WORKLOG.md`, and add
    compact proof to `naive_validation.md`.
-5. Commit only the integrated files; push only when the user asks. Use `npm run land -- --branch ...`
+6. Commit only the integrated files; push only when the user asks. Use `npm run land -- --branch ...`
    for the final push to `origin/main`; do not merge by checking out `main` in the live folder.
 
 ## 4. Run / verify

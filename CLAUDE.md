@@ -26,6 +26,7 @@ Then skim only the **top / current** portion of these (they are large — do NOT
   acceptance/worklog/validation ledgers.
 - **Add/update tests when behavior changes.** Every `server/*.ts` has a sibling `server/*.test.ts` and `src/` has `*.test.tsx` — match that pattern; don't land new modules untested.
 - **Do not append `WORKLOG.md` from a section task.** Leave task proof and merge notes in `TASKS.md`; the final merge agent writes the landed history.
+- **Always record out-of-section edits.** If you edit outside your claimed section, write the file path and reason in `TASKS.md` immediately.
 - **Validate before claiming done:** run the narrowest relevant check first, then `npm run typecheck && npm run test` (full gate: `npm run validate:mvp`).
 - Reuse the existing stack; prefer small, reviewable patches; preserve existing user changes; commit/push only when the user asks.
 - The app may be inspired by reference products but must not copy competitor branding, exact UI/CSS, icons, or wording.

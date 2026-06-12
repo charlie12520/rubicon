@@ -46,6 +46,9 @@ Trader opens Rubicon -> Morning shows the macro/live/model premarket brief -> Re
 
 ## Last Completed Change
 
+- A189 - **Godel watcher auto-starts at logon.** New scripts/godel-news-watcher.vbs (WMI SW_HIDE launch, serve-headless.vbs pattern) + Startup-folder shortcut (schtasks onlogon needs elevation; Startup folder doesn't). Scraper gains a pid-probed single-instance lock (logon fire + manual start can't fight over the profile - duplicate exits cleanly, proven by firing the .lnk while running) and self-logging to godel-news/watcher.log. Verified: launcher starts the watcher (session up 1.5s), exactly one node process survives a duplicate fire, log written by the scraper itself.
+
+
 - A188 - **Godel pipeline post-review hardening** (user: 'take a look at the code and see if it's fine'). Two-lens review (scraper internals + integration contract) produced 22 findings; all 5 bugs + the high-value risks fixed: warm-start order inversion (newest history was being evicted), LOGIN-mode 120s timeout closing the window mid-sign-in, --once relaunch-looping on failure, DOM bridge clobbering the scraper's capture file (bridge moved to data/godel-bridge-alerts.json), reader quarantine copy->move (was re-quarantining every 10s), ISO timestamps at the scraper (kills the 3-tz dependency; exact-instant contract test), staleness watchdog, guarded appends, FIFO-capped dedupe sets, elementFromPoint bottom-strip red-scan (was a full-DOM style scan every 5s), rename-with-retry, per-source floor of 8 in the 24-cap merge (firehose can't starve FirstSquawk), numeric filter scoped to bridge rows (wire earnings lines no longer dropped). Focused 31/31, full 589/589, typecheck+lint 0; watcher restarted on fixed code.
 
 

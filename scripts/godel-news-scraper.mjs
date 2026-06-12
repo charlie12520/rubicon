@@ -58,6 +58,9 @@ const LOGIN_MARKER = path.join(ROOT, "profile-logged-in.flag");
 const SEEN_CAP = 10_000;
 const SEEN_BREAKING_CAP = 500;
 
+const WATCHER_LOG = path.join(ROOT, "watcher.log");
+const WATCHER_LOCK = path.join(ROOT, "watcher.lock.json");
+
 fs.mkdirSync(PROFILE, { recursive: true });
 
 const seen = new Set();
@@ -71,8 +74,41 @@ function addCapped(set, value, cap) {
   }
 }
 
+// Console + file: the logon launcher (godel-news-watcher.vbs) starts node with
+// no console at all, so the file is the only place the log survives.
 function log(message) {
-  console.log(`[${new Date().toISOString()}] ${message}`);
+  const line = `[${new Date().toISOString()}] ${message}`;
+  console.log(line);
+  try {
+    fs.appendFileSync(WATCHER_LOG, `${line}\n`, "utf8");
+  } catch {
+    // logging must never kill the watcher
+  }
+}
+
+function pidIsAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Single-instance guard: a second watcher would fight the first over the Edge
+// profile ("profile already in use" relaunch loops). Stale locks (dead pid)
+// are taken over silently — e.g. after a reboot or a hard kill.
+function acquireSingleInstanceLock() {
+  try {
+    const lock = JSON.parse(fs.readFileSync(WATCHER_LOCK, "utf8"));
+    if (typeof lock.pid === "number" && lock.pid !== process.pid && pidIsAlive(lock.pid)) {
+      console.log(`another watcher is already running (pid ${lock.pid}) — exiting.`);
+      process.exit(0);
+    }
+  } catch {
+    // missing/corrupt lock — take it
+  }
+  fs.writeFileSync(WATCHER_LOCK, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }), "utf8");
 }
 
 function loadSeenFromDisk() {
@@ -366,6 +402,13 @@ async function launchSession() {
   }
 }
 
+acquireSingleInstanceLock();
+// fresh log per run — this file describes the CURRENT watcher only
+try {
+  fs.writeFileSync(WATCHER_LOG, "", "utf8");
+} catch {
+  // non-fatal
+}
 loadSeenFromDisk();
 
 let stopping = false;

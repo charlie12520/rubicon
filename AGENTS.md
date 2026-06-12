@@ -9,6 +9,11 @@ Start every session: read this file, then `codebase.md` (repo map), then the TOP
 (current state) and the yaml header of `naive_acceptance.md` (current acceptance ID). Use `rg` to
 jump; never read the big logs end-to-end.
 
+First user-visible reply in a session/task must include an `A###` token. For repo-changing work,
+claim the next free acceptance ID first and open with it (for example, `A196 - ...`). For read-only
+status/questions where no new ID is claimed, report the current active ID as context (for example,
+`A195 context - ...`). This keeps cross-agent transcripts tied to the ledger from the first message.
+
 This file is the SHARED rulebook for every agent runtime (Codex reads it natively; Claude imports
 it via CLAUDE.md). Shell on this machine is Windows PowerShell 5.1 — no `&&` chaining, no `??`;
 all recipes below are PS syntax. Durable repo knowledge belongs in these md files, never in any

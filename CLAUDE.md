@@ -20,7 +20,8 @@ Then skim only the **top / current** portion of these (they are large — do NOT
 - **Update `WORKLOG.md`** after each meaningful change.
 - **Validate before claiming done:** run the narrowest relevant check first, then `npm run typecheck && npm run test` (full gate: `npm run validate:mvp`).
 - Reuse the existing stack; prefer small, reviewable patches; preserve existing user changes; commit/push only when the user asks.
-- Before changing public UI, copy, naming, or positioning, read `COMPETITOR_BOUNDARIES.md` — the app may be inspired by reference products but must not copy competitor branding, exact UI/CSS, icons, or wording.
+- The app may be inspired by reference products but must not copy competitor branding, exact UI/CSS, icons, or wording.
+- **Concurrency:** Codex and Claude agents often run here simultaneously — follow AGENTS.md §2 (branch-check before commit, claim acceptance IDs from a fresh read, stage only your own files, never sweep up others' uncommitted work).
 
 ## Run / verify
 

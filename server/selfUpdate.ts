@@ -156,9 +156,13 @@ export function buildRelauncherArgs(pid: number, taskName = RELAUNCH_TASK_NAME):
   return ["-NoProfile", "-WindowStyle", "Hidden", "-Command", script];
 }
 
+export function normalizeGitStdout(stdout: string): string {
+  return stdout.replace(/[\r\n]+$/, "");
+}
+
 async function git(args: string[]): Promise<string> {
   const { stdout } = await execFileAsync("git", args, { cwd: APP_ROOT, timeout: 60_000, maxBuffer: 4 * 1024 * 1024 });
-  return stdout.trim();
+  return normalizeGitStdout(stdout);
 }
 
 async function npmStep(label: string, command: string, timeoutMs: number): Promise<void> {

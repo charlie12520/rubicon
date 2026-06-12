@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildRelauncherArgs, evaluateUpdateGate, filterUpdateBlockingDirtyFiles, isMarketHoursEt, parseTrackedDirtyFiles } from "./selfUpdate.ts";
+import { buildRelauncherArgs, evaluateUpdateGate, filterUpdateBlockingDirtyFiles, isMarketHoursEt, normalizeGitStdout, parseTrackedDirtyFiles } from "./selfUpdate.ts";
 
 describe("self-update guards", () => {
   it("counts tracked modifications but ignores untracked files", () => {
@@ -14,6 +14,27 @@ describe("self-update guards", () => {
     expect(parseTrackedDirtyFiles(porcelain)).toEqual(["server/dailySync.ts", "naive_acceptance.md", "src/newFile.ts"]);
     expect(parseTrackedDirtyFiles("?? scratch.txt\n")).toEqual([]);
     expect(parseTrackedDirtyFiles("")).toEqual([]);
+  });
+
+  it("preserves the first unstaged filename after git stdout normalization", () => {
+    const porcelain = normalizeGitStdout([
+      " M WORKLOG.md",
+      " M server/selfUpdate.ts",
+      "?? scratch.txt",
+      "",
+    ].join("\n"));
+
+    expect(parseTrackedDirtyFiles(porcelain)).toEqual(["WORKLOG.md", "server/selfUpdate.ts"]);
+  });
+
+  it("keeps the first runtime data file exempt after git stdout normalization", () => {
+    const porcelain = normalizeGitStdout([
+      " M data/heatmap-classification-auto.json",
+      " M server/selfUpdate.ts",
+      "",
+    ].join("\n"));
+
+    expect(filterUpdateBlockingDirtyFiles(parseTrackedDirtyFiles(porcelain))).toEqual(["server/selfUpdate.ts"]);
   });
 
   it("flags weekday market hours including the open/close guard bands", () => {

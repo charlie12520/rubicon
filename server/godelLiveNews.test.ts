@@ -127,6 +127,33 @@ describe("Godel live news ingestion", () => {
     expect(updates.every((u) => u.source === "Godel")).toBe(true);
   });
 
+  it("normalizes banner-only Godel Breaking captures without a ticker", () => {
+    const updates = parseGodelLiveNews(
+      JSON.stringify({
+        generatedAt: "2026-06-12T17:45:00.000Z",
+        items: [
+          {
+            id: "breaking-2026-06-12-e7f0d5c0a4f3b9aa",
+            headline: "ADOBE (ADBE.O) SHARES FELL 10%, HITTING THEIR LOWEST LEVEL SINCE 2018.",
+            time: "2026-06-12T17:43:18.000Z",
+            source: "Godel Breaking",
+          },
+        ],
+      }),
+      "data/godel-live-news.json",
+    );
+
+    expect(updates).toHaveLength(1);
+    expect(updates[0]).toMatchObject({
+      author: "Godel Breaking",
+      id: "godel-breaking-2026-06-12-e7f0d5c0a4f3b9aa",
+      publishedAt: "2026-06-12T17:43:18.000Z",
+      source: "Godel",
+      text: "ADOBE (ADBE.O) SHARES FELL 10%, HITTING THEIR LOWEST LEVEL SINCE 2018.",
+      timeLabel: "1:43 PM",
+    });
+  });
+
   it("still accepts a legacy local-naive time stamp without crashing", () => {
     // transition safety: captures written before the ISO change carry
     // "M/D/YY H:M:S"; the parsed instant depends on the server's local tz, so

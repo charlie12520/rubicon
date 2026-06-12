@@ -45,6 +45,24 @@ describe("git safety checks", () => {
     expect(checkStagedChangeMix(status).problems.join("\n")).toContain("Split these commits");
   });
 
+  it("allows landing integrations to merge full validated stacks", () => {
+    const status = [
+      "R100\tACCEPTANCE_CRITERIA.md\tarchive/ACCEPTANCE_CRITERIA.md",
+      "R100\tVALIDATION.md\tarchive/VALIDATION.md",
+      "R100\tCOMPLETION_AUDIT.md\tarchive/COMPLETION_AUDIT.md",
+      "M\tserver/selfUpdate.ts",
+    ].join("\n");
+
+    expect(
+      runGitSafetyChecks({
+        branch: "",
+        nameStatusText: status,
+        stagedAcceptanceContent: ledger("A196", ["A196"]),
+        env: { RUBICON_LANDING_OVERRIDE: "1" },
+      }),
+    ).toEqual([]);
+  });
+
   it("allows pure archive rotations and focused source commits", () => {
     expect(checkStagedChangeMix("R100\tVALIDATION.md\tarchive/VALIDATION.md").problems).toEqual([]);
     expect(checkStagedChangeMix("M\tserver/selfUpdate.ts\nM\tsrc/App.tsx").problems).toEqual([]);

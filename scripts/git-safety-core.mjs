@@ -109,9 +109,10 @@ export function checkBranchGuard({ branch, env = process.env }) {
 }
 
 export function runGitSafetyChecks({ branch, nameStatusText, stagedAcceptanceContent = null, headAcceptanceContent = null, env = process.env }) {
+  const isLandingIntegration = env.RUBICON_LANDING_OVERRIDE === "1";
   const problems = [
     ...checkBranchGuard({ branch, env }),
-    ...checkStagedChangeMix(nameStatusText).problems,
+    ...(isLandingIntegration ? [] : checkStagedChangeMix(nameStatusText).problems),
   ];
 
   if (stagedAcceptanceContent !== null) {

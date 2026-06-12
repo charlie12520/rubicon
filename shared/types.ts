@@ -668,6 +668,18 @@ export type MorningCompanyProfile = {
   updatedAt?: string;
 };
 
+export type MorningTc2000SourceFreshnessStatus = "fresh" | "partial-stale" | "stale" | "unknown";
+
+export type MorningTc2000SourceDetail = {
+  path: string;
+  updatedAt?: string;
+  fresh?: boolean | null;
+  rowCount?: number;
+  keptCount?: number;
+  rejectedCount?: number;
+  screenNames?: string[];
+};
+
 export type MorningTc2000Screener = {
   name: string;
   symbols: string[];
@@ -692,6 +704,9 @@ export type MorningTc2000Pulls = {
   dailyBarsGeneratedAt: string | null;
   dailyBarsSource: string | null;
   dailyBarsNote?: string;
+  dailyBarsScreenerFreshnessStatus?: MorningTc2000SourceFreshnessStatus;
+  dailyBarsSourceDetails?: MorningTc2000SourceDetail[];
+  dailyBarsStaleSourceCount?: number;
   profiles: Record<string, MorningCompanyProfile>;
   artifacts: MorningTc2000Artifact[];
   note: string;
@@ -713,25 +728,6 @@ export type MorningLiveUpdatesPayload = {
   generatedAt: string;
   liveUpdates: MorningLiveUpdate[];
   sources: MorningBriefSource[];
-};
-
-export type GodelAlertBridgeStatus = {
-  bookmarkletUrl: string;
-  generatedAt: string;
-  lastAlert: {
-    headline?: string;
-    publishedAt?: string | null;
-    sourceUrl?: string | null;
-  } | null;
-  lastRejected: {
-    at?: string;
-    reason?: string;
-    text?: string;
-  } | null;
-  message: string;
-  mode: "dom-bridge";
-  setupUrl: string;
-  validCount: number;
 };
 
 export type MorningAiNotesBlock = {

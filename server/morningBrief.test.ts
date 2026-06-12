@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  isValidGodelLiveUpdate,
   loadMorningBrief,
   loadMorningLiveUpdates,
   loadTc2000Pulls,
@@ -14,7 +15,53 @@ import {
   readCachedLiveUpdatesForBrief,
   resetMorningLiveUpdateCacheForTests,
   morningBriefStatePath,
+  sortLiveUpdates,
 } from "./morningBrief.ts";
+import type { MorningLiveUpdate } from "../shared/types.ts";
+
+function liveUpdate(overrides: Partial<MorningLiveUpdate>): MorningLiveUpdate {
+  return {
+    id: "u1",
+    source: "FirstSquawk",
+    text: "Some market headline",
+    timeLabel: "9:31 AM",
+    publishedAt: "2026-06-11T13:31:00.000Z",
+    ...overrides,
+  } as MorningLiveUpdate;
+}
+
+describe("live update merge policy", () => {
+  it("guarantees a per-source floor so a firehose cannot starve the other source", () => {
+    // 30 Godel items all NEWER than 10 FirstSquawk items
+    const godel = Array.from({ length: 30 }, (_, i) =>
+      liveUpdate({ id: `g${i}`, source: "Godel", publishedAt: `2026-06-11T18:${String(i).padStart(2, "0")}:00.000Z` }));
+    const squawk = Array.from({ length: 10 }, (_, i) =>
+      liveUpdate({ id: `f${i}`, source: "FirstSquawk", publishedAt: `2026-06-11T12:${String(i).padStart(2, "0")}:00.000Z` }));
+
+    const merged = sortLiveUpdates([...godel, ...squawk]);
+
+    expect(merged).toHaveLength(24);
+    expect(merged.filter((item) => item.source === "FirstSquawk")).toHaveLength(8);
+    expect(merged.filter((item) => item.source === "Godel")).toHaveLength(16);
+    // still globally time-desc
+    const times = merged.map((item) => new Date(item.publishedAt ?? 0).getTime());
+    expect([...times].sort((a, b) => b - a)).toEqual(times);
+  });
+
+  it("keeps plain newest-first behavior for a single source or small lists", () => {
+    const items = Array.from({ length: 5 }, (_, i) =>
+      liveUpdate({ id: `g${i}`, source: "Godel", publishedAt: `2026-06-11T18:0${i}:00.000Z` }));
+    expect(sortLiveUpdates(items).map((item) => item.id)).toEqual(["g4", "g3", "g2", "g1", "g0"]);
+  });
+
+  it("exempts wire-attributed Godel rows from the mostly-numeric bridge filter", () => {
+    const denseEarnings = "EPS 2.31 vs 2.05 est; Rev 4.5B vs 4.3B est; Q3 guide 4.8B-5.1B vs 4.7B; buyback 10B; div 0.25";
+    expect(isValidGodelLiveUpdate(liveUpdate({ source: "Godel", author: "Benzinga Lightning Feed", text: denseEarnings }))).toBe(true);
+    // bridge-origin (or unattributed) numeric garbage still drops
+    expect(isValidGodelLiveUpdate(liveUpdate({ source: "Godel", author: "Godel red alert", text: "7400 7405 7410 7415 7420 7425 7430 12 15 18 22 25 28 31 35 38 41" }))).toBe(false);
+    expect(isValidGodelLiveUpdate(liveUpdate({ source: "Godel", author: "Godel DOM bridge", text: "anything at all" }))).toBe(false);
+  });
+});
 
 describe("morning brief parsers", () => {
   it("loads saved Morning state for normal app reads without pulling live sources", async () => {
@@ -121,6 +168,55 @@ describe("morning brief parsers", () => {
       expect(loaded.tc2000.screeners[0].newSymbols).toEqual(["UIS"]);
     } finally {
       restoreEnv("RUBICON_MORNING_BRIEF_STATE_DIR", originalStateDir);
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("carries stale TC2000 screener source metadata into Morning pulls", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "rubicon-morning-tc2000-stale-"));
+    const appRoot = path.join(tempDir, "app");
+    const exportRoot = path.join(tempDir, "IBKR Equity History Pull", "data", "tc2000_exports");
+    await fs.mkdir(path.join(appRoot, "data"), { recursive: true });
+    await fs.mkdir(exportRoot, { recursive: true });
+    const exportPath = path.join(exportRoot, "qullamaggie_latest.csv");
+    await fs.writeFile(exportPath, "symbol,screen\nUIS,Three Bar Rule Spike\n", "utf8");
+    await fs.writeFile(
+      path.join(appRoot, "data", "tc2000-daily-bars.json"),
+      JSON.stringify(
+        {
+          barsBySymbol: {
+            UIS: [{ close: 20, date: "2026-06-01", high: 21, low: 19, open: 20, volume: 1000 }],
+          },
+          generatedAt: "2026-06-02T12:00:00.000Z",
+          note: "Daily bars available for 1 / 1 TC2000 symbols. TC2000 screener sources are stale.",
+          screenerFreshnessStatus: "stale",
+          source: "cache",
+          sourceDetails: [
+            {
+              fresh: false,
+              keptCount: 1,
+              path: exportPath,
+              rowCount: 1,
+              updatedAt: "2026-06-01T12:00:00.000Z",
+            },
+          ],
+          staleSourceCount: 1,
+          symbols: ["UIS"],
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    try {
+      const pulls = await loadTc2000Pulls(appRoot);
+
+      expect(pulls.dailyBarsScreenerFreshnessStatus).toBe("stale");
+      expect(pulls.dailyBarsStaleSourceCount).toBe(1);
+      expect(pulls.dailyBarsSourceDetails?.[0]).toMatchObject({ fresh: false, keptCount: 1, path: exportPath });
+      expect(pulls.note).toContain("TC2000 scanner CSV sources are stale");
+    } finally {
       await fs.rm(tempDir, { recursive: true, force: true });
     }
   });

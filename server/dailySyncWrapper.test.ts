@@ -3,6 +3,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 const WRAPPER_PATH = path.resolve(process.cwd(), "..", "IBKR Equity History Pull", "run_daily_spx_ibkr_sync_with_sheet_payload.ps1");
+const TC2000_CONTROL_PATH = path.resolve(process.cwd(), "..", "scripts", "tc2000_control_panel.ps1");
 
 function readWrapper(): string {
   return fs.readFileSync(WRAPPER_PATH, "utf8");
@@ -69,5 +70,33 @@ describe.skipIf(!fs.existsSync(WRAPPER_PATH))("daily sync PowerShell wrapper", (
     expect(wrapper.slice(stepIndex, commandIndex)).toContain('$HistoryWindowMode = if ($Config.Scope -eq "spx-spread-legs") { "chunk-first" } else { "full-first" }');
     expect(wrapper.slice(stepIndex, commandIndex)).toContain('"--option-request-timeout-s", "25"');
     expect(commandIndex).toBeGreaterThan(stepIndex);
+  });
+
+  it("passes TC2000 export freshness into the daily-bars refresh", () => {
+    const wrapper = readWrapper();
+    const barsIndex = wrapper.indexOf("$DailyBarsArgs = @(");
+
+    expect(barsIndex).toBeGreaterThanOrEqual(0);
+    expect(wrapper.slice(barsIndex, barsIndex + 500)).toContain("--fresh-after");
+    expect(wrapper.slice(barsIndex, barsIndex + 500)).toContain("$Tc2000ExportStartedAt.ToUniversalTime().ToString(\"o\")");
+    expect(wrapper.slice(barsIndex, barsIndex + 500)).toContain("--require-fresh-sources");
+    expect(wrapper).toContain("TC2000 daily-bar refresh completed with scanner freshness warnings");
+  });
+});
+
+describe.skipIf(!fs.existsSync(TC2000_CONTROL_PATH))("TC2000 control panel PowerShell script", () => {
+  it("dismisses known blocking prompts before OCR and retries prompt failures", () => {
+    const script = fs.readFileSync(TC2000_CONTROL_PATH, "utf8");
+    const exportIndex = script.indexOf("function Export-Tc2000WindowSymbols");
+    const preCaptureDismissIndex = script.indexOf("Dismiss-Tc2000KnownPrompt", exportIndex);
+    const snapshotIndex = script.indexOf("Save-Tc2000Snapshot", exportIndex);
+    const promptRetryIndex = script.indexOf("$exitCode -eq 4", exportIndex);
+
+    expect(script).toContain("function Find-Tc2000BlockingPrompt");
+    expect(script).toContain("Open Postmarket Watchlist");
+    expect(preCaptureDismissIndex).toBeGreaterThan(exportIndex);
+    expect(snapshotIndex).toBeGreaterThan(preCaptureDismissIndex);
+    expect(promptRetryIndex).toBeGreaterThan(snapshotIndex);
+    expect(script).toContain("-DismissKnownPrompts:(-not $NoPromptDismiss)");
   });
 });

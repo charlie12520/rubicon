@@ -16,6 +16,8 @@ import type {
   MorningTc2000ArtifactKind,
   MorningTc2000Pulls,
   MorningTc2000Screener,
+  MorningTc2000SourceDetail,
+  MorningTc2000SourceFreshnessStatus,
 } from "../shared/types.ts";
 import { readGodelLiveNewsSource } from "./godelLiveNews.ts";
 import { writeJsonAtomic } from "./jsonStore.ts";
@@ -1053,9 +1055,12 @@ async function loadTc2000ExportScreeners(appRoot: string): Promise<MorningTc2000
 
 async function loadTc2000DailyBars(appRoot: string): Promise<{
   bars: Record<string, MorningDailyBar[]>;
+  freshnessStatus?: MorningTc2000SourceFreshnessStatus;
   generatedAt: string | null;
   profiles: Record<string, MorningCompanyProfile>;
   source: string | null;
+  sourceDetails?: MorningTc2000SourceDetail[];
+  staleSourceCount?: number;
   note?: string;
 }> {
   const filePath = path.join(appRoot, "data", "tc2000-daily-bars.json");
@@ -1067,7 +1072,10 @@ async function loadTc2000DailyBars(appRoot: string): Promise<{
       note?: unknown;
       profiles?: unknown;
       profilesBySymbol?: unknown;
+      screenerFreshnessStatus?: unknown;
       source?: unknown;
+      sourceDetails?: unknown;
+      staleSourceCount?: unknown;
     };
     const rawBars = parsed.barsBySymbol ?? parsed.dailyBars;
     const bars: Record<string, MorningDailyBar[]> = {};
@@ -1097,20 +1105,64 @@ async function loadTc2000DailyBars(appRoot: string): Promise<{
     }
     return {
       bars,
+      freshnessStatus: sanitizeTc2000FreshnessStatus(parsed.screenerFreshnessStatus),
       generatedAt: typeof parsed.generatedAt === "string" ? parsed.generatedAt : null,
       profiles,
       source: typeof parsed.source === "string" ? parsed.source : filePath,
+      sourceDetails: sanitizeTc2000SourceDetails(parsed.sourceDetails),
+      staleSourceCount: finiteNumber(parsed.staleSourceCount) ?? undefined,
       note: typeof parsed.note === "string" ? parsed.note : undefined,
     };
   } catch {
     return {
       bars: {},
+      freshnessStatus: undefined,
       generatedAt: null,
       profiles: {},
       source: null,
       note: "Chart preview cache pending.",
     };
   }
+}
+
+function sanitizeTc2000FreshnessStatus(value: unknown): MorningTc2000SourceFreshnessStatus | undefined {
+  return value === "fresh" || value === "partial-stale" || value === "stale" || value === "unknown" ? value : undefined;
+}
+
+function sanitizeTc2000SourceDetails(value: unknown): MorningTc2000SourceDetail[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const details = value
+    .map((item): MorningTc2000SourceDetail | null => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) {
+        return null;
+      }
+      const record = item as Record<string, unknown>;
+      const pathValue = typeof record.path === "string" ? record.path : "";
+      if (!pathValue) {
+        return null;
+      }
+      const detail: MorningTc2000SourceDetail = { path: pathValue };
+      if (typeof record.updatedAt === "string") {
+        detail.updatedAt = record.updatedAt;
+      }
+      if (typeof record.fresh === "boolean" || record.fresh === null) {
+        detail.fresh = record.fresh;
+      }
+      for (const key of ["rowCount", "keptCount", "rejectedCount"] as const) {
+        const number = finiteNumber(record[key]);
+        if (number !== null) {
+          detail[key] = number;
+        }
+      }
+      if (Array.isArray(record.screenNames)) {
+        detail.screenNames = record.screenNames.filter((name): name is string => typeof name === "string" && name.trim().length > 0);
+      }
+      return detail;
+    })
+    .filter((item): item is MorningTc2000SourceDetail => item !== null);
+  return details.length ? details : undefined;
 }
 
 function sanitizeCompanyProfile(value: unknown): MorningCompanyProfile | null {
@@ -1149,6 +1201,20 @@ function sanitizeDailyBar(value: unknown): MorningDailyBar | null {
     open,
     volume: finiteNumber(record.volume),
   };
+}
+
+function tc2000FreshnessNote(
+  status: MorningTc2000SourceFreshnessStatus | undefined,
+  staleSourceCount?: number,
+  sourceCount?: number,
+): string {
+  if (status !== "stale" && status !== "partial-stale") {
+    return "";
+  }
+  const countText = typeof staleSourceCount === "number" && typeof sourceCount === "number"
+    ? ` (${staleSourceCount}/${sourceCount} stale CSV source${sourceCount === 1 ? "" : "s"})`
+    : "";
+  return ` TC2000 scanner CSV sources are ${status}${countText}.`;
 }
 
 function finiteNumber(value: unknown): number | null {
@@ -1231,6 +1297,11 @@ export async function loadTc2000Pulls(appRoot = defaultAppRoot): Promise<Morning
   ]);
   if (!sourceDir) {
     const symbols = uniqueSymbols(csvScreeners.flatMap((screener) => screener.symbols));
+    const freshnessNote = tc2000FreshnessNote(
+      dailyBarsSnapshot.freshnessStatus,
+      dailyBarsSnapshot.staleSourceCount,
+      dailyBarsSnapshot.sourceDetails?.length,
+    );
     return {
       available: csvScreeners.length > 0,
       sourceDir: null,
@@ -1240,11 +1311,14 @@ export async function loadTc2000Pulls(appRoot = defaultAppRoot): Promise<Morning
       dailyBarsGeneratedAt: dailyBarsSnapshot.generatedAt,
       dailyBarsSource: dailyBarsSnapshot.source,
       dailyBarsNote: dailyBarsSnapshot.note,
+      dailyBarsScreenerFreshnessStatus: dailyBarsSnapshot.freshnessStatus,
+      dailyBarsSourceDetails: dailyBarsSnapshot.sourceDetails,
+      dailyBarsStaleSourceCount: dailyBarsSnapshot.staleSourceCount,
       profiles: dailyBarsSnapshot.profiles,
       artifacts: [],
       note: csvScreeners.length
-        ? `Loaded ${csvScreeners.length} TC2000 scanner export${csvScreeners.length === 1 ? "" : "s"}; no analysis snapshot directory was found.`
-        : "No TC2000 pull directory was found under AI STUFF/analysis.",
+        ? `Loaded ${csvScreeners.length} TC2000 scanner export${csvScreeners.length === 1 ? "" : "s"}; no analysis snapshot directory was found.${freshnessNote}`
+        : `No TC2000 pull directory was found under AI STUFF/analysis.${freshnessNote}`,
     };
   }
 
@@ -1307,6 +1381,11 @@ export async function loadTc2000Pulls(appRoot = defaultAppRoot): Promise<Morning
     artifact.name === latestOcr?.name ? { ...artifact, symbols } : artifact,
   );
   const dailyBarsNote = dailyBarsSnapshot.note;
+  const freshnessNote = tc2000FreshnessNote(
+    dailyBarsSnapshot.freshnessStatus,
+    dailyBarsSnapshot.staleSourceCount,
+    dailyBarsSnapshot.sourceDetails?.length,
+  );
 
   return {
     available: true,
@@ -1320,13 +1399,16 @@ export async function loadTc2000Pulls(appRoot = defaultAppRoot): Promise<Morning
     dailyBarsGeneratedAt: dailyBarsSnapshot.generatedAt,
     dailyBarsSource: dailyBarsSnapshot.source,
     dailyBarsNote,
+    dailyBarsScreenerFreshnessStatus: dailyBarsSnapshot.freshnessStatus,
+    dailyBarsSourceDetails: dailyBarsSnapshot.sourceDetails,
+    dailyBarsStaleSourceCount: dailyBarsSnapshot.staleSourceCount,
     profiles: dailyBarsSnapshot.profiles,
     artifacts: enrichedArtifacts.slice(0, 12),
     note: screeners.length
-      ? `Loaded TC2000 scanner list${screeners.length === 1 ? "" : "s"}.`
+      ? `Loaded TC2000 scanner list${screeners.length === 1 ? "" : "s"}.${freshnessNote}`
       : symbols.length
-        ? "Latest OCR pull found visible symbols."
-        : "Latest TC2000 artifacts are present, but no OCR symbol list was found.",
+        ? `Latest OCR pull found visible symbols.${freshnessNote}`
+        : `Latest TC2000 artifacts are present, but no OCR symbol list was found.${freshnessNote}`,
   };
 }
 
@@ -1378,13 +1460,16 @@ async function buildLiveMorningBrief(date: string, appRoot = defaultAppRoot): Pr
   const economicEvents = sortCalendarEvents(macro.dailyItems);
   const trumpEvents = sortCalendarEvents(rollcall.items);
   const combinedEvents = sortCalendarEvents([...economicEvents, ...trumpEvents]);
+  const tc2000HasStaleScreeners =
+    tc2000.dailyBarsScreenerFreshnessStatus === "stale" ||
+    tc2000.dailyBarsScreenerFreshnessStatus === "partial-stale";
   const sources: MorningBriefSource[] = [
     ...macro.sources,
     rollcall.source,
     ...liveCache.sources,
     sourceStatus(
       "TC2000 pulls",
-      tc2000.available ? "ok" : "warning",
+      tc2000.available && !tc2000HasStaleScreeners ? "ok" : "warning",
       tc2000.note,
       tc2000.sourceDir ?? undefined,
     ),
@@ -1667,11 +1752,16 @@ function validLiveUpdates(items: MorningLiveUpdate[]): MorningLiveUpdate[] {
   return items.filter((item) => item.source !== "Godel" || isValidGodelLiveUpdate(item));
 }
 
-function isValidGodelLiveUpdate(item: MorningLiveUpdate): boolean {
-  if (isMostlyNumericGodelText(item.text)) {
+export function isValidGodelLiveUpdate(item: MorningLiveUpdate): boolean {
+  const author = (item.author ?? "").trim().toLowerCase();
+  if (author === "godel dom bridge") {
     return false;
   }
-  return (item.author ?? "").trim().toLowerCase() !== "godel dom bridge";
+  // The mostly-numeric guard exists to reject DOM-bridge price-ladder garbage.
+  // Scraper rows attributed to a real wire (Benzinga, MarketLine, ...) are
+  // exempt — dense earnings/CPI headlines must not be silently dropped.
+  const bridgeLike = !author || author.includes("godel");
+  return !(bridgeLike && isMostlyNumericGodelText(item.text));
 }
 
 function isMostlyNumericGodelText(text: string): boolean {
@@ -1689,15 +1779,49 @@ function isMostlyNumericGodelText(text: string): boolean {
   return alphaWords.length < 3 || alphaRatio < 0.22 || numericRatio > 0.62 || priceLikeTokens.length >= 5;
 }
 
-function sortLiveUpdates(items: MorningLiveUpdate[]): MorningLiveUpdate[] {
-  return [...items]
-    .sort((a, b) => {
-      const aTime = a.publishedAt ? new Date(a.publishedAt).getTime() : 0;
-      const bTime = b.publishedAt ? new Date(b.publishedAt).getTime() : 0;
-      if (aTime !== bTime) {
-        return bTime - aTime;
+const LIVE_UPDATE_CAP = 24;
+const LIVE_UPDATE_SOURCE_FLOOR = 8;
+
+function compareLiveUpdatesByTimeDesc(a: MorningLiveUpdate, b: MorningLiveUpdate): number {
+  const aTime = a.publishedAt ? new Date(a.publishedAt).getTime() : 0;
+  const bTime = b.publishedAt ? new Date(b.publishedAt).getTime() : 0;
+  if (aTime !== bTime) {
+    return bTime - aTime;
+  }
+  return a.id.localeCompare(b.id);
+}
+
+/**
+ * Newest LIVE_UPDATE_CAP items, but with a per-source floor: a high-volume
+ * source (the Godel wire firehose) must not starve the other (FirstSquawk)
+ * out of the tape entirely. Each source is guaranteed its newest
+ * min(floor, available) rows; the remainder fills chronologically.
+ */
+export function sortLiveUpdates(items: MorningLiveUpdate[]): MorningLiveUpdate[] {
+  const byTimeDesc = [...items].sort(compareLiveUpdatesByTimeDesc);
+  const sources = [...new Set(byTimeDesc.map((item) => item.source))];
+  if (sources.length <= 1 || byTimeDesc.length <= LIVE_UPDATE_CAP) {
+    return byTimeDesc.slice(0, LIVE_UPDATE_CAP);
+  }
+
+  const picked = new Set<string>();
+  for (const source of sources) {
+    let count = 0;
+    for (const item of byTimeDesc) {
+      if (count >= LIVE_UPDATE_SOURCE_FLOOR) {
+        break;
       }
-      return a.id.localeCompare(b.id);
-    })
-    .slice(0, 24);
+      if (item.source === source) {
+        picked.add(item.id);
+        count += 1;
+      }
+    }
+  }
+  for (const item of byTimeDesc) {
+    if (picked.size >= LIVE_UPDATE_CAP) {
+      break;
+    }
+    picked.add(item.id);
+  }
+  return byTimeDesc.filter((item) => picked.has(item.id)).slice(0, LIVE_UPDATE_CAP);
 }

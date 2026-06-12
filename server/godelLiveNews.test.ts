@@ -88,6 +88,58 @@ describe("Godel live news ingestion", () => {
     });
   });
 
+  it("normalizes the godel-news-scraper capture shape (items[], ISO time, ticker)", () => {
+    // exact output of scripts/godel-news-scraper.mjs -> data/godel-live-news.json:
+    // the scraper converts the DOM's local-naive stamp to ISO at write time, so
+    // the contract here is timezone-independent and pinned exactly
+    const updates = parseGodelLiveNews(
+      JSON.stringify({
+        generatedAt: "2026-06-11T21:00:00.000Z",
+        items: [
+          {
+            id: "202606111501BENZINGANEWSOPEN_53153136.xml",
+            headline: "Nvidia Millionaires Can't Afford To Sell, ETFs May Be Their Escape Route",
+            time: "2026-06-11T19:01:28.000Z",
+            ticker: "NVDA",
+            source: "Benzinga Lightning Feed",
+          },
+          {
+            id: "202606111430BENZINGANEWSOPEN_53152453.xml",
+            headline: "Stock Market Whipsawed on Trump Statements, ECB Rate Hike, Hotter PPI",
+            time: "2026-06-11T18:32:24.000Z",
+            ticker: "SPY",
+            source: "Benzinga Lightning Feed",
+          },
+        ],
+      }),
+      "data/godel-live-news.json",
+    );
+
+    expect(updates).toHaveLength(2);
+    expect(updates[0]).toMatchObject({
+      id: "godel-202606111501BENZINGANEWSOPEN_53153136.xml",
+      source: "Godel",
+      author: "Benzinga Lightning Feed",
+      text: "Nvidia Millionaires Can't Afford To Sell, ETFs May Be Their Escape Route",
+      publishedAt: "2026-06-11T19:01:28.000Z",
+      timeLabel: "3:01 PM",
+    });
+    expect(updates.every((u) => u.source === "Godel")).toBe(true);
+  });
+
+  it("still accepts a legacy local-naive time stamp without crashing", () => {
+    // transition safety: captures written before the ISO change carry
+    // "M/D/YY H:M:S"; the parsed instant depends on the server's local tz, so
+    // only existence is pinned here
+    const updates = parseGodelLiveNews(
+      JSON.stringify({ items: [{ id: "x1", headline: "Some headline text here", time: "6/11/26 15:01:28", source: "Wire" }] }),
+      "data/godel-live-news.json",
+    );
+    expect(updates).toHaveLength(1);
+    expect(updates[0].publishedAt).not.toBeNull();
+    expect(updates[0].timeLabel).not.toBe("Time TBD");
+  });
+
   it("drops unmarked broad DOM bridge rows from Godel live updates", () => {
     const updates = parseGodelLiveNews(
       JSON.stringify({

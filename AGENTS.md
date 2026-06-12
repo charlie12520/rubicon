@@ -1,109 +1,125 @@
-# AGENTS.md
+# AGENTS.md - Rubicon operating guide
 
-## Product
+Rubicon is a local-first SPX 0DTE morning-intelligence + trade-tracker + replay cockpit for one
+trader, on one Windows machine. React 19 + Vite client (`src/`), Express 5 + `tsx` server
+(`server/`), shared types (`shared/`), automation scripts (`scripts/`). It may take inspiration
+from reference products but must never copy competitor branding, exact UI/CSS, icons, or wording.
 
-We are building Rubicon, a local-first morning intelligence, trade tracker, and replay cockpit for an SPX 0DTE spread trader.
+Start every session: read this file, then `codebase.md` (repo map), then the TOP of `WORKLOG.md`
+(current state) and the yaml header of `naive_acceptance.md` (current acceptance ID). Use `rg` to
+jump; never read the big logs end-to-end.
 
-## Core Loop
+First user-visible reply in a session/task must include an `A###` token. For repo-changing work,
+claim the next free acceptance ID first and open with it (for example, `A196 - ...`). For read-only
+status/questions where no new ID is claimed, report the current active ID as context (for example,
+`A195 context - ...`). This keeps cross-agent transcripts tied to the ledger from the first message.
 
-Trader opens the local app -> app imports AI STUFF/SPX tracker data -> trader reviews today's or a selected range's P/L and position metrics -> trader selects a session/trade -> replay charts advance through the day with scrub/autoplay -> optional wallet size persists locally.
+This file is the SHARED rulebook for every agent runtime (Codex reads it natively; Claude imports
+it via CLAUDE.md). Shell on this machine is Windows PowerShell 5.1 - no `&&` chaining, no `??`;
+all recipes below are PS syntax. Durable repo knowledge belongs in these md files, never in any
+one runtime's private memory.
 
-Example shape:
+## 1. The working tree IS production
 
-User arrives -> completes the primary action -> app persists useful data -> operator/admin can inspect or act -> user sees the result/status -> the demo proves the loop end to end.
+The user's live app serves THIS folder. At logon, the "Rubicon Server" scheduled task runs
+`scripts/serve-headless.vbs` (rebuilds stale `dist/`, then `tsx server/index.ts` on
+`127.0.0.1:5174`), and an Edge PWA window auto-opens pointed at it. Live market feeds
+(FPL 09:25; heatmap / SPX bars / spread-speed 09:28 ET) auto-start only in their open window -
+**a midday server restart silently kills the feeds for the rest of the day.**
 
-## Always-Read Docs
+- NEVER kill or restart the live 5174 server during market hours (~09:20-16:05 ET).
+- Client-only change: `npm run build`; the user hard-refreshes the PWA. Server change: lands at
+  the next after-hours restart - say so, don't restart.
+- Kill only the exact PIDs of processes YOU started. NEVER `taskkill /T` (a tree-kill once took
+  down the user's app). Never touch TWS, the live server, or the Godel watcher (an invisible
+  off-screen Edge + node pair; it has its own Startup-folder shortcut and single-instance lock).
 
-For normal starts or heartbeats, skim only the top/current portions of:
+## 2. Concurrent agents and production/main safety
 
-- WORKLOG.md
-- codebase.md
-- naive_acceptance.md
-- naive_validation.md
+Treat every file and the git state as liable to change under you:
 
-Keep this pass lightweight. Read enough to know the current work state, repository/file map, current acceptance ID, latest validation status, relevant commands/URLs, and any known blockers. Use `rg` for a specific acceptance ID, feature name, or failure phrase when deeper history is needed.
+- A196 bootstrap exception: this guardrail change may be authored from the current feature-branch
+  HEAD in a sibling worktree. After it lands, the live `spx-spread-replay-tracker` checkout is
+  production-only: keep it on `main`, let the live server and Latest button operate only there,
+  and do not edit source files there directly.
+- For repo-changing work, create a sibling worktree under `../rubicon-worktrees/`:
+  `npm run worktree:create -- --id A### --slug short-name`. Future worktrees start from fresh
+  `origin/main`; use feature branches named `agent/A###-short-name`.
+- Land completed branches through `npm run land -- --branch agent/A###-short-name`; add `--push`
+  only when the user explicitly wants the validated merge pushed to `origin/main`. The landing
+  script uses a temporary integration worktree and must not checkout local `main` in the live
+  folder.
+- Install repo hooks with `npm run hooks:install` after the guardrail commit lands. Hooks block
+  direct commits/merges on `main`, duplicate/regressed acceptance IDs, and broad archive rotations
+  mixed with source edits.
+- `git branch --show-current` BEFORE committing - another session may have switched the checkout
+  to its feature branch. Commit where you are; never switch branches out from under a session.
+- Uncommitted changes you didn't make are someone's in-flight work. Stage ONLY files you touched
+  (`git add <paths>`, never `-A` blindly); never `checkout -- .`, stash, or reset.
+- Acceptance IDs race. Read `naive_acceptance.md`'s yaml fresh at claim time, take the next free
+  ID, add your row + bump the yaml. Never renumber or rewrite another session's rows. If a ledger
+  file changed since your read, re-read and re-apply - anchored string edits only, never
+  line-number splicing (a bad splice once destroyed the ledger).
+- ID collisions still happen despite the protocol. Resolution: the id that is COMMITTED first
+  wins; the loser renumbers their own row to the next free id (this has been done before -
+  branch row "A179" became A184 at merge). Start every WORKLOG entry with its A-id so prepend
+  order never matters.
+- Never bypass the build lock. `npm run build` is lock-protected; `build:raw` is only for the
+  lock wrapper. If another build/validation is active, wait or run focused non-build checks.
+- Scratch ports can collide too: probe before binding (`Get-NetTCPConnection -LocalPort <p>`)
+  or pick randomly within 5189-5199. Name temp scripts uniquely (`<task>-<something>.tmp.mjs`).
+- `data/` is runtime state, written by the live app at any moment (e.g. the daily index-reconcile
+  rewrites the tracked `data/heatmap-classification-auto.json`). Never treat `data/` churn as a
+  blocker or sweep it into commits; the self-update gate already ignores it (A183).
+- Respect the locks: daily sync (`../IBKR Equity History Pull/data/daily_sync.lock.json`,
+  pid-probed), Godel watcher (`../godel-news/watcher.lock.json`), and the server's pre-bind port
+  probe (a second instance on an owned port exits cleanly - that's by design).
 
-Before navigating implementation files, read `codebase.md` as the repository/file map. Use it to find the right module and avoid wasting context by reading the entire codebase or large files end to end. When a mapped file is large, search within it first and then read only the relevant section.
+## 3. Per-change ritual
 
-## Read Only When Needed
+1. Map the change to an acceptance criterion: claim the next ID in `naive_acceptance.md`
+   (row + yaml bump).
+2. Write/update tests - nearly every `server/*.ts` and `src/` logic module has a co-located
+   `*.test.ts(x)`; match that. Display-only components are the usual exception.
+3. Validate: narrowest check first, then `npm run validate:mvp`
+   (= typecheck && lint && test && build). Lint is zero-tolerance and gated in CI
+   (windows-latest, push to main + PRs; CI runs typecheck/lint/test).
+4. Prepend the entry under `## Last Completed Change` in `WORKLOG.md`.
+   (Ignore WORKLOG's own yaml header - it drifts; `naive_acceptance.md` is the ID authority.)
+5. Commit only your files, with a clear message. Push only when the user asks.
 
-- Read ACCEPTANCE_CRITERIA.md only when `naive_acceptance.md` is insufficient or historical proof is needed.
-- Read VALIDATION.md only when `naive_validation.md` is insufficient, a command is unclear, or historical validation evidence is needed.
-- Read HEARTBEAT.md only when changing process/governance or when a heartbeat run is ambiguous.
-- Read PRODUCT_SPEC.md only if product behavior is unclear.
-- Read DEMO_SCRIPT.md only during demo/e2e validation.
-- Read COMPETITOR_BOUNDARIES.md only when changing public UI, copy, naming, or positioning.
-- Read DECISIONS.md before making or revising architecture/product decisions.
-- Read REVIEW_AND_BLOCKERS.md during review passes or repeated blockers.
+## 4. Run / verify
 
-## Build Priority
+- Dev: `npm run dev` (Vite client 5173, API 5174, `/api` proxied).
+- Scratch server for verification (never reuse 5174):
+  `$env:PORT="5189"; $env:RUBICON_LISTEN_HOST="127.0.0.1"; npx tsx server/index.ts`
+  - use ports 5189-5199, kill the exact PID when done. Build first if you need the client UI.
+- Browser proof: `playwright-core` with `{ channel: "msedge", headless: true }`. The script must
+  live INSIDE the repo (module resolution) - name it `*.tmp.mjs`, delete it after.
+- The Claude preview MCP is rooted at the WRONG project on this machine - never use it for Rubicon.
 
-1. Repo audit or minimal scaffold
-2. Data model and seed/demo data
-3. Primary public/user workflow
-4. Required create/read/update actions
-5. Operator/admin workflow, if the app needs one
-6. Status, history, or result visibility
-7. Optional AI/integration fallback layer
-8. Tests and demo validation
+## 5. External processes & integrations
 
-## Phase Governance
+- IBKR/TWS client-ids - never reuse: holdings **884**; heatmap **941**; TC2000 bars **947**;
+  0DTE chain **948**; SPX live bars **949**; nightly sync **9300+/9393/9494-9497**.
+- The nightly sync lives in the sibling `../IBKR Equity History Pull` (PowerShell wrapper
+  `run_daily_spx_ibkr_sync_with_sheet_payload.ps1` + `daily_spx_ibkr_sync.py`). That project has
+  **no git** - copy any file you'll edit to `~/Documents/<task>_backup_<date>/` first.
+- Godel news: `scripts/godel-news-scraper.mjs` (invisible Edge, Cloudflare-constrained - headless
+  does NOT work) -> `../godel-news/` archives + `data/godel-live-news.json` -> the Morning
+  Live Updates panel.
+- Secrets live outside the repo (e.g. `.secrets/` in sibling projects). Never print or commit them.
 
-Phase goals are effective only when they force measurable app progress. Early phases may add scaffold, data, and visible surfaces, but later phases must become stricter: they should prove real workflow depth, cross-record effects, persistence, permissions, recovery, scale, and operator clarity.
+## 6. Doc map
 
-Do not keep adding panels, modules, or modeled records just to make the app look broader. A future phase should be marked GREEN only when it proves a user or operator can complete a meaningful workflow, see the result, recover from normal failure, and rely on persisted state after reload.
+| Doc | Read when |
+|---|---|
+| `codebase.md` (then `detailedcodebase.md` for depth) | finding the right module - don't spelunk blind |
+| `WORKLOG.md` - top block only | every session: current state, recent changes |
+| `naive_acceptance.md` - yaml + recent rows | claiming an acceptance ID |
+| `naive_validation.md` | validation commands / latest evidence |
+| `PLAN-improvement-roadmap-2026-06-09.md` | picking up roadmap work (R2-R5 remain) |
+| `DECISIONS.md` | before reversing an architecture decision |
+| `archive/`, `docs/` | history; point-in-time audits and shipped plans |
 
-After every run, review the goals themselves before defining the next run. Ask whether the completed goals were too broad, too easy to satisfy with static panels, too focused on breadth, or missing workflow proof. If so, revise the MiniOS and Backlog/task list so the next goals are harder, more workflow-based, and less gameable.
-
-Manual productivity meta-review rule: after any completed phase or goal run, manually score these ten meta-goals in WORKLOG.md before defining the next goals: goal quality, time to stable, rework rate, validation strength, workflow depth, context carryover, tooling leverage, user-visible value, agent productivity metrics, and next-goal improvement. Each score must be Strong, Mixed, or Weak, cite proof, and name one adjustment for the next run.
-
-MiniOS self-edit rule: after each phase/goal review, agents are allowed to revise this MiniOS when the review exposes a better operating rule, stricter goal shape, validation habit, or productivity improvement. Every MiniOS edit must be logged in `MINIOS_CHANGELOG.md` with datetime, changed file, reason, and expected effect before claiming the run is complete.
-
-Production-conversion rule: after a local launch rehearsal is green, future phases must distinguish local proof, sandbox proof, hosted proof, and pilot/customer proof. Do not mark hosted production, connector, security, telemetry, performance, or pilot claims green from modeled local evidence alone.
-
-Hard dependency stop rule: when a selected phase requires an external resource such as hosted data, hosted auth, a connector sandbox, pilot tenant, telemetry source, or deployment account, run a credential/config discovery pass first and record only names/statuses, never secret values. If the resource is absent, do not build modeled substitutes or mark the phase green; record the blocker in WORKLOG.md and VALIDATION.md, keep task/backlog items non-done, and create an operator input note if the user needs to provide access.
-
-## Non-Goals For MVP
-
-Do not build these until the core loop is green unless the user explicitly makes one of them the core product:
-
-- Billing
-- Real email/SMS/push sending
-- Enterprise SSO
-- Advanced permissions
-- Advanced analytics dashboards
-- Full third-party integrations
-- Complex import/export flows
-- Pixel-perfect polish
-
-Stubs are acceptable when they clarify future direction.
-
-## Concurrent Agents
-
-Multiple agents often work in this codebase at the same time (and the user edits it live). Treat every file as liable to change under you:
-
-- Re-read a file immediately before editing it; do not trust an earlier read. Expect "file modified since read" and reconcile rather than overwrite.
-- Preserve other agents' and the user's in-flight changes. Make small, targeted patches and never revert edits you did not make.
-- High-contention shared files (WORKLOG.md, codebase.md, MINIOS_CHANGELOG.md, `data/` status + snapshot JSON, daily-sync artifacts) may be written concurrently — append/merge carefully instead of clobbering.
-- Assume another agent may be running the same kind of job. Use the existing locks and distinct IDs (e.g. the daily-sync lock, unique IBKR client ids) and do not kill processes or TWS connections you did not start.
-
-## Engineering Behavior
-
-- Reuse the existing stack.
-- Do not rewrite broad architecture unless WORKLOG.md identifies it as the current blocker.
-- Preserve existing user changes.
-- Prefer small, reviewable patches.
-- Prefer small, meaningful commits after verified changes; do not batch unrelated work into one commit, and push only when the user asks or the workflow clearly calls for it.
-- Every meaningful change must map to one acceptance criterion.
-- After each run, perform a meta-review of whether the goals improved app reality or merely added surfaces; write the lesson into the next goal set.
-- For completed phases, include the manual ten-point productivity meta-review before claiming the next goals are ready.
-- If the review suggests a better operating rule, update the relevant MiniOS docs and record the datetime/reason in `MINIOS_CHANGELOG.md`.
-- Add or update tests when behavior changes.
-- Run the narrowest relevant validation first.
-- Keep GitHub Actions CI aligned with local validation. CI should at minimum run `npm ci`, `npm run typecheck`, and `npm run test` on push/PR; before pushing, run the relevant local checks so CI is confirming rather than discovering obvious failures.
-- Update WORKLOG.md after each meaningful change.
-- If a task takes more than five minutes, include a short completion note naming what took very long or cost an unreasonable amount of tokens, plus any obvious optimization for the next run. For tasks under five minutes, skip this note.
-
-## Done Means
-
-The app runs locally, seed/demo data works, the core demo flow works, acceptance criteria are green or explicitly marked deferred, and tests/checks pass or documented failures are actionable.
+Done means: validated per section 3, ledger + WORKLOG updated, app still serves the user's live workflow.

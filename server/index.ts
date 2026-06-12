@@ -32,15 +32,6 @@ import { loadMorningBrief, loadMorningLiveUpdates, resolveTc2000Artifact } from 
 import { loadMorningAiNotes } from "./morningAiNotes.ts";
 import { mergeTradeJournalSnapshot } from "./tradeJournalSnapshot.ts";
 import { showCalendarDesktopAlert, showLiveUpdateDesktopToast } from "./desktopAlert.ts";
-import {
-  getGodelAlertBridgeStatus,
-  godelBridgeBookmarklet,
-  godelBridgeSetupHtml,
-  authorizeGodelBridgeRequest,
-  ingestGodelBridgeAlert,
-  isGodelBridgeOriginAllowed,
-  setGodelBridgeCorsHeaders,
-} from "./godelAlertBridge.ts";
 
 export const app = express();
 const port = Number(process.env.PORT ?? 5174);
@@ -480,61 +471,6 @@ app.get("/api/morning/live-updates", async (_request, response, next) => {
   }
 });
 
-app.get("/api/godel-alert-bridge/status", async (_request, response, next) => {
-  try {
-    response.setHeader("Cache-Control", "no-store, max-age=0");
-    response.json(await getGodelAlertBridgeStatus());
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.get("/api/godel-alert-bridge/bookmarklet", (_request, response) => {
-  response.type("text/plain").send(godelBridgeBookmarklet());
-});
-
-app.get("/api/godel-alert-bridge/setup", (_request, response) => {
-  response.type("html").send(godelBridgeSetupHtml());
-});
-
-app.options("/api/godel-alert-bridge/ingest", (request, response) => {
-  const origin = firstHeader(request.headers.origin);
-  setGodelBridgeCorsHeaders(origin, response);
-  if (origin && !isGodelBridgeOriginAllowed(origin)) {
-    response.status(403).json({
-      generatedAt: new Date().toISOString(),
-      message: "Godel bridge origin is not allowed.",
-      ok: false,
-    });
-    return;
-  }
-  response.sendStatus(204);
-});
-
-app.post("/api/godel-alert-bridge/ingest", express.text({ type: "text/plain" }), async (request, response, next) => {
-  try {
-    const origin = firstHeader(request.headers.origin);
-    setGodelBridgeCorsHeaders(origin, response);
-    const authorization = authorizeGodelBridgeRequest({
-      body: request.body,
-      origin,
-      queryToken: firstQueryValue(request.query.bridgeToken),
-      token: firstHeader(request.headers["x-rubicon-bridge-token"]),
-    });
-    if (!authorization.ok) {
-      response.status(authorization.status).json({
-        generatedAt: new Date().toISOString(),
-        message: authorization.message,
-        ok: false,
-      });
-      return;
-    }
-    response.json(await ingestGodelBridgeAlert(request.body));
-  } catch (error) {
-    next(error);
-  }
-});
-
 app.get("/api/morning/ai-notes", async (request, response, next) => {
   try {
     const date = String(request.query.date ?? "");
@@ -735,21 +671,6 @@ export function startRubiconServer(): ReturnType<typeof app.listen> {
 function isDirectRun(): boolean {
   const entryPoint = process.argv[1];
   return Boolean(entryPoint && path.resolve(entryPoint) === currentFilePath);
-}
-
-function firstHeader(value: string | string[] | undefined): string | undefined {
-  if (Array.isArray(value)) {
-    return value.find((item) => item.trim());
-  }
-  return value?.trim() || undefined;
-}
-
-function firstQueryValue(value: unknown): string | undefined {
-  if (Array.isArray(value)) {
-    return value.map((item) => String(item ?? "").trim()).find(Boolean);
-  }
-  const text = String(value ?? "").trim();
-  return text || undefined;
 }
 
 function isPortInUse(host: string, candidatePort: number, timeoutMs = 1500): Promise<boolean> {

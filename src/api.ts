@@ -6,7 +6,6 @@ import type {
   FplIndicatorManifest,
   FplIndicatorPayload,
   FplLiveStatus,
-  GodelAlertBridgeStatus,
   GoogleSnapshotRefreshResult,
   IbkrHoldingsRefreshResult,
   IbkrHoldingsSnapshot,
@@ -215,10 +214,6 @@ export function fetchMorningBrief(date: string, signal?: AbortSignal, options: {
 
 export function fetchMorningLiveUpdates(signal?: AbortSignal): Promise<MorningLiveUpdatesPayload> {
   return readJson<MorningLiveUpdatesPayload>(`/api/morning/live-updates?${new URLSearchParams({ refresh: String(Date.now()) }).toString()}`, { signal });
-}
-
-export function fetchGodelAlertBridgeStatus(signal?: AbortSignal): Promise<GodelAlertBridgeStatus> {
-  return readJson<GodelAlertBridgeStatus>("/api/godel-alert-bridge/status", { signal });
 }
 
 export function fetchMorningAiNotes(date: string, signal?: AbortSignal): Promise<MorningAiNotesPayload> {

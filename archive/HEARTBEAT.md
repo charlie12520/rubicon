@@ -1,5 +1,7 @@
 # HEARTBEAT.md
 
+> Historical note: this heartbeat prompt is archived and is not the active Rubicon startup flow. Current startup docs are `AGENTS.md`, `codebase.md`, `WORKLOG.md`, `naive_acceptance.md`, and `naive_validation.md`.
+
 ## Core Rule
 
 Every heartbeat should read less, change less, and prove more.

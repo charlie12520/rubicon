@@ -1,5 +1,7 @@
 # GOAL — Rubicon performance & safety fixes (items 1–7)
 
+> Historical note: this goal is superseded by the current ledger and codebase maps. Several items here have since changed state, including the lint gate, CI, `jsonStore`, Godel bridge removal, and tracker cache/coalescing. Current startup docs are `AGENTS.md`, `codebase.md`, `WORKLOG.md`, `naive_acceptance.md`, and `naive_validation.md`.
+
 _Created 2026-06-01 from a code review of the Rubicon app. Self-contained: a fresh Claude Code session can execute this against `C:\Users\charl\Desktop\AI STUFF\spx-spread-replay-tracker` without prior context._
 
 ## Goal

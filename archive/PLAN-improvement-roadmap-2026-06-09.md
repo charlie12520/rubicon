@@ -1,8 +1,10 @@
 # PLAN — Rubicon Improvement Roadmap (2026-06-09)
 
+> Historical note: this roadmap is superseded by the current ledger and codebase maps. Several scoreboard items here have since changed state, including the lint gate, CI, `jsonStore`, Godel bridge removal, and tracker cache/coalescing. Current startup docs are `AGENTS.md`, `codebase.md`, `WORKLOG.md`, `naive_acceptance.md`, and `naive_validation.md`.
+
 Full-codebase review + prioritized improvement plan, produced 2026-06-09 evening.
-Companion to `RUBICON_CODEBASE_REVIEW_2026-06-03.md` (most of which is still open —
-see §2). When an item here is picked up, assign it the next acceptance ID
+Companion to `archive/RUBICON_CODEBASE_REVIEW_2026-06-03.md` (most of which is still
+open — see §2). When an item here is picked up, assign it the next acceptance ID
 (A162+) per AGENTS.md before building.
 
 ---

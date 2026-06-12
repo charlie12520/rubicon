@@ -1,5 +1,7 @@
 /goal Ship the first validated local MVP loop for Rubicon, a local-first morning intelligence, trade tracker, and replay cockpit for an SPX 0DTE spread trader.
 
+Historical note: this goal file is archived and is not the active Rubicon startup flow. Current startup docs are AGENTS.md, codebase.md, WORKLOG.md, naive_acceptance.md, and naive_validation.md.
+
 Core MVP loop:
 Trader opens Rubicon -> Morning shows the macro/live/model premarket brief -> Replay imports AI STUFF/SPX tracker data -> trader reviews today's or a selected range's P/L and position metrics -> trader selects a session/trade -> replay charts advance through the day with scrub/autoplay -> optional wallet size persists locally.
 

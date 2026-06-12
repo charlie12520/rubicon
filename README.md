@@ -118,17 +118,25 @@ By default this checks `127.0.0.1` ports `7496,4001` and writes `..\IBKR Equity 
 
 The desktop wallet card also exposes an `IBKR` refresh button that calls the same read-only path through `/api/ibkr-wallet/refresh`.
 
+## Agent Coordination
+
+Rubicon supports parallel section work by using `TASKS.md` as the active board. Section agents claim
+or update `TASK-###` rows there, record focused validation and merge notes there, and leave
+`WORKLOG.md`, `naive_acceptance.md`, and `naive_validation.md` for the final merge/landing agent.
+Final acceptance IDs (`A###`) are assigned only after task branches/worktrees are integrated and the
+merged result is validated.
+
 ## Validate
 
 ```bash
 npm run validate:mvp
 ```
 
-That runs TypeScript, importer tests, and a production build.
+That runs TypeScript typecheck, ESLint (zero-tolerance, also CI-gated), the full Vitest suite, and a production build.
 
 ## Completion Audit
 
-`COMPLETION_AUDIT.md` is a point-in-time audit from 2026-05-29. Current acceptance and validation status live in `WORKLOG.md`, `naive_acceptance.md`, and `naive_validation.md`.
+`archive/COMPLETION_AUDIT.md` is a point-in-time audit from 2026-05-29. Current acceptance and validation status live in `WORKLOG.md`, `naive_acceptance.md`, and `naive_validation.md`.
 
 ## Data Sources
 
@@ -146,6 +154,6 @@ That runs TypeScript, importer tests, and a production build.
 
 ## QA Artifacts
 
-- Desktop screenshot: `qa-desktop.png`
-- Mobile top screenshot: `qa-mobile.png`
-- Mobile trade table screenshot: `qa-mobile-lower.png`
+- Historical screenshots and QA server logs are archived under `archive/artifacts/`.
+- Active section-agent proof lives in `TASKS.md`; final proof lives in `WORKLOG.md`,
+  `naive_acceptance.md`, and `naive_validation.md`.

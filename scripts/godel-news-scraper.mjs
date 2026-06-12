@@ -7,6 +7,7 @@
 //   1. DOM poll of the news feed rows (tr[id*="streaming-table"]) — reliable.
 //   2. Raw frames from wss://api.godelterminal.com/events (STOMP) — logged for
 //      the breaking ticker / future reverse-engineering.
+// Current DOM payload is banner-only; streaming-table rows are heartbeat only.
 // Output (append-only, deduped across restarts):
 //   godel-news/news.jsonl     one JSON object per headline
 //   godel-news/latest.json    most recent 50, newest first (easy to consume)
@@ -18,6 +19,7 @@
 //   node scripts/godel-news-scraper.mjs            watch forever (Ctrl+C stops)
 
 import { chromium } from "playwright-core";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -40,15 +42,15 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..
 const RUBICON_CAPTURE = path.join(REPO_ROOT, "data", "godel-live-news.json");
 const RUBICON_CAPTURE_MAX = 24;
 
-const POLL_MS = 5_000;
+const POLL_MS = 3_000;
 // --login: show the window on-screen so you can sign in to Godel (and arrange
 // the news panel you want scraped); the layout/session persist in the profile.
 const LOGIN = process.argv.includes("--login");
 // --once contradicts --login (it would exit before you can sign in) — login wins.
 const ONCE = process.argv.includes("--once") && !LOGIN;
-// relaunch the browser if the page serves zero news rows this long (session
-// expired / in-page re-challenge / panel closed — none of these throw on their own)
-const STALE_POLLS_BEFORE_RELAUNCH = 60;
+// Zero banners is normal; relaunch only if the persistent Godel app shell
+// disappears, or Cloudflare returns after the session was already up.
+const SHELL_MISSING_POLLS_BEFORE_RELAUNCH = 60;
 // Observed repeatedly: a hard-killed profile gets re-challenged by Cloudflare
 // and STAYS stuck, while a fresh profile clears in seconds. After this many
 // consecutive interstitial failures, reset the profile — but never one that
@@ -61,8 +63,6 @@ const SEEN_BREAKING_CAP = 500;
 const WATCHER_LOG = path.join(ROOT, "watcher.log");
 const WATCHER_LOCK = path.join(ROOT, "watcher.lock.json");
 
-fs.mkdirSync(PROFILE, { recursive: true });
-
 const seen = new Set();
 const latest = [];
 
@@ -72,6 +72,92 @@ function addCapped(set, value, cap) {
   if (set.size > cap) {
     set.delete(set.values().next().value);
   }
+}
+
+const TIME_PIPE_TEXT_RE = /^\s*(\d{1,2}:\d{2}:\d{2}\s*[AP]M)\s*\|\s*(.+)$/i;
+const BANNER_SOURCE = "Godel Breaking";
+
+export function parseGodelBannerText(text) {
+  const normalized = String(text ?? "").replace(/\s+/g, " ").trim();
+  const match = TIME_PIPE_TEXT_RE.exec(normalized);
+  if (!match) {
+    return null;
+  }
+  return {
+    timeOfDay: match[1].replace(/\s+/g, " ").trim().toUpperCase(),
+    headline: match[2].trim(),
+  };
+}
+
+function parseTimeOfDayParts(timeOfDay) {
+  const match = /^\s*(\d{1,2}):(\d{2}):(\d{2})\s*([AP]M)\s*$/i.exec(timeOfDay);
+  if (!match) {
+    return null;
+  }
+  let hour = Number(match[1]);
+  const minute = Number(match[2]);
+  const second = Number(match[3]);
+  const meridiem = match[4].toUpperCase();
+  if (hour < 1 || hour > 12 || minute > 59 || second > 59) {
+    return null;
+  }
+  if (meridiem === "PM" && hour !== 12) {
+    hour += 12;
+  }
+  if (meridiem === "AM" && hour === 12) {
+    hour = 0;
+  }
+  return { hour, minute, second };
+}
+
+export function bannerTimeOfDayToIso(timeOfDay, now = new Date()) {
+  const parts = parseTimeOfDayParts(timeOfDay);
+  if (!parts) {
+    return null;
+  }
+  const candidate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), parts.hour, parts.minute, parts.second, 0);
+  if (candidate.getTime() - now.getTime() > 2 * 60 * 60 * 1000) {
+    candidate.setDate(candidate.getDate() - 1);
+  }
+  return candidate.toISOString();
+}
+
+function normalizeHeadlineForId(headline) {
+  return String(headline ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+export function stableBannerId(headline, timeIso) {
+  const normalizedHeadline = normalizeHeadlineForId(headline);
+  const day = typeof timeIso === "string" && /^\d{4}-\d{2}-\d{2}/.test(timeIso) ? timeIso.slice(0, 10) : "unknown-day";
+  const digest = createHash("sha1").update(normalizedHeadline).digest("hex").slice(0, 16);
+  return `breaking-${day}-${digest}`;
+}
+
+export function bannerRowsToNewsItems(rows, now = new Date()) {
+  const items = [];
+  for (const row of rows) {
+    const parsed = row?.headline && row?.timeOfDay ? { headline: String(row.headline), timeOfDay: String(row.timeOfDay) } : parseGodelBannerText(row?.text ?? row?.fullText ?? "");
+    if (!parsed) {
+      continue;
+    }
+    const time = bannerTimeOfDayToIso(parsed.timeOfDay, now);
+    if (!time) {
+      continue;
+    }
+    items.push({
+      id: stableBannerId(parsed.headline, time),
+      headline: parsed.headline,
+      time,
+      source: BANNER_SOURCE,
+      severity: row?.isRed ? "red" : "standard",
+      timeLabel: parsed.timeOfDay,
+    });
+  }
+  return items;
+}
+
+function isBreakingNewsItem(item) {
+  return item && typeof item === "object" && item.source === BANNER_SOURCE;
 }
 
 // Console + file: the logon launcher (godel-news-watcher.vbs) starts node with
@@ -117,7 +203,7 @@ function loadSeenFromDisk() {
     for (const line of lines) {
       try {
         const item = JSON.parse(line);
-        if (item && typeof item === "object" && item.id) {
+        if (isBreakingNewsItem(item) && item.id) {
           addCapped(seen, item.id, SEEN_CAP);
           latest.push(item);
         }
@@ -129,7 +215,7 @@ function loadSeenFromDisk() {
     // file order is oldest-first; runtime unshifts newest-first — normalize so
     // latest[0] is always the newest and splice(50) evicts the oldest
     latest.reverse();
-    log(`warm start: ${seen.size} known ids from news.jsonl`);
+    log(`warm start: ${seen.size} known ${BANNER_SOURCE} ids from news.jsonl`);
   } catch {
     log("cold start: no existing news.jsonl");
   }
@@ -252,79 +338,93 @@ function appendWsRaw(text) {
 
 async function scrapeOnce(page) {
   return page.evaluate(() => {
-    const out = { news: [], breaking: [] };
-    const dateRe = /^\d{1,2}\/\d{1,2}\/\d{2,4}$/;
-    const timeRe = /^\d{1,2}:\d{2}(:\d{2})?$/;
-    for (const row of document.querySelectorAll('tr[id*="streaming-table"]')) {
-      const cells = [...row.querySelectorAll("td")].map((td) => (td.textContent ?? "").trim());
-      if (!cells.length) {
-        continue;
-      }
-      // layouts vary: time can be one cell ("6/11/26 15:01:28") or two
-      let time = cells[1] ?? "";
-      let rest = cells.slice(2);
-      if (dateRe.test(cells[1] ?? "") && timeRe.test(cells[2] ?? "")) {
-        time = `${cells[1]} ${cells[2]}`;
-        rest = cells.slice(3);
-      }
-      out.news.push({
-        id: row.id.replace(/^\d+-streaming-table-/, ""),
-        headline: cells[0] ?? "",
-        time,
-        symbol: rest[0] ?? "",
-        source: rest[1] ?? "",
-      });
-    }
-    // breaking banner: red band pinned near the viewport bottom, or anything
-    // godel labels "breaking" outright
-    const vh = window.innerHeight;
-    const vw = window.innerWidth;
-    for (const el of document.querySelectorAll('[class*="breaking" i], [id*="breaking" i]')) {
-      const text = (el.textContent ?? "").trim().replace(/\s+/g, " ");
-      if (text.length > 12) {
-        out.breaking.push(text.slice(0, 500));
-      }
-    }
-    // red-band detection by SAMPLING the bottom strip (elementFromPoint returns
-    // the innermost element, which also avoids parent/child duplicate text) —
-    // a full body-* style scan every poll was a layout-thrash hog on this DOM
-    const sampled = new Set();
-    for (const yOffset of [22, 55]) {
-      for (let frac = 0.1; frac <= 0.9; frac += 0.1) {
-        const el = document.elementFromPoint(vw * frac, vh - yOffset);
-        if (!el || sampled.has(el)) {
+    const TIME_PIPE = /^\s*(\d{1,2}:\d{2}:\d{2}\s*[AP]M)\s*\|\s*(.+)$/i;
+
+    function collectBanners() {
+      const banners = [];
+      for (const el of document.querySelectorAll("div.truncate")) {
+        const fullText = (el.textContent ?? "").replace(/\s+/g, " ").trim();
+        const match = TIME_PIPE.exec(fullText);
+        if (!match) {
           continue;
         }
-        sampled.add(el);
-        const bg = getComputedStyle(el).backgroundColor;
-        const match = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(bg);
-        if (match && Number(match[1]) > 140 && Number(match[2]) < 80 && Number(match[3]) < 80) {
-          const text = (el.textContent ?? "").trim().replace(/\s+/g, " ");
-          if (text.length > 12) {
-            out.breaking.push(text.slice(0, 500));
-          }
-        }
+        const parent = el.closest(".fade-in-animation") ?? el.parentElement;
+        const bg = parent ? getComputedStyle(parent).backgroundColor : "";
+        const color = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(bg);
+        const isRed = !!(color && Number(color[1]) > 200 && Number(color[2]) < 60 && Number(color[3]) < 60);
+        banners.push({
+          key: `${match[1].replace(/\s+/g, " ").trim().toUpperCase()}|${match[2].trim()}`,
+          fullText,
+          timeOfDay: match[1].replace(/\s+/g, " ").trim().toUpperCase(),
+          headline: match[2].trim(),
+          isRed,
+          hasFadeInAncestor: !!el.closest(".fade-in-animation"),
+          parentClass: parent?.className ? String(parent.className).slice(0, 200) : "",
+        });
       }
+      return banners;
     }
-    return out;
+
+    const win = window;
+    if (!Array.isArray(win.__rubiconGodelBannerBuffer)) {
+      win.__rubiconGodelBannerBuffer = [];
+      win.__rubiconGodelBannerObservedKeys = new Set();
+      const enqueue = () => {
+        for (const banner of collectBanners()) {
+          if (win.__rubiconGodelBannerObservedKeys.has(banner.key)) {
+            continue;
+          }
+          win.__rubiconGodelBannerObservedKeys.add(banner.key);
+          win.__rubiconGodelBannerBuffer.push(banner);
+        }
+      };
+      win.__rubiconGodelBannerObserver = new MutationObserver(enqueue);
+      win.__rubiconGodelBannerObserver.observe(document.body ?? document.documentElement, {
+        characterData: true,
+        childList: true,
+        subtree: true,
+      });
+      enqueue();
+    }
+
+    const buffered = win.__rubiconGodelBannerBuffer.splice(0);
+    const merged = new Map();
+    for (const banner of [...buffered, ...collectBanners()]) {
+      merged.set(banner.key, banner);
+    }
+    const appShellRowCount = document.querySelectorAll('tr[id*="streaming-table"]').length;
+    return {
+      appShellPresent: appShellRowCount > 0,
+      appShellRowCount,
+      banners: [...merged.values()].map(({ key: _key, ...banner }) => banner),
+      title: document.title,
+    };
   });
 }
 
 const seenBreaking = new Set();
 
-function recordBreaking(texts) {
-  for (const text of texts) {
-    const key = text.slice(0, 200);
+function recordBreaking(items) {
+  for (const item of items) {
+    const key = item.id;
     if (seenBreaking.has(key)) {
       continue;
     }
     addCapped(seenBreaking, key, SEEN_BREAKING_CAP);
     try {
-      appendJsonl(BREAKING_JSONL, { capturedAt: new Date().toISOString(), text });
+      appendJsonl(BREAKING_JSONL, {
+        capturedAt: new Date().toISOString(),
+        headline: item.headline,
+        id: item.id,
+        severity: item.severity,
+        source: item.source,
+        time: item.time,
+        timeLabel: item.timeLabel,
+      });
     } catch (error) {
       log(`breaking append failed: ${error instanceof Error ? error.message : String(error)}`);
     }
-    log(`BREAKING ${text.slice(0, 160)}`);
+    log(`BREAKING ${item.timeLabel ?? item.time ?? ""} ${item.headline.slice(0, 160)}`);
   }
 }
 
@@ -402,6 +502,12 @@ async function launchSession() {
   }
 }
 
+function isMainModule() {
+  return !!process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+}
+
+if (isMainModule()) {
+fs.mkdirSync(PROFILE, { recursive: true });
 acquireSingleInstanceLock();
 // fresh log per run — this file describes the CURRENT watcher only
 try {
@@ -441,24 +547,26 @@ while (!stopping) {
     // refresh the Rubicon capture from the warm-started snapshot at boot, so the
     // panel has current rows even before the next new headline lands
     writeRubiconCapture();
-    let emptyPolls = 0;
+    let missingShellPolls = 0;
     for (;;) {
-      const { news, breaking } = await scrapeOnce(page);
-      const fresh = recordNews(news.reverse());
-      recordBreaking(breaking);
+      const { appShellPresent, appShellRowCount, banners, title } = await scrapeOnce(page);
+      const bannerItems = bannerRowsToNewsItems(banners);
+      const fresh = recordNews(bannerItems);
+      recordBreaking(bannerItems);
       if (ONCE) {
-        log(`once mode: ${news.length} rows on screen, ${fresh} new -> ${NEWS_JSONL}`);
+        log(`once mode: ${banners.length} banner(s), shell rows ${appShellRowCount}, ${fresh} new -> ${NEWS_JSONL}`);
         stopping = true;
         break;
       }
       if (stopping) {
         break;
       }
-      // staleness watchdog: a logged-out / re-challenged / blanked page returns
-      // zero rows without ever throwing — relaunch instead of polling it forever
-      emptyPolls = news.length === 0 ? emptyPolls + 1 : 0;
-      if (emptyPolls >= STALE_POLLS_BEFORE_RELAUNCH) {
-        throw new Error(`no news rows for ${Math.round((STALE_POLLS_BEFORE_RELAUNCH * POLL_MS) / 60000)}min — relaunching`);
+      if (/just a moment/i.test(title)) {
+        throw new Error("Cloudflare interstitial returned after session start");
+      }
+      missingShellPolls = appShellPresent ? 0 : missingShellPolls + 1;
+      if (missingShellPolls >= SHELL_MISSING_POLLS_BEFORE_RELAUNCH) {
+        throw new Error(`Godel app shell absent for ${Math.round((SHELL_MISSING_POLLS_BEFORE_RELAUNCH * POLL_MS) / 60000)}min (last row count ${appShellRowCount})`);
       }
       await page.waitForTimeout(POLL_MS);
     }
@@ -496,3 +604,4 @@ while (!stopping) {
   }
 }
 log("scraper stopped.");
+}

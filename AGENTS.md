@@ -4,8 +4,6 @@
 
 We are building Rubicon, a local-first morning intelligence, trade tracker, and replay cockpit for an SPX 0DTE spread trader.
 
-The app may be inspired by common product patterns or named reference products, but it must not copy competitor branding, exact UI, CSS, icons, wording, screenshots, or proprietary assets.
-
 ## Core Loop
 
 Trader opens the local app -> app imports AI STUFF/SPX tracker data -> trader reviews today's or a selected range's P/L and position metrics -> trader selects a session/trade -> replay charts advance through the day with scrub/autoplay -> optional wallet size persists locally.

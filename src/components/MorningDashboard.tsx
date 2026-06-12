@@ -18,7 +18,6 @@ import type {
   IbkrHoldingEarningsEvent,
   IbkrHoldingPosition,
   IbkrHoldingsSnapshot,
-  GodelAlertBridgeStatus,
   MorningAiNotesBlock,
   MorningAiNotesPayload,
   MorningBriefPayload,
@@ -41,7 +40,6 @@ import type {
 import {
   type HeatmapIndex,
   fetchIbkrHoldings,
-  fetchGodelAlertBridgeStatus,
   fetchMorningAiNotes,
   fetchMorningBrief,
   fetchMorningLiveUpdates,
@@ -144,8 +142,6 @@ export function MorningDashboard({
   const [liveUpdatesRefreshing, setLiveUpdatesRefreshing] = useState(false);
   const [liveUpdatesCheckedAt, setLiveUpdatesCheckedAt] = useState<string | null>(null);
   const [liveUpdatesRefreshMessage, setLiveUpdatesRefreshMessage] = useState("");
-  const [godelBridge, setGodelBridge] = useState<GodelAlertBridgeStatus | null>(null);
-  const [godelBridgeMessage, setGodelBridgeMessage] = useState("");
   const [screen, setScreen] = useState<MorningScreen>("brief");
   const [heatmapIndex, setHeatmapIndex] = useState<HeatmapIndex>("spx");
   const autoArmLastDate = useRef<string | null>(null);
@@ -245,18 +241,6 @@ export function MorningDashboard({
       setLiveUpdatesRefreshing(false);
     }
   }, [loadLiveUpdates]);
-
-  const loadGodelBridge = useCallback(async (signal?: AbortSignal) => {
-    try {
-      const next = await fetchGodelAlertBridgeStatus(signal);
-      setGodelBridge(next);
-      setGodelBridgeMessage(next.message);
-    } catch (nextError) {
-      if (!isAbortLike(nextError)) {
-        setGodelBridgeMessage(nextError instanceof Error ? nextError.message : String(nextError));
-      }
-    }
-  }, []);
 
   const loadHoldings = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -373,12 +357,6 @@ export function MorningDashboard({
 
   useEffect(() => {
     const controller = new AbortController();
-    void loadGodelBridge(controller.signal);
-    return () => controller.abort();
-  }, [loadGodelBridge]);
-
-  useEffect(() => {
-    const controller = new AbortController();
     void loadHoldings(controller.signal);
     return () => controller.abort();
   }, [loadHoldings]);
@@ -480,13 +458,6 @@ export function MorningDashboard({
     }, 10_000);
     return () => window.clearInterval(interval);
   }, [loadLiveUpdates]);
-
-  useEffect(() => {
-    const interval = window.setInterval(() => {
-      void loadGodelBridge();
-    }, 5_000);
-    return () => window.clearInterval(interval);
-  }, [loadGodelBridge]);
 
   useEffect(() => {
     try {
@@ -743,13 +714,6 @@ export function MorningDashboard({
                   ? `Checked ${formatLiveRefreshTime(liveUpdatesCheckedAt)}.`
                   : "Live feed checks every 10 seconds.")}
             </div>
-            <GodelBridgeControls
-              bridge={godelBridge}
-              bridgeMessage={godelBridgeMessage}
-              onRefresh={() => {
-                void loadGodelBridge();
-              }}
-            />
             <div className="morning-live-filter">
               <label htmlFor="live-update-word-filter">Word filter</label>
               <textarea
@@ -964,60 +928,6 @@ function MorningPanelHeading({ icon, label, title }: { icon: ReactNode; label: s
       {title && <h3>{title}</h3>}
     </div>
   );
-}
-
-function GodelBridgeControls({
-  bridge,
-  bridgeMessage,
-  onRefresh,
-}: {
-  bridge: GodelAlertBridgeStatus | null;
-  bridgeMessage: string;
-  onRefresh: () => void;
-}) {
-  const latest = bridge?.lastAlert?.headline ?? bridge?.lastRejected?.text ?? null;
-  const statusMessage = cleanGodelBridgeMessage(bridgeMessage || bridge?.message || "");
-  return (
-    <div className="godel-bridge-card">
-      <div className="godel-bridge-top">
-        <div className="godel-bridge-signal">
-          <span aria-hidden="true" />
-          <strong>DOM bridge</strong>
-          <small>{bridge ? `${bridge.validCount} captured` : "Status pending"}</small>
-        </div>
-        <div className="godel-bridge-actions">
-          <a
-            className="morning-alert-button"
-            href={bridge?.setupUrl ?? "/api/godel-alert-bridge/setup"}
-            rel="noreferrer"
-            target="_blank"
-          >
-            <ExternalLink size={14} />
-            Setup
-          </a>
-          <button
-            aria-label="Refresh bridge status"
-            className="morning-icon-button"
-            onClick={onRefresh}
-            title="Refresh status"
-            type="button"
-          >
-            <RefreshCcw size={14} />
-          </button>
-        </div>
-      </div>
-      {statusMessage && <p>{statusMessage}</p>}
-      <div className="godel-bridge-meta">
-        <span>Minimized-safe capture</span>
-        {bridge?.lastAlert?.publishedAt && <span>{formatLiveRefreshTime(bridge.lastAlert.publishedAt)}</span>}
-        {latest && <span>{latest}</span>}
-      </div>
-    </div>
-  );
-}
-
-function cleanGodelBridgeMessage(message: string): string {
-  return /RUBICON_GODEL_NEWS_URL|godel:scrape|capture-godel-news/i.test(message) ? "" : message;
 }
 
 function MorningSourceStrip({ sources, error, loading }: { sources: MorningBriefSource[]; error: string | null; loading: boolean }) {

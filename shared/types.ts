@@ -730,25 +730,6 @@ export type MorningLiveUpdatesPayload = {
   sources: MorningBriefSource[];
 };
 
-export type GodelAlertBridgeStatus = {
-  bookmarkletUrl: string;
-  generatedAt: string;
-  lastAlert: {
-    headline?: string;
-    publishedAt?: string | null;
-    sourceUrl?: string | null;
-  } | null;
-  lastRejected: {
-    at?: string;
-    reason?: string;
-    text?: string;
-  } | null;
-  message: string;
-  mode: "dom-bridge";
-  setupUrl: string;
-  validCount: number;
-};
-
 export type MorningAiNotesBlock = {
   available: boolean;
   bullets: string[];

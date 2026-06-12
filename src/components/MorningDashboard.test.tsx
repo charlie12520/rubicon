@@ -5,12 +5,11 @@ import type { ComponentType } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { IbkrHoldingPosition, MorningBriefPayload, MorningBriefSource, MorningCalendarEvent, MorningMajorEvent } from "../../shared/types";
 import type { SpreadSpeedFrame, SpxLiveBarsLiveStatus } from "../../shared/types";
-import { fetchGodelAlertBridgeStatus, fetchIbkrHoldings, fetchMorningAiNotes, fetchMorningBrief, fetchMorningLiveUpdates, refreshIbkrHoldings } from "../api";
+import { fetchIbkrHoldings, fetchMorningAiNotes, fetchMorningBrief, fetchMorningLiveUpdates, refreshIbkrHoldings } from "../api";
 import { easternDateKey } from "../easternDate";
 import * as MorningDashboardModule from "./MorningDashboard";
 
 vi.mock("../api", () => ({
-  fetchGodelAlertBridgeStatus: vi.fn(),
   fetchIbkrHoldings: vi.fn(),
   fetchMorningAiNotes: vi.fn(),
   fetchMorningBrief: vi.fn(),
@@ -67,7 +66,6 @@ const fetchMorningBriefMock = vi.mocked(fetchMorningBrief);
 const fetchMorningLiveUpdatesMock = vi.mocked(fetchMorningLiveUpdates);
 const fetchMorningAiNotesMock = vi.mocked(fetchMorningAiNotes);
 const fetchIbkrHoldingsMock = vi.mocked(fetchIbkrHoldings);
-const fetchGodelAlertBridgeStatusMock = vi.mocked(fetchGodelAlertBridgeStatus);
 const refreshIbkrHoldingsMock = vi.mocked(refreshIbkrHoldings);
 
 afterEach(() => {
@@ -470,17 +468,6 @@ describe("MorningDashboard brief races", () => {
       source: "test",
       status: "missing",
     });
-    fetchGodelAlertBridgeStatusMock.mockResolvedValue({
-      bookmarkletUrl: "http://example.test/bookmarklet",
-      generatedAt: "2026-05-29T12:00:00.000Z",
-      lastAlert: null,
-      lastRejected: null,
-      message: "idle",
-      mode: "dom-bridge",
-      setupUrl: "http://example.test/setup",
-      validCount: 0,
-    });
-
     const { rerender } = render(
       <MorningDashboard
         onOpenReplay={() => undefined}
@@ -812,17 +799,6 @@ function mockMorningDashboardFetches({
     source: aiNotesSource,
   });
   fetchIbkrHoldingsMock.mockResolvedValue(ibkrHoldingsFixture("ok"));
-  fetchGodelAlertBridgeStatusMock.mockResolvedValue({
-    bookmarkletUrl: "javascript:void 0",
-    generatedAt: `${brief.date}T12:00:00.000Z`,
-    lastAlert: null,
-    lastRejected: null,
-    message:
-      "Set RUBICON_GODEL_NEWS_URL with an authenticated Godel news endpoint, use the minimized-safe DOM bridge setup at /api/godel-alert-bridge/setup, run npm run godel:scrape to browser-scrape Godel, or stage data/godel-live-news.json with scripts/capture-godel-news.mjs.",
-    mode: "dom-bridge",
-    setupUrl: "/api/godel-alert-bridge/setup",
-    validCount: 0,
-  });
 }
 
 function ibkrHoldingsFixture(status: "ok" | "missing" | "error") {

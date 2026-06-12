@@ -10,8 +10,6 @@
     "build": "tsc -b && vite build",
     "desktop": "node scripts/launch-desktop.mjs",
     "desktop:install": "node scripts/install-desktop-shortcut.mjs",
-    "godel:capture": "node scripts/capture-godel-news.mjs",
-    "godel:scrape": "node scripts/scrape-godel-news.mjs",
     "google:snapshot": "tsx scripts/refresh-google-drive-snapshot.ts",
     "google:upload": "tsx scripts/upload-spx-google-pipeline.ts",
     "ibkr:holdings": "python scripts/refresh-ibkr-holdings-snapshot.py",

@@ -46,6 +46,9 @@ Trader opens Rubicon -> Morning shows the macro/live/model premarket brief -> Re
 
 ## Last Completed Change
 
+- A190 - **Godel DOM bridge fully removed** (user: 'full removal' - superseded by the A186-A189 scraper). Deleted godelAlertBridge.ts + tests, the 4 bridge routes + orphaned helpers in index.ts, the GodelBridgeControls card + state/polls in MorningDashboard (was showing stale June-2 chat fragments), fetchGodelAlertBridgeStatus, GodelAlertBridgeStatus type, 90 lines of .godel-bridge-* CSS, legacy pre-scraper scripts (capture-godel-news.mjs / scrape-godel-news.mjs + npm aliases), bridge test fixtures, and untracked data artifacts (alert-screens dirs, watch logs, calibration PNGs, quarantine, test fixture). Kept: the live data/godel-live-news.json capture, the reader's defensive bridge-payload filters (legacy DATA protection), and negative-assertion guards in tests. Gates: typecheck 0, lint 0, 583/583 (exactly -6 bridge tests), build clean, browser check 0 bridge remnants / 0 console errors.
+
+
 - A189 - **Godel watcher auto-starts at logon.** New scripts/godel-news-watcher.vbs (WMI SW_HIDE launch, serve-headless.vbs pattern) + Startup-folder shortcut (schtasks onlogon needs elevation; Startup folder doesn't). Scraper gains a pid-probed single-instance lock (logon fire + manual start can't fight over the profile - duplicate exits cleanly, proven by firing the .lnk while running) and self-logging to godel-news/watcher.log. Verified: launcher starts the watcher (session up 1.5s), exactly one node process survives a duplicate fire, log written by the scraper itself.
 
 

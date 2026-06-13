@@ -34,3 +34,25 @@ Do not merge during a push-only request.
 1. Push only when the user explicitly asks.
 2. Before pushing, confirm the final merge branch is already merged, committed, and validated.
 3. Push the final merge branch with the landing script: `npm run land -- --branch <final-merge-branch> --push`.
+4. After a successful push, sync the visible local Rubicon checkout back to GitHub `main`, but only if it is clean:
+```powershell
+git status --porcelain=v1 --branch
+git fetch origin main
+git switch main
+git pull --ff-only origin main
+```
+Do not use reset, force checkout, or stash. If the visible checkout is dirty, stop and report the dirty files instead of switching branches.
+5. Clean up only the exact final merge and landing worktrees from this push run, after proving each one is safe. Run cleanup from the visible local Rubicon checkout, not from inside a worktree being removed:
+```powershell
+git worktree list --porcelain
+git -C <final-merge-worktree-path> status --porcelain=v1 --branch
+git merge-base --is-ancestor <final-merge-branch> origin/main
+git -C <landing-worktree-path> status --porcelain=v1 --branch
+$landingHead = git -C <landing-worktree-path> rev-parse HEAD
+git merge-base --is-ancestor $landingHead origin/main
+git worktree remove <final-merge-worktree-path>
+git worktree remove <landing-worktree-path>
+git branch -d <final-merge-branch>
+git worktree prune
+```
+Use the exact paths printed by the landing script and `git worktree list --porcelain`; do not infer or glob paths. Remove the final merge worktree only if its status is clean and its branch is already contained in `origin/main`. Remove a detached landing worktree only if its status is clean and its HEAD is already contained in `origin/main`. Delete the final merge branch only after its worktree is removed, and only with `git branch -d`, never `-D`. Never remove active task worktrees such as `agent-TASK-*`, dirty worktrees, or any worktree you did not positively identify as part of the completed merge/push run. If any check fails or is unclear, leave the worktree in place and report it.

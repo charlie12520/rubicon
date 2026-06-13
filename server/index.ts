@@ -11,6 +11,7 @@ import { refreshGoogleDriveSnapshot } from "../scripts/refresh-google-drive-snap
 import { refreshIbkrWalletSnapshot } from "./ibkrWalletRefresh.ts";
 import { armIbkrHoldingsAutoRefresh, readIbkrHoldingsSnapshot, refreshIbkrHoldingsSnapshot } from "./ibkrHoldings.ts";
 import { getDailySyncStatus, startDailyOptionPull, startDailySync } from "./dailySync.ts";
+import { armDailySyncAutoRun, getDailySyncAutoRunStatus } from "./dailySyncAutoRun.ts";
 import { getAppVersionStatus, runAppUpdate } from "./selfUpdate.ts";
 import { getDailySyncCatchupStatus, maybeRunDailySyncCatchup } from "./dailySyncCatchup.ts";
 import { maybeAutoRefreshGoogleDriveSnapshot } from "./googleSnapshotAutoRefresh.ts";
@@ -177,6 +178,7 @@ app.get("/api/daily-sync/status", async (_request, response, next) => {
     const status = await getDailySyncStatus();
     response.json({
       ...status,
+      autoRun: getDailySyncAutoRunStatus(),
       catchup: getDailySyncCatchupStatus(),
     });
   } catch (error) {
@@ -664,6 +666,7 @@ export function startRubiconServer(): ReturnType<typeof app.listen> {
     armSpxLiveBarsAutoStart();
     armSpreadSpeedLiveAutoStart();
     armIndexReconcileAutoRun();
+    armDailySyncAutoRun();
     void maybeRunDailySyncCatchup().then((status) => {
       if (status.refreshedDates.length) {
         invalidateTrackerSnapshotCache();

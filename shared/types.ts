@@ -210,10 +210,30 @@ export type DailySyncCatchupStatus = {
 
 export type DailySyncPipelineState = "idle" | "running" | "completed" | "failed-with-stage-errors" | "failed" | "missing";
 
+export type DailySyncAutoRunStatus = {
+  catchupMinutes: number;
+  configuredTimeEt: string;
+  enabled: boolean;
+  lastAttempt?: {
+    at: string;
+    date: string;
+    message: string;
+    ok: boolean;
+    runId?: string;
+    state?: DailySyncState | "error";
+    targetDate?: string;
+    timeEt: string;
+  };
+  lastFiredDate?: string;
+  lastSkippedDate?: string;
+  tickSeconds: number;
+};
+
 export type DailySyncStatusResult = {
   ok: boolean;
   state: DailySyncState;
   message: string;
+  autoRun?: DailySyncAutoRunStatus;
   command?: string[];
   cwd?: string;
   catchup?: DailySyncCatchupStatus;
@@ -337,6 +357,9 @@ export type DailySummary = {
   spxIntradayBarSize?: string;
   spxIntradayExpectedRows?: number;
   spxIntradayRowCount?: number;
+  reviewMode?: string;
+  reviewReady?: boolean;
+  localReviewStatus?: string;
   tradeStatus: string;
   ibkrEndpointExpectedCount?: number;
   ibkrEndpointConnectedCount?: number;

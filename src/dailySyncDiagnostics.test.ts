@@ -41,6 +41,53 @@ describe("daily sync diagnostics", () => {
     expect(diagnostics.facts).toContainEqual({ label: "Current summary", value: "2026-05-28: partial, 21 entries" });
   });
 
+  it("shows enabled daily pipeline auto-run status", () => {
+    const diagnostics = buildDailySyncDiagnostics(
+      status({
+        autoRun: {
+          catchupMinutes: 5,
+          configuredTimeEt: "16:15",
+          enabled: true,
+          lastAttempt: {
+            at: "2026-06-15T20:15:00.000Z",
+            date: "2026-06-15",
+            message: "Daily pipeline started.",
+            ok: true,
+            runId: "daily-2026-06-15-201500",
+            state: "running",
+            targetDate: "2026-06-15",
+            timeEt: "16:15",
+          },
+          lastFiredDate: "2026-06-15",
+          tickSeconds: 30,
+        },
+      }),
+    );
+
+    expect(diagnostics.facts).toContainEqual({
+      label: "Auto-run",
+      value: "enabled (16:15 ET, 5m catch-up); last fired 2026-06-15 16:15 ET: Daily pipeline started.",
+    });
+  });
+
+  it("shows disabled daily pipeline auto-run status", () => {
+    const diagnostics = buildDailySyncDiagnostics(
+      status({
+        autoRun: {
+          catchupMinutes: 5,
+          configuredTimeEt: "16:15",
+          enabled: false,
+          tickSeconds: 30,
+        },
+      }),
+    );
+
+    expect(diagnostics.facts).toContainEqual({
+      label: "Auto-run",
+      value: "disabled (16:15 ET, 5m catch-up); not fired yet",
+    });
+  });
+
   it("labels a different-date summary as the latest pipeline run", () => {
     const diagnostics = buildDailySyncDiagnostics(status(), "2026-05-29");
 

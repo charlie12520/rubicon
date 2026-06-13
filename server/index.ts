@@ -11,6 +11,7 @@ import { refreshGoogleDriveSnapshot } from "../scripts/refresh-google-drive-snap
 import { refreshIbkrWalletSnapshot } from "./ibkrWalletRefresh.ts";
 import { armIbkrHoldingsAutoRefresh, readIbkrHoldingsSnapshot, refreshIbkrHoldingsSnapshot } from "./ibkrHoldings.ts";
 import { getDailySyncStatus, startDailyOptionPull, startDailySync } from "./dailySync.ts";
+import { armDailySyncAutoRun, getDailySyncAutoRunStatus } from "./dailySyncAutoRun.ts";
 import { getAppVersionStatus, runAppUpdate } from "./selfUpdate.ts";
 import { getDailySyncCatchupStatus, maybeRunDailySyncCatchup } from "./dailySyncCatchup.ts";
 import { maybeAutoRefreshGoogleDriveSnapshot } from "./googleSnapshotAutoRefresh.ts";
@@ -31,7 +32,7 @@ import { armIndexReconcileAutoRun } from "./indexReconcile.ts";
 import { loadMorningBrief, loadMorningLiveUpdates, resolveTc2000Artifact } from "./morningBrief.ts";
 import { loadMorningAiNotes } from "./morningAiNotes.ts";
 import { mergeTradeJournalSnapshot } from "./tradeJournalSnapshot.ts";
-import { showCalendarDesktopAlert, showLiveUpdateDesktopToast } from "./desktopAlert.ts";
+import { showCalendarDesktopAlert, showJournalReviewDesktopAlert, showLiveUpdateDesktopToast } from "./desktopAlert.ts";
 
 export const app = express();
 const port = Number(process.env.PORT ?? 5174);
@@ -177,6 +178,7 @@ app.get("/api/daily-sync/status", async (_request, response, next) => {
     const status = await getDailySyncStatus();
     response.json({
       ...status,
+      autoRun: getDailySyncAutoRunStatus(),
       catchup: getDailySyncCatchupStatus(),
     });
   } catch (error) {
@@ -526,6 +528,27 @@ app.post("/api/desktop-alert/live-update", (request, response) => {
   }
 });
 
+app.post("/api/desktop-alert/journal-review", (request, response) => {
+  try {
+    response.json(
+      showJournalReviewDesktopAlert(
+        {
+          body: request.body?.body,
+          detail: request.body?.detail,
+          title: request.body?.title,
+        },
+        appRoot,
+      ),
+    );
+  } catch (error) {
+    response.status(400).json({
+      generatedAt: new Date().toISOString(),
+      message: error instanceof Error ? error.message : String(error),
+      ok: false,
+    });
+  }
+});
+
 app.get("/api/tc2000-artifact/:dir/:file", (request, response, next) => {
   try {
     response.sendFile(resolveTc2000Artifact(request.params.dir, request.params.file, appRoot));
@@ -643,6 +666,7 @@ export function startRubiconServer(): ReturnType<typeof app.listen> {
     armSpxLiveBarsAutoStart();
     armSpreadSpeedLiveAutoStart();
     armIndexReconcileAutoRun();
+    armDailySyncAutoRun();
     void maybeRunDailySyncCatchup().then((status) => {
       if (status.refreshedDates.length) {
         invalidateTrackerSnapshotCache();

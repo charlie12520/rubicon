@@ -72,4 +72,36 @@ describe("desktop alert helpers", () => {
     expect(spawnArgs[1]).toContain("short");
     expect(spawnArgs[2]).toEqual(expect.objectContaining({ windowsHide: true }));
   });
+
+  it("launches journal-review alerts through the shared native Windows toast helper", async () => {
+    vi.resetModules();
+    const spawn = vi.fn();
+    const spawnSync = vi.fn((_command: string, _args: string[], _options: unknown) => ({
+      status: 0,
+      stderr: "",
+      stdout: "Rubicon.RubiconApp\r\n",
+    }));
+    vi.doMock("node:child_process", () => ({ spawn, spawnSync }));
+
+    const { showJournalReviewDesktopAlert } = await import("./desktopAlert.ts");
+    showJournalReviewDesktopAlert(
+      {
+        body: "2 trades need journal review",
+        detail: "2026-06-15 after-close review",
+        title: "Journal review ready",
+      },
+      "C:\\rubicon",
+    );
+
+    expect(spawn).not.toHaveBeenCalled();
+    const spawnArgs = spawnSync.mock.calls[0] as unknown as [string, string[], Record<string, unknown>];
+
+    expect(spawnArgs[0]).toBe("powershell.exe");
+    expect(spawnArgs[1]).toContain("C:\\rubicon\\scripts\\show-windows-toast.ps1");
+    expect(spawnArgs[1]).toContain("Journal review ready");
+    expect(spawnArgs[1]).toContain("2 trades need journal review");
+    expect(spawnArgs[1]).toContain("2026-06-15 after-close review");
+    expect(spawnArgs[1]).toContain("long");
+    expect(spawnArgs[2]).toEqual(expect.objectContaining({ windowsHide: true }));
+  });
 });

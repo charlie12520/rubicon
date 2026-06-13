@@ -98,3 +98,13 @@ export function showLiveUpdateDesktopToast(payload: DesktopAlertPayload, appRoot
   }
   return launchWindowsToast({ title, body, detail }, appRoot, "short");
 }
+
+export function showDailySyncDesktopToast(payload: DesktopAlertPayload, appRoot: string): DesktopAlertResult {
+  const title = sanitizeDesktopAlertText(payload.title || "Daily pull canceled", 120);
+  const body = sanitizeDesktopAlertText(payload.body, 420);
+  const detail = sanitizeDesktopAlertText(payload.detail ?? "", 360);
+  if (!body) {
+    throw new Error("Desktop alert body is required.");
+  }
+  return launchWindowsToast({ title, body, detail }, appRoot, "long");
+}

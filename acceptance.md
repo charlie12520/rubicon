@@ -9,7 +9,7 @@ Do not add an accepted entry until the task work is merged and validation is suf
 ## Current State
 
 Status:
-Latest accepted merge: MERGE-002
+Latest accepted merge: MERGE-003
 Open risks: None
 Deferred: None
 
@@ -25,6 +25,7 @@ Accepted merge rows are newest-first: add each new `MERGE-###` row directly belo
 
 | Merge | Date | Tasks | Status | Proof |
 |---|---|---|---|---|
+| MERGE-003 | 2026-06-13 | TASK-011, TASK-012 | accepted | `git diff --check origin/main..HEAD`; targeted `rg` checks for live-board sync, commit-default wording, and server recovery safety/runbook terms; see `proof.md#merge-003-2026-06-13-task-011-task-012-docs`. |
 | MERGE-002 | 2026-06-13 | TASK-010 | accepted | `git diff --check AGENTS.md TASKS.md tasks/rollup.md merge_push.md codebase.md`; `git diff --check origin/main..HEAD`; requested coordination-text `rg` checks for live/stale wording and old ambiguity; see `proof.md#merge-002-2026-06-13-task-010-live-rollup-coordination`. |
 | MERGE-001 | 2026-06-13 | TASK-007 | accepted | `git diff --check origin/main..HEAD`; `node --check` for mirror/startup scripts; `npm run validate:mvp` with Desktop AI STUFF mirror evidence paths; local landing validation via `npm run land -- --branch agent/MERGE-001-task-007-docs-runtime`; see `proof.md#merge-001-2026-06-13-task-007-docsruntime-merge`. |
 

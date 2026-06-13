@@ -16,6 +16,7 @@
     "ibkr:holdings": "python scripts/refresh-ibkr-holdings-snapshot.py",
     "index:reconcile": "python scripts/reconcile-index-membership.py --apply",
     "ibkr:wallet": "python scripts/refresh-ibkr-wallet-snapshot.py",
+    "pnl:audit": "tsx scripts/audit-pnl.ts",
     "hooks:install": "node scripts/install-git-hooks.mjs",
     "land": "node scripts/land-agent-branch.mjs",
     "lint": "eslint .",

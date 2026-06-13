@@ -20,6 +20,7 @@ type UpdatePhase = "idle" | "updating" | "restarting";
 
 const RESTART_POLL_MS = 2_500;
 const RESTART_TIMEOUT_MS = 180_000;
+const VERSION_CHECK_INTERVAL_MS = 5 * 60 * 1000;
 
 function gitStatusSummary(status: AppVersionStatus | null): string {
   if (!status?.ok) {
@@ -44,22 +45,34 @@ export function AppUpdateButton({ onBundleRefresh }: { onBundleRefresh: () => vo
 
   useEffect(() => {
     let active = true;
-    fetch("/api/app-version")
-      .then(async (res) => (await res.json()) as AppVersionStatus)
-      .then((payload) => {
+    const checkVersion = async () => {
+      try {
+        const res = await fetch("/api/app-version");
+        const payload = (await res.json()) as AppVersionStatus;
         if (!active) {
           return;
         }
         setStatus(payload);
         setNotice(payload.ok ? null : payload.error ?? "version check failed");
-      })
-      .catch(() => {
+      } catch {
         if (active) {
           setNotice("version check unavailable");
         }
-      });
+      }
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void checkVersion();
+      }
+    };
+
+    void checkVersion();
+    const intervalId = window.setInterval(() => void checkVersion(), VERSION_CHECK_INTERVAL_MS);
+    document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
       active = false;
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, []);
 

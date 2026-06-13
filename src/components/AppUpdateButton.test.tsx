@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppUpdateButton } from "./AppUpdateButton";
 
@@ -32,6 +32,7 @@ function stubVersion(payload: Partial<Record<string, unknown>>, postResult?: Rec
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -45,6 +46,41 @@ describe("AppUpdateButton", () => {
     await waitFor(() => expect(screen.getByRole("button")).toHaveTextContent("Latest"));
     fireEvent.click(screen.getByRole("button"));
     expect(onBundleRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("automatically re-checks GitHub and reflects a newly available update", async () => {
+    vi.useFakeTimers();
+    const base = {
+      ok: true,
+      currentBranch: "main",
+      isMainBranch: true,
+      localRev: "aaaa1111",
+      localRevShort: "aaaa111",
+      remoteBranch: "origin/main",
+      remoteRevShort: "aaaa111",
+      behindCount: 0,
+      aheadCount: 0,
+      dirtyFiles: [],
+      marketHours: false,
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ json: async () => base } as Response)
+      .mockResolvedValueOnce({ json: async () => ({ ...base, remoteRevShort: "bbbb222", behindCount: 2 }) } as Response);
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AppUpdateButton onBundleRefresh={vi.fn()} />);
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByRole("button")).toHaveTextContent("Latest");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+    });
+
+    expect(screen.getByRole("button")).toHaveTextContent("Update (2)");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("offers the update when behind GitHub and posts after confirmation", async () => {

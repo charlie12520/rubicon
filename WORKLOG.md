@@ -7,7 +7,7 @@ core_loop_status: "GREEN"
 last_validation_result: "GREEN"
 same_blocker_count: 0
 blocked: false
-# Summary only - naive_acceptance.md yaml is the acceptance-ID authority (this header drifts):
+# Summary only - acceptance.md is the accepted-merge authority (this header drifts):
 last_green_ids_summary: "A01-A12, A14-A19, A21-A194, A196-A200"
 last_yellow_ids: []
 last_red_ids: []
@@ -17,10 +17,10 @@ last_blocker_signature: ""
 
 ## Workflow Note
 
-`WORKLOG.md` is landed history, not the active multi-agent task board. Section agents should record
-claims, progress, focused validation, and merge notes in `TASKS.md`. The final merge agent updates
-this file only after integrating task branches/worktrees, resolving any duplicate `A###` IDs, and
-running the agreed validation.
+`WORKLOG.md` is landed history, not the active multi-agent task ledger. Section agents should keep
+live status in `TASKS.md` and compact task details in `tasks/rollup.md`. The final merge agent
+updates this file only after integrating task branches/worktrees, assigning a `MERGE-###` in
+`acceptance.md`, and running the agreed validation.
 
 ## Current Objective
 

@@ -6,7 +6,7 @@
 
 | Working on | Go to |
 |---|---|
-| Claiming or merging multi-agent work | `TASKS.md`, then `AGENTS.md` sections 2-3 |
+| Claiming or merging multi-agent work | `AGENTS.md`, `TASKS.md`, `tasks/rollup.md`, then `merge_push.md` when merging/pushing |
 | A server endpoint | Section 5.2 routes, then section 5.3 modules |
 | A frontend API call | Section 4.4 API client |
 | Morning calendar/live updates/heatmap | Sections 4.2, 5.2, 5.3 |
@@ -39,8 +39,9 @@
 | `npm run validate:mvp` | Runs typecheck → lint → test → build (the full gate). |
 | `npm run desktop` / `npm run desktop:install` | Launches or installs the Rubicon desktop app window. |
 
-The active multi-agent board is `TASKS.md`. Section agents record task validation there; final
-merged proof goes in `naive_validation.md`. `archive/VALIDATION.md` is historical/reference detail.
+The active multi-agent board is `TASKS.md`. Section agents keep compact task details in
+`tasks/rollup.md`; final merged proof goes in `proof.md`, with verdicts in `acceptance.md`.
+`archive/VALIDATION.md` is historical/reference detail.
 CI (`.github/workflows/ci.yml`, `windows-latest`) runs typecheck/lint/test on push to main + PRs.
 
 ## 3. Architecture At A Glance
@@ -281,9 +282,9 @@ Per trading date, loaders expect files such as `entries.csv`, `daily_sync_summar
 
 ## 9. Conventions
 
-- Coordinate parallel section work in `TASKS.md`. Section agents update task status and handoff
-  notes there; final merge agents update `WORKLOG.md`, `naive_acceptance.md`, and
-  `naive_validation.md`.
+- Coordinate parallel section work in `TASKS.md`. Section agents keep compact owned detail rows in
+  `tasks/rollup.md`; final merge agents update `WORKLOG.md`, `acceptance.md`, `proof.md`, and
+  durable `memory/*.md` entries when needed.
 - Keep pure logic in `.ts` modules with co-located `*.test.ts`.
 - Use `src/easternDate.ts` (client) / `server/easternClock.ts` (server) for Eastern date keys/time math.
 - Keep `src/api.ts` as the single frontend `/api/*` caller.

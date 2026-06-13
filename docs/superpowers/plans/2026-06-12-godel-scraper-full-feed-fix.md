@@ -6,6 +6,30 @@ This rev supersedes rev 1 (wrongly blamed "must log in") and rev 2 (right
 direction, no element id). The user supplied the exact DOM; direction is now
 concrete: **scrape ONLY the red breaking banner, poll every 3 s.**
 
+## Location (repo relocated 2026-06-12)
+
+- **Canonical repo is now `C:\Users\charl\Desktop\Rubicon\spx-spread-replay-tracker`**
+  (moved from `C:\Users\charl\Desktop\AI STUFF\spx-spread-replay-tracker`; pre-clone
+  snapshot kept at `C:\Users\charl\Desktop\Rubicon\_preclone_snapshot_20260612-201138`).
+  Every `scripts/…`, `server/…`, `data/…`, `docs/…` path below is relative to this root.
+- **`godel-news/` did NOT move** — it stays at `C:\Users\charl\Desktop\AI STUFF\godel-news`
+  because the scraper hardcodes `const ROOT = "C:/Users/charl/Desktop/AI STUFF/godel-news"`.
+  It is therefore **no longer a repo sibling**: AGENTS.md §5's `../godel-news` is now
+  WRONG — refer to it by its absolute path. (Functionally fine; `ROOT` is absolute, so
+  archives/lock/log keep landing there regardless of where the repo lives.)
+- **Bridge coupling — the move's one real hazard.** `RUBICON_CAPTURE` is
+  REPO_ROOT-relative, so the scraper writes the panel file into *whichever repo copy
+  launches it* (`<repo>\data\godel-live-news.json`); the live server reads
+  `data/godel-live-news.json` relative to *its own* cwd. **The Godel watcher and the
+  5174 server must run from the SAME copy**, or the panel silently serves stale rows.
+  Before trusting the feed, confirm both Startup entries — "Godel News Watcher" and
+  "Rubicon Server" — now launch from the new path. (The currently-running watcher +
+  server still serve the OLD path — they started before the move and migrate at the
+  next logon/restart once the shortcuts point here.)
+- **Out of scope here:** physically relocating `godel-news/` under the Rubicon folder
+  (would need the dir moved AND the scraper's `ROOT` updated AND a watcher relaunch).
+  Flag if wanted; not done in this plan.
+
 ## The target element (confirmed from user-supplied DOM)
 
 ```html
@@ -162,13 +186,16 @@ This touches only the **Godel watcher**, never the 5174 server / TWS / feeds:
 2. `npm run typecheck && npm run test` (narrow first), then `validate:mvp` if no
    other agent is building.
 3. Restart the watcher to pick up the change: stop the pid in
-   `godel-news/watcher.lock.json` (`Stop-Process`), close its off-screen Edge if
-   it lingers, relaunch via the Startup shortcut "Godel News Watcher" /
-   `wscript scripts\godel-news-watcher.vbs`. Confirm `watcher.log` shows the new
+   `C:\Users\charl\Desktop\AI STUFF\godel-news\watcher.lock.json` (`Stop-Process`),
+   close its off-screen Edge if it lingers, relaunch via the Startup shortcut
+   "Godel News Watcher" /
+   `wscript "C:\Users\charl\Desktop\Rubicon\spx-spread-replay-tracker\scripts\godel-news-watcher.vbs"`.
+   **First confirm that shortcut (and the 5174 server) now point at the new repo**
+   (see Location — same-copy coupling), then confirm `watcher.log` shows the new
    build and `NEWS`/banner lines.
-4. WORKLOG entry under `## Last Completed Change`, opening with `A196`.
+4. WORKLOG entry under `## Last Completed Change`, opening with `A199`.
 
-## Acceptance (A196)
+## Acceptance (A199)
 - A red breaking banner visible on Godel (like the 1:41 PM Iran line) lands in
   `data/godel-live-news.json` within ~1 poll, `source:"Godel Breaking"`, ISO time,
   no AAPL.
@@ -186,3 +213,7 @@ This touches only the **Godel watcher**, never the 5174 server / TWS / feeds:
   `scripts/godel-news-watcher.vbs` (WMI SW_HIDE) → node scraper; single-instance
   via `godel-news/watcher.lock.json`.
 - Headless is CF-blocked for Godel; off-screen headed Edge is the only route.
+- Relocation 2026-06-12: repo now `C:\Users\charl\Desktop\Rubicon\spx-spread-replay-tracker`;
+  `godel-news/` stays absolute at `C:\Users\charl\Desktop\AI STUFF\godel-news` (scraper
+  `ROOT`) and is no longer a repo sibling; scraper + 5174 server must share one repo copy
+  because the bridge file (`RUBICON_CAPTURE`) is repo-relative.

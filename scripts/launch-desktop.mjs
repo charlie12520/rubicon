@@ -4,10 +4,12 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { applyMirrorEnvDefaults } from "./mirror-env.mjs";
 import { ensureRubiconIcon } from "./rubicon-icon.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(scriptDir, "..");
+applyMirrorEnvDefaults();
 ensureRubiconIcon(path.join(appRoot, "public", "favicon.ico"));
 const defaultGoogleServiceAccountPath = path.resolve(appRoot, "..", ".secrets", "spx-replay-google-service-account.json");
 if (!process.env.GOOGLE_SERVICE_ACCOUNT_PATH && fs.existsSync(defaultGoogleServiceAccountPath)) {

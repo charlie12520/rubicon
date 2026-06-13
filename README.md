@@ -120,11 +120,11 @@ The desktop wallet card also exposes an `IBKR` refresh button that calls the sam
 
 ## Agent Coordination
 
-Rubicon supports parallel section work by using `TASKS.md` as the active board. Section agents claim
-or update `TASK-###` rows there, record focused validation and merge notes there, and leave
-`WORKLOG.md`, `naive_acceptance.md`, and `naive_validation.md` for the final merge/landing agent.
-Final acceptance IDs (`A###`) are assigned only after task branches/worktrees are integrated and the
-merged result is validated.
+Rubicon supports parallel section work through `TASKS.md` and `tasks/rollup.md`. `TASKS.md` is the
+live board; `tasks/rollup.md` is the compact task-owned detail ledger. Section agents edit only their
+own rows and leave `acceptance.md`, `proof.md`, `memory/`, and `WORKLOG.md` updates to the final
+merge agent. Accepted merge IDs (`MERGE-###`) are assigned only after task branches/worktrees are
+integrated and the merged result is validated.
 
 ## Validate
 
@@ -136,7 +136,7 @@ That runs TypeScript typecheck, ESLint (zero-tolerance, also CI-gated), the full
 
 ## Completion Audit
 
-`archive/COMPLETION_AUDIT.md` is a point-in-time audit from 2026-05-29. Current acceptance and validation status live in `WORKLOG.md`, `naive_acceptance.md`, and `naive_validation.md`.
+`archive/COMPLETION_AUDIT.md` is a point-in-time audit from 2026-05-29. Current acceptance and validation status live in `acceptance.md`, `proof.md`, `validation.md`, and `WORKLOG.md`.
 
 ## Data Sources
 
@@ -155,5 +155,6 @@ That runs TypeScript typecheck, ESLint (zero-tolerance, also CI-gated), the full
 ## QA Artifacts
 
 - Historical screenshots and QA server logs are archived under `archive/artifacts/`.
-- Active section-agent proof lives in `TASKS.md`; final proof lives in `WORKLOG.md`,
-  `naive_acceptance.md`, and `naive_validation.md`.
+- Active section-agent status lives in `TASKS.md`; compact task detail lives in `tasks/rollup.md`.
+  Final proof lives in `proof.md`, with accepted merge verdicts in `acceptance.md` and polished
+  summaries in `WORKLOG.md`.

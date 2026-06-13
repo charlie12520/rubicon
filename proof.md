@@ -6,6 +6,14 @@ This is the receipt file: it records the validation evidence that justified each
 
 ## Proof Entries
 
+## MERGE-004 - 2026-06-13 - TASK-013 TASK-014 TASK-015 Shipped Behavior
+
+Tasks: TASK-013, TASK-014, TASK-015
+Validation: `npm run validate:mvp` with `SPX_GOOGLE_DRIVE_TRACKER_SNAPSHOT_PATH=C:\Users\charl\Desktop\Rubicon\spx-spread-replay-tracker\data\google-drive-tracker-snapshot.json` and `SPX_GOOGLE_RECEIPT_CHECKS_PATH=C:\Users\charl\Desktop\Rubicon\spx-spread-replay-tracker\data\google-drive-receipt-checks.json`; Browser smoke on scratch `http://127.0.0.1:5189/`; `Invoke-RestMethod http://127.0.0.1:5189/api/health`.
+Result: Accepted after integration into `agent/MERGE-004-task-013-014-015`.
+Evidence: TASK-013 commits `dd7ec1d` and `6cc6b4a`, TASK-014 commit `a2d395f`, and TASK-015 commit `9c82643` merged cleanly into the MERGE-004 integration worktree from `origin/main`. Full validation passed typecheck, lint, Vitest 97 files passed / 1 skipped with 623 passed tests / 9 skipped tests, and production build produced `dist/assets/index-D9VvzMSL.css` and `dist/assets/index-Bv91pNCU.js` with the existing large-chunk warning. Browser smoke through the scratch Express server rendered the Rubicon shell, Morning surface, 14 synced sessions, and 14 buttons with no console errors; `/api/health` returned `ok:true` for the scratch server PID `47156`, which was then stopped.
+Known gaps / failure class: The first bare worktree `npm run validate:mvp` failed in `server/dataImporter.test.ts` because the fresh worktree had no Google connector snapshot/receipt evidence files. Failure class: `environment`. The rerun with explicit visible-checkout connector evidence paths passed. TASK-013's external AI STUFF collector edits remain outside Rubicon git as documented by the section agent; the full wrapper exact run still depends on closed TWS/TC2000 state and was not rerun at merge time.
+
 ## MERGE-003 - 2026-06-13 - TASK-011 TASK-012 Docs
 
 Tasks: TASK-011, TASK-012

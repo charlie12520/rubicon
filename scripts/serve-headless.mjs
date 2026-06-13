@@ -16,9 +16,11 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { applyMirrorEnvDefaults } from "./mirror-env.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(scriptDir, "..");
+applyMirrorEnvDefaults();
 const logPath = path.join(appRoot, "data", "serve-headless.log");
 
 // Truncate per launch — this log only ever describes the most recent start.

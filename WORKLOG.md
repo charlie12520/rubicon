@@ -7,7 +7,7 @@ core_loop_status: "GREEN"
 last_validation_result: "GREEN"
 same_blocker_count: 0
 blocked: false
-# Summary only - naive_acceptance.md yaml is the acceptance-ID authority (this header drifts):
+# Summary only - acceptance.md is the accepted-merge authority (this header drifts):
 last_green_ids_summary: "A01-A12, A14-A19, A21-A194, A196-A200"
 last_yellow_ids: []
 last_red_ids: []
@@ -17,10 +17,10 @@ last_blocker_signature: ""
 
 ## Workflow Note
 
-`WORKLOG.md` is landed history, not the active multi-agent task board. Section agents should record
-claims, progress, focused validation, and merge notes in `TASKS.md`. The final merge agent updates
-this file only after integrating task branches/worktrees, resolving any duplicate `A###` IDs, and
-running the agreed validation.
+`WORKLOG.md` is landed history, not the active multi-agent task ledger. Section agents should keep
+live status in `TASKS.md` and compact task details in `tasks/rollup.md`. The final merge agent
+updates this file only after integrating task branches/worktrees, assigning a `MERGE-###` in
+`acceptance.md`, and running the agreed validation.
 
 ## Current Objective
 
@@ -53,6 +53,8 @@ Trader opens Rubicon -> Morning shows the macro/live/model premarket brief -> Re
 - Blocked: none
 
 ## Last Completed Change
+
+- MERGE-001 - **TASK-007 docs/runtime merge accepted.** Integrated `agent/TASK-007-docs-runtime` into `agent/MERGE-001-task-007-docs-runtime`, replacing legacy acceptance/proof docs with `acceptance.md` and `proof.md`, adding `validation.md`, creating section memory baselines, documenting newest-first mutable tables, and adding `scripts/mirror-env.mjs` defaults for the Desktop Rubicon / AI STUFF split. Validation: `git diff --check origin/main..HEAD`; `node --check` for mirror/startup scripts; `npm run validate:mvp` with Desktop AI STUFF mirror evidence paths; local landing validation via `npm run land -- --branch agent/MERGE-001-task-007-docs-runtime`. No push or live server restart.
 
 - A200 - **Out-of-section edit notes are required for parallel agents.** AGENTS.md, CLAUDE.md, and TASKS.md now require section agents to record any file touched outside their claimed section with the file path, reason, and coordination risk. TASKS.md includes an `Out-of-section changes` field in the task template, and the final merge checklist now requires merge agents to inspect those notes before landing. Validation: docs-only drift/ledger checks; `git diff --check` clean aside from line-ending warnings.
 

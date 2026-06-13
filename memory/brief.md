@@ -15,5 +15,7 @@ Accepted (A186-A189 built; bridge removed A190)
 
 ## Changelog
 
+Changelog rows are newest-first: add each new row directly below the table header.
+
 | Date | Merge | Notes |
 |---|---|---|

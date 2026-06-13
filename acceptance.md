@@ -21,6 +21,8 @@ Deferred:
 
 ## Accepted Work
 
+Accepted merge rows are newest-first: add each new `MERGE-###` row directly below the table header.
+
 | Merge | Date | Tasks | Status | Proof |
 |---|---|---|---|---|
 | MERGE-001 | YYYY-MM-DD | TASK-001, TASK-002 | accepted | Command/API/browser/data proof; link to `proof.md#merge-###`; any remaining risk. |

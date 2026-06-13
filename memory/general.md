@@ -119,5 +119,7 @@ Drafted by user workflow request; final merge ID is assigned by the merge agent.
 
 ## Changelog
 
+Changelog rows are newest-first: add each new row directly below the table header.
+
 | Date | Merge | Notes |
 |---|---|---|

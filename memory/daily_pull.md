@@ -15,6 +15,8 @@ Accepted
 
 ## Changelog
 
+Changelog rows are newest-first: add each new row directly below the table header.
+
 | Date | Merge | Notes |
 |---|---|---|
 

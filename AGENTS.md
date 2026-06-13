@@ -6,6 +6,8 @@ Always use `codebase.md` to find files before searching or editing code.
 
 Always pressure-test the prompt and your assumptions against the code, docs, git state, runtime evidence, and reality before acting on them.
 
+Markdown tables that accumulate dated/task/merge/proof/history rows are newest-first: insert new rows directly below the table header. Static reference tables, such as status values, routing maps, and quick references, keep their logical order.
+
 Read `memory/general.md` and the relevant section memory file before reversing or questioning an existing architecture decision.
 
 Only merge agents update `memory/*.md`; section agents read memory but do not edit it.

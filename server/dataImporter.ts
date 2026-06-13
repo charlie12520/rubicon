@@ -41,7 +41,7 @@ const REPLAY_SAFE_STATE_FILE = "rubicon_replay_safe_state.json";
 const REPLAY_SAFE_STATE_SCHEMA = "rubicon-replay-safe-state";
 const REPLAY_SAFE_STATE_VERSION = 4;
 
-type CsvRow = Record<string, string>;
+export type CsvRow = Record<string, string>;
 
 type JsonRecord = Record<string, unknown>;
 
@@ -734,7 +734,7 @@ function splitLegSymbols(value: string): string[] {
     .filter(Boolean);
 }
 
-function normalizeTrade(row: CsvRow, source: string): TradeRecord {
+export function normalizeTrade(row: CsvRow, source: string): TradeRecord {
   const spreadClass = row.spread_class ?? "";
   const legs = parseLegs(row.spread_key ?? "", row.legs ?? "");
   const side = inferSide(spreadClass, legs);
@@ -1765,7 +1765,7 @@ function isSpxOptionRow(row: CsvRow, date: string): boolean {
   return rowExpiry === expectedExpiry && rowHasSpxRoot(row) && rowHasOptionSideAndStrike(row);
 }
 
-function isSpxSpreadTrade(trade: TradeRecord): boolean {
+export function isSpxSpreadTrade(trade: TradeRecord): boolean {
   return trade.legs.length >= 2 && trade.legs.every((leg) => normalizeSymbol(leg.localSymbol).startsWith("SPXW "));
 }
 

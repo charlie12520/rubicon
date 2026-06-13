@@ -12,4 +12,4 @@ Tasks:
 Validation:
 Result:
 Evidence:
-Known gaps:
+Known gaps / failure class:

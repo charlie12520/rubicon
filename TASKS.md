@@ -38,7 +38,7 @@ Use `TASKS.md` for live task status. Use `tasks/rollup.md` for compact task-owne
 | TASK-003 | Docs / Archive | Archive deprecated root docs and QA artifacts; refresh active references | Legacy landed branch; no active worktree | merged | Landed before `MERGE-###`; see `WORKLOG.md`. |
 | TASK-004 | Docs / Governance | Rewrite active Markdown copy for task-first section agents and final merge IDs | Legacy landed branch; no active worktree | merged | Landed before `MERGE-###`; see `WORKLOG.md`. |
 | TASK-005 | Docs / Governance | Require explicit notes for out-of-section edits in task handoffs | Legacy landed branch; no active worktree | merged | Landed before `MERGE-###`; see `WORKLOG.md`. |
-| TASK-007 | General / Docs and Runtime | Deprecate old AI STUFF Rubicon folders and update mirror env defaults; strengthen acceptance proof rules | Branch `agent/TASK-007-docs-runtime`; current Desktop mirror | ready_for_commit | New acceptance evidence-standard doc change is validated; user approval needed before commit. |
+| TASK-007 | General / Docs and Runtime | Deprecate old AI STUFF Rubicon folders and update mirror env defaults; strengthen acceptance/validation proof rules | Branch `agent/TASK-007-docs-runtime`; current Desktop mirror | ready_for_commit | New acceptance evidence-standard and validation failure-classification doc changes are validated; user approval needed before commit. |
 
 ## Section Routing
 

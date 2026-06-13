@@ -66,6 +66,8 @@ http://127.0.0.1:5174
 
 The production desktop launcher serves the built app from the API server after verifying `/api/health` reports `rubicon`; if one local address is occupied by another project, it tries the next Rubicon-ready address. You do not need to manually open that URL when using the desktop shortcut.
 
+If the installed Rubicon app opens to "refused to connect", recover the live server with [docs/runbooks/rubicon-server-recovery.md](docs/runbooks/rubicon-server-recovery.md). That runbook checks `http://127.0.0.1:5174/api/health`, starts only the existing headless launcher when nothing is listening, and avoids repo edits, branch changes, TWS, Godel, Edge, and live feed processes.
+
 ## Refresh Google Tracker Snapshot
 
 The app can rebuild `data/google-drive-tracker-snapshot.json` through the Google Sheets API. By default it reads `Daily Sync Runs!A1:AA1000`, which covers the current tracker tab depth while staying within a bounded Sheets read:

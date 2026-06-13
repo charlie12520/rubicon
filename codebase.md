@@ -12,6 +12,7 @@ Rubicon sections:
 Servers:
 - Dev: `npm run dev` starts Vite on `5173` and API on `5174`; `/api` is proxied.
 - Live app/API is usually `http://127.0.0.1:5174`; do not reuse it for scratch checks.
+- If the installed desktop app says "refused to connect", use `docs/runbooks/rubicon-server-recovery.md` to recover the live server without repo edits, task creation, branch changes, or touching TWS/Godel/live feed processes.
 - Scratch verification server: use `127.0.0.1` on ports `5189-5199`, build first if UI is needed, and kill only the exact PID you started.
 - Browser proof uses `playwright-core` with Edge; keep temporary scripts inside the repo so module resolution works.
 
@@ -27,6 +28,7 @@ Doc map:
 - `memory/<section>.md` - section-specific project memory
 - `DECISIONS.md` - original unsorted decision log
 - `validation.md` - concise validation selector
+- `docs/runbooks/rubicon-server-recovery.md` - no-edit runtime procedure for restoring the live `127.0.0.1:5174` Rubicon server after a refused-to-connect app window
 
 If these anchors are not enough, use `detailedcodebase.md` before broad searching.
 

@@ -1,4 +1,4 @@
-import type { DailyPipelineStage, DailySyncStatusResult, DailySyncStep } from "../shared/types";
+import type { DailyPipelineStage, DailySyncAutoRunStatus, DailySyncStatusResult, DailySyncStep } from "../shared/types";
 
 export type DailySyncDiagnostics = {
   available: boolean;
@@ -66,6 +66,7 @@ export function buildDailySyncDiagnostics(status: DailySyncStatusResult | null |
       ...(status.googleUploaded !== undefined ? [{ label: "Google", value: status.googleUploaded ? "uploaded" : "not uploaded" }] : []),
       ...(status.runId ? [{ label: "Run ID", value: status.runId }] : []),
       { label: "Target", value: targetLabel(status) },
+      ...(status.autoRun ? [{ label: "Auto-run", value: autoRunLabel(status.autoRun) }] : []),
       { label: latestSummaryLabel, value: summaryLabel(status) },
       { label: "Updated", value: status.generatedAt },
     ],
@@ -102,4 +103,19 @@ function summaryLabel(status: DailySyncStatusResult): string {
   const entries = summary.entryCount ?? 0;
   const availability = summary.status ?? "unknown";
   return `${summary.date}: ${availability}, ${entries} entr${entries === 1 ? "y" : "ies"}`;
+}
+
+function autoRunLabel(autoRun: DailySyncAutoRunStatus): string {
+  const base = `${autoRun.enabled ? "enabled" : "disabled"} (${autoRun.configuredTimeEt} ET, ${autoRun.catchupMinutes}m catch-up)`;
+  if (autoRun.lastAttempt) {
+    const outcome = autoRun.lastAttempt.ok ? "last fired" : "last failed";
+    return `${base}; ${outcome} ${autoRun.lastAttempt.date} ${autoRun.lastAttempt.timeEt} ET: ${autoRun.lastAttempt.message}`;
+  }
+  if (autoRun.lastFiredDate) {
+    return `${base}; last fired ${autoRun.lastFiredDate}`;
+  }
+  if (autoRun.lastSkippedDate) {
+    return `${base}; last skipped ${autoRun.lastSkippedDate}`;
+  }
+  return `${base}; not fired yet`;
 }

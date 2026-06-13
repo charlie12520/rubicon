@@ -6,6 +6,14 @@ This is the receipt file: it records the validation evidence that justified each
 
 ## Proof Entries
 
+## MERGE-005 - 2026-06-13 - TASK-016 TASK-017 TASK-018 Shipped Behavior
+
+Tasks: TASK-016, TASK-017, TASK-018
+Validation: `npm run validate:mvp` with `SPX_GOOGLE_DRIVE_TRACKER_SNAPSHOT_PATH=C:\Users\charl\Desktop\Rubicon\spx-spread-replay-tracker\data\google-drive-tracker-snapshot.json` and `SPX_GOOGLE_RECEIPT_CHECKS_PATH=C:\Users\charl\Desktop\Rubicon\spx-spread-replay-tracker\data\google-drive-receipt-checks.json`; Browser smoke on scratch `http://127.0.0.1:5189/`; `Invoke-RestMethod http://127.0.0.1:5189/api/health`.
+Result: Accepted after integration into `agent/MERGE-005-task-016-017-018`.
+Evidence: TASK-016 commit `4c18f4f`, TASK-017 commit `d2cb268`, and TASK-018 commit `a7f07aa` were merged into the MERGE-005 integration worktree from `origin/main`. Full validation passed typecheck, lint, Vitest 98 files passed / 1 skipped with 632 passed tests / 9 skipped tests, and production build produced `dist/assets/index-D9VvzMSL.css` and `dist/assets/index-B8pizGRH.js` with the existing large-chunk warning. Browser smoke through the scratch Express server rendered the Rubicon shell, Morning surface, Dev branch badge, and no console errors; `/api/health` returned `ok:true` for scratch server PID `49516`, which was then stopped.
+Known gaps / failure class: `npm ci` reported one existing high-severity advisory. TASK-018's task-branch full `npm test` gap was the known fresh-worktree Google snapshot/receipt evidence issue; MERGE-005 validation used explicit connector evidence paths and passed. No live `5174`, TWS, Godel, or Windows Task Scheduler changes were made.
+
 ## MERGE-004 - 2026-06-13 - TASK-013 TASK-014 TASK-015 Shipped Behavior
 
 Tasks: TASK-013, TASK-014, TASK-015

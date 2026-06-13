@@ -6,6 +6,14 @@ This is the receipt file: it records the validation evidence that justified each
 
 ## Proof Entries
 
+## MERGE-006 - 2026-06-13 - TASK-019 Live Board Sync Governance
+
+Tasks: TASK-019
+Validation: `git diff --check origin/main..HEAD`; targeted `rg` checks for `superseded`, `clean-equivalent`, `origin/main` merged-row wording, and old strict-only sync wording in `AGENTS.md`, `TASKS.md`, `tasks/rollup.md`, `merge_push.md`, and `codebase.md`.
+Result: Accepted after integration into `agent/MERGE-006-task-019-live-board-sync`.
+Evidence: TASK-019 commit `cb4eec5` merged cleanly into the MERGE-006 integration worktree from `origin/main`. The accepted docs preserve the clean-equivalent live-board sync path and add a second verified superseded-row path: push agents may sync dirty live board files only when every dirty task ID is already present as `merged` on `origin/main`, with no local-only task IDs, active unsuperseded rows, staged files, or non-board dirt.
+Known gaps / failure class: No app tests or `npm run validate:mvp` were run at merge-branch acceptance time because this merge only changes Markdown governance/docs and does not touch shipped runtime behavior. The landing push path runs the configured validation before updating `origin/main`.
+
 ## MERGE-005 - 2026-06-13 - TASK-016 TASK-017 TASK-018 Shipped Behavior
 
 Tasks: TASK-016, TASK-017, TASK-018

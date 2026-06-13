@@ -37,14 +37,28 @@ Do not merge during a push-only request.
 1. Push only when the user explicitly asks.
 2. Before pushing, confirm the final merge branch is already merged, committed, and validated.
 3. Push the final merge branch with the landing script: `npm run land -- --branch <final-merge-branch> --push`.
-4. After a successful push, sync the visible local Rubicon checkout back to GitHub `main`, but only if it is clean:
+4. After a successful push, sync the visible local Rubicon checkout back to GitHub `main`. Use the clean path when possible:
 ```powershell
 git status --porcelain=v1 --branch
 git fetch origin main
 git switch main
 git pull --ff-only origin main
 ```
-Do not use reset, force checkout, or stash. If the visible checkout is dirty, including live coordination edits in `TASKS.md` or `tasks/rollup.md`, stop and report the dirty files instead of switching branches or overwriting them.
+Do not use reset, force checkout, or stash.
+
+If the visible checkout is dirty only in live board files (`TASKS.md` and/or `tasks/rollup.md`), and those files already match `origin/main`, the dirt is a landed live-board sync artifact rather than unmerged work. In that exact case, reconcile the local branch pointer without sweeping unrelated files:
+```powershell
+git status --porcelain=v1 --branch
+git fetch origin main
+git diff --name-only
+git diff --cached --name-only
+git diff --quiet origin/main -- TASKS.md tasks/rollup.md
+git restore --source=HEAD -- TASKS.md tasks/rollup.md
+git pull --ff-only origin main
+```
+Run this exception only when the visible checkout is already on `main`, `git diff --name-only` lists no files except `TASKS.md` and/or `tasks/rollup.md`, `git diff --cached --name-only` is empty, and `git diff --quiet origin/main -- TASKS.md tasks/rollup.md` exits `0`. The `git restore --source=HEAD` step is allowed only in this verified clean-equivalent case; it temporarily clears the local live-board dirt so the fast-forward can reapply the already-pushed board state from `origin/main`. If `git pull --ff-only origin main` fails after this restore, immediately run `git restore --source=origin/main -- TASKS.md tasks/rollup.md`, then stop and report the failed sync.
+
+If the visible checkout has any unrelated dirty file, any staged file, or live board files that differ from `origin/main`, stop and report the dirty files instead of switching branches, pulling, or overwriting them. Dirty live board files that do not match `origin/main` are unlanded coordination rows and must remain visible.
 5. Clean up only the exact final merge and landing worktrees from this push run, after proving each one is safe. Run cleanup from the visible local Rubicon checkout, not from inside a worktree being removed:
 ```powershell
 git worktree list --porcelain

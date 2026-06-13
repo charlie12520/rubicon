@@ -13,10 +13,11 @@ Use the visible checkout `TASKS.md` for live task status. Use the visible checko
 - A section agent may edit only its own visible checkout task row and its own visible checkout `tasks/rollup.md` row.
 - Before editing live rows, run `git -C C:\Users\charl\Desktop\Rubicon\spx-spread-replay-tracker status --porcelain=v1 --branch`; stop if unrelated dirty files exist.
 - If only `TASKS.md` / `tasks/rollup.md` are dirty, inspect `git -C C:\Users\charl\Desktop\Rubicon\spx-spread-replay-tracker diff -- TASKS.md tasks/rollup.md` and edit only the current task row.
+- After push, live board dirt is sync-safe only when `git diff origin/main -- TASKS.md tasks/rollup.md` is empty; otherwise it is unlanded live coordination state.
 - If work is related to another task, mention `Related: TASK-###` in merge notes instead of editing the other task.
 - If any file outside the assigned section changes, note the path and reason in the task's `tasks/rollup.md` row.
 - Active Board rows are newest-first: add new task rows directly below the table header, above older task rows.
-- Commit only if the user asks, and ask for confirmation before committing.
+- After validation passes, stage explicit intended files and commit the task branch/worktree by default unless the user explicitly says not to commit or validation documents a blocking gap.
 - Merge agents assign `MERGE-###` IDs in `acceptance.md` after integration and validation.
 
 ## Status Values
@@ -27,7 +28,7 @@ Use the visible checkout `TASKS.md` for live task status. Use the visible checko
 | `claimed` | Agent accepted the task but has not made meaningful changes yet. |
 | `in_progress` | Agent is editing or validating. |
 | `blocked` | Agent cannot continue without user input or an external state change. |
-| `ready_for_commit` | Work is validated or the gap is documented; user must approve commit. |
+| `ready_for_commit` | Work is validated or the gap is documented, but commit is intentionally withheld because the user explicitly said not to commit yet, a commit is blocked, or the work cannot be committed safely. |
 | `ready_for_merge` | Committed task branch/worktree is ready for the merge agent. |
 | `merged` | Merge agent integrated the task into the landed branch. |
 | `dropped` | User or merge agent intentionally chose not to land it. |
@@ -36,6 +37,7 @@ Use the visible checkout `TASKS.md` for live task status. Use the visible checko
 
 | Task | Section | Scope | Owner / branch / worktree | Status | Merge notes |
 |---|---|---|---|---|---|
+| TASK-011 | Docs / Governance | Allow push agents to sync visible checkout when only live board files are dirty and already match `origin/main` | Branch `agent/TASK-011-live-board-sync`; worktree `C:\Users\charl\Desktop\Rubicon\rubicon-worktrees\agent-TASK-011-live-board-sync` | ready_for_merge | Docs-only; validation passed: `git diff --check` plus targeted `rg` checks for safe live-board sync wording and commit-default wording. |
 | TASK-010 | Docs / Governance | Make visible-checkout `TASKS.md` and `tasks/rollup.md` the live coordination source; clarify stale worktree snapshot handling | Branch `agent/TASK-010-live-rollup-coordination`; commit `391f233`; merged by `agent/MERGE-002-task-010-live-rollup-coordination` | merged | Accepted in `MERGE-002`; validation and proof recorded in `proof.md`. |
 | TASK-007 | General / Docs and Runtime | Deprecate old AI STUFF Rubicon folders and update mirror env defaults; strengthen acceptance/validation proof rules; add newest-first table rules | Branch `agent/TASK-007-docs-runtime`; merged by `agent/MERGE-001-task-007-docs-runtime` | merged | Accepted in `MERGE-001`; validation and proof recorded in `proof.md`. |
 | TASK-001 | Governance | Multi-agent guardrails: worktree flow, landing scripts/hooks, build lock, Latest off-main behavior | Legacy landed branch; no active worktree | merged | Landed before `MERGE-###`; see `WORKLOG.md`. |

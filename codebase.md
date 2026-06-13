@@ -19,7 +19,7 @@ Doc map:
 - `AGENTS.md` - standing rules and section-agent workflow
 - `acceptance.md` - final accepted-work verdict ledger
 - `codebase.md` - file anchors and server/run basics
-- `merge_push.md` - merge or push workflow only
+- `merge_push.md` - merge or push workflow only, including safe visible-checkout sync when dirty live board files already match `origin/main`
 - `proof.md` - compact proof ledger for accepted merges
 - `TASKS.md` - authoritative live multi-agent board only in the visible local Rubicon checkout; branch/worktree copies are snapshots or proposed state
 - `tasks/rollup.md` - visible-checkout compact live task detail companion to `TASKS.md`; branch/worktree copies may be stale snapshots

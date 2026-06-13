@@ -10,7 +10,7 @@ Rules:
 - Keep cells short; link to a plan or commit when detail would make the table hard to scan.
 - Task rows are newest-first: add new rows directly below the table header, above older rows.
 - Merge agents use live rows from the visible checkout as selection inputs, then write the accepted final ledger state into the final merge branch without letting stale worktree copies overwrite live coordination rows.
-- Push agents may sync through live-board dirt only when `TASKS.md` and `tasks/rollup.md` already match `origin/main`; otherwise they must stop and report the unlanded live rows.
+- Push agents may sync through live-board dirt only when `TASKS.md` and `tasks/rollup.md` already match `origin/main`, or when `merge_push.md` proves every dirty row is superseded by an `origin/main` `merged` row for the same task ID; otherwise they must stop and report the unlanded live rows.
 
 | Task | Dates | Section | Owner / branch / worktree | Status | Files | Validation | Out-of-section changes | Blockers / risks | Merge notes | Review notes |
 |---|---|---|---|---|---|---|---|---|---|---|

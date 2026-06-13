@@ -19,5 +19,6 @@ Changelog rows are newest-first: add each new row directly below the table heade
 
 | Date | Merge | Notes |
 |---|---|---|
+| 2026-06-13 | MERGE-005 | Daily Review has a report-only historical PnL audit CLI that reconciles local archive fills against Daily Review totals without touching UI, Google upload, TWS, or live server state. |
 | 2026-06-13 | MERGE-004 | Daily Review can show clean market-data-only sessions for no-execution days without requiring a selected trade. |
 | 2026-06-13 | MERGE-001 | Established section memory baseline and newest-first changelog rule during TASK-007 docs/runtime merge. |

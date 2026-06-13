@@ -19,6 +19,7 @@ Changelog rows are newest-first: add each new row directly below the table heade
 
 | Date | Merge | Notes |
 |---|---|---|
+| 2026-06-13 | MERGE-005 | Daily Pull now cancels manual and automated daily sync starts when the local IBKR workstation is not activated, using a shared Windows toast notification. |
 | 2026-06-13 | MERGE-004 | No-execution days can publish market-data-only local review state with source-root preflight, and the daily pipeline now auto-runs on weekdays at 16:15 ET through the existing launcher/lock path. |
 | 2026-06-13 | MERGE-001 | Established section memory baseline and newest-first changelog rule during TASK-007 docs/runtime merge. |
 

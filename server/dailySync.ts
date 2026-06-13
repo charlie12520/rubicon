@@ -20,6 +20,8 @@ import { pathExists, readJson, writeJsonAtomic } from "./jsonStore.ts";
 import { loadMorningBrief } from "./morningBrief.ts";
 import { refreshRubiconDailySummary } from "./trackerSummary.ts";
 import { openRotatingLogStream } from "./logRotation.ts";
+import { parseIbkrPorts, probeTcpPort } from "./ibkrWalletRefresh.ts";
+import { showDailySyncDesktopToast } from "./desktopAlert.ts";
 
 const AI_STUFF_ROOT = process.env.AI_STUFF_ROOT ?? path.resolve(process.cwd(), "..");
 const IBKR_ROOT = path.join(AI_STUFF_ROOT, "IBKR Equity History Pull");
@@ -31,6 +33,9 @@ const DAILY_SYNC_LAUNCH_LOG = path.join(process.cwd(), "data", "daily-sync-launc
 const DAILY_SYNC_LOCK_PATH = path.join(IBKR_ROOT, "data", "daily_sync.lock.json");
 const DAILY_SYNC_AUTO_CUTOFF_ET = "07:00";
 const DAILY_SYNC_LOCK_STALE_MS = 12 * 60 * 60 * 1000;
+const DEFAULT_DAILY_SYNC_IBKR_HOST = "127.0.0.1";
+const DEFAULT_DAILY_SYNC_IBKR_PORTS = "7496";
+const DEFAULT_DAILY_SYNC_IBKR_PROBE_TIMEOUT_MS = 350;
 const SPX_HEATMAP_FILE = "spx-heatmap.json";
 const SPX_HEATMAP_SCRIPT = path.join("scripts", "refresh-spx-heatmap.py");
 const SECTOR_RRG_FILE = "sector-rrg-bars.json";
@@ -43,10 +48,32 @@ let activeDailySync: ChildProcess | null = null;
 type DailySyncLaunchInput = {
   date?: string;
   dryRun?: boolean;
+  ibkrActivationProbe?: DailySyncIbkrActivationProbe;
+  notifyUser?: DailySyncUserNotifier;
   optionScope?: DailyOptionPullScope;
   optionSidecarsOnly?: boolean;
   runId?: string;
 };
+
+type DailyOptionPullInput = {
+  date: string;
+  ibkrActivationProbe?: DailySyncIbkrActivationProbe;
+  notifyUser?: DailySyncUserNotifier;
+  scope?: DailyOptionPullScope;
+};
+
+type DailySyncIbkrActivation = {
+  active: boolean;
+  checkedAt: string;
+  detail?: string;
+  host: string;
+  openPorts?: number[];
+  ports: number[];
+};
+
+type DailySyncIbkrActivationProbe = () => Promise<DailySyncIbkrActivation>;
+
+type DailySyncUserNotifier = (status: DailySyncStatusResult) => Promise<void> | void;
 
 type DailySyncCommand = {
   command: string;
@@ -602,6 +629,139 @@ function defaultDailyPipelineStages(startedAt: string, dataCollectionStatus: Dai
       "Waiting to update Daily Sync Runs and Trade Log rows.",
     ),
   };
+}
+
+function dailySyncIbkrPorts(): number[] {
+  return parseIbkrPorts(process.env.IBKR_DAILY_SYNC_PORTS ?? DEFAULT_DAILY_SYNC_IBKR_PORTS);
+}
+
+async function defaultDailySyncIbkrActivationProbe(): Promise<DailySyncIbkrActivation> {
+  const host = process.env.IBKR_HOST ?? DEFAULT_DAILY_SYNC_IBKR_HOST;
+  const checkedAt = new Date().toISOString();
+  let ports: number[];
+  try {
+    ports = dailySyncIbkrPorts();
+  } catch (error) {
+    return {
+      active: false,
+      checkedAt,
+      detail: error instanceof Error ? error.message : "IBKR daily sync port configuration is invalid.",
+      host,
+      ports: [],
+    };
+  }
+
+  const checks = await Promise.all(
+    ports.map(async (port) => ({
+      port,
+      open: await probeTcpPort(host, port, DEFAULT_DAILY_SYNC_IBKR_PROBE_TIMEOUT_MS),
+    })),
+  );
+  const openPorts = checks.filter((check) => check.open).map((check) => check.port);
+  return {
+    active: openPorts.length > 0,
+    checkedAt,
+    detail: openPorts.length
+      ? `IBKR API socket is reachable at ${host}:${openPorts.join(", ")}.`
+      : `No TWS/Gateway API socket accepted connections at ${host}:${ports.join(", ")}.`,
+    host,
+    openPorts,
+    ports,
+  };
+}
+
+async function resolveDailySyncIbkrActivation(probe: DailySyncIbkrActivationProbe): Promise<DailySyncIbkrActivation> {
+  try {
+    return await probe();
+  } catch (error) {
+    const host = process.env.IBKR_HOST ?? DEFAULT_DAILY_SYNC_IBKR_HOST;
+    return {
+      active: false,
+      checkedAt: new Date().toISOString(),
+      detail: `IBKR activation check failed: ${error instanceof Error ? error.message : String(error)}`,
+      host,
+      ports: [],
+    };
+  }
+}
+
+function buildIbkrInactiveDailySyncStatus({
+  activation,
+  runId,
+  targetDate,
+  targetPlan,
+}: {
+  activation: DailySyncIbkrActivation;
+  runId: string;
+  targetDate: string;
+  targetPlan: DailySyncTargetPlan;
+}): DailySyncStatusResult {
+  const generatedAt = new Date().toISOString();
+  const detail =
+    activation.detail ??
+    `No TWS/Gateway API socket accepted connections at ${activation.host}:${activation.ports.length ? activation.ports.join(", ") : "unknown"}.`;
+  const message =
+    `Daily pipeline canceled: IBKR workstation is not activated. Start Trader Workstation or IB Gateway, log in, enable the API socket, then run Daily Pipeline again. ${detail}`;
+  const stages = defaultDailyPipelineStages(generatedAt, "failed");
+  stages.dataCollection = {
+    ...stages.dataCollection,
+    blockers: [detail],
+    detail: "IBKR workstation is not activated, so Rubicon did not start Data Collection.",
+    status: "failed",
+  };
+  stages.rubiconIngest = {
+    ...stages.rubiconIngest,
+    detail: "Skipped because Data Collection was canceled before the IBKR pull.",
+    status: "skipped",
+  };
+  stages.googleUpload = {
+    ...stages.googleUpload,
+    detail: "Skipped because the daily pull was canceled before local files changed.",
+    status: "skipped",
+  };
+
+  return {
+    ok: false,
+    state: "failed",
+    message,
+    generatedAt,
+    pipelineState: "failed",
+    reviewReady: false,
+    runId,
+    stages,
+    steps: defaultDailySyncSteps(generatedAt).map((step) =>
+      step.id === "sync-started" || step.id === "core-sync"
+        ? {
+            ...step,
+            detail: step.id === "sync-started" ? "Daily pull canceled before launching the wrapper." : detail,
+            status: "failed",
+            updatedAt: generatedAt,
+          }
+        : step,
+    ),
+    targetDate,
+    targetPlan,
+    warnings: [detail],
+  };
+}
+
+async function notifyDailySyncUser(status: DailySyncStatusResult, notifyUser?: DailySyncUserNotifier): Promise<void> {
+  const notifier =
+    notifyUser ??
+    ((blockedStatus: DailySyncStatusResult) =>
+      showDailySyncDesktopToast(
+        {
+          body: "IBKR workstation is not activated. Daily pull was canceled.",
+          detail: blockedStatus.message,
+          title: "Daily pull canceled",
+        },
+        process.cwd(),
+      ));
+  try {
+    await notifier(status);
+  } catch (error) {
+    console.warn(`Daily sync notification failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 function normalizeStages(status: DailySyncStatusResult | null | undefined, startedAt?: string): DailyPipelineStages {
@@ -1286,6 +1446,14 @@ export async function startDailySync(input: DailySyncLaunchInput = {}): Promise<
     return missing;
   }
 
+  const activation = await resolveDailySyncIbkrActivation(input.ibkrActivationProbe ?? defaultDailySyncIbkrActivationProbe);
+  if (!activation.active) {
+    const blocked = buildIbkrInactiveDailySyncStatus({ activation, runId, targetDate, targetPlan });
+    await writeStatus(blocked);
+    await notifyDailySyncUser(blocked, input.notifyUser);
+    return blocked;
+  }
+
   const command = buildDailySyncCommand({ ...input, runId });
   const startedAt = new Date().toISOString();
   const dryRun = Boolean(input.dryRun);
@@ -1417,7 +1585,7 @@ export async function startDailySync(input: DailySyncLaunchInput = {}): Promise<
   return launched;
 }
 
-export async function startDailyOptionPull(input: { date: string; scope?: DailyOptionPullScope }): Promise<DailySyncStatusResult> {
+export async function startDailyOptionPull(input: DailyOptionPullInput): Promise<DailySyncStatusResult> {
   if (!isValidSyncDate(input.date) || input.date === "auto") {
     throw new Error("Manual option retry date must be an explicit YYYY-MM-DD trade date.");
   }
@@ -1451,6 +1619,29 @@ export async function startDailyOptionPull(input: { date: string; scope?: DailyO
     return blocked;
   }
   await clearStaleDailySyncLock(lock);
+
+  if (!(await pathExists(DAILY_SYNC_WRAPPER)) || !(await pathExists(DAILY_SYNC_SCRIPT))) {
+    const missing: DailySyncStatusResult = {
+      ok: false,
+      state: "missing",
+      message: "Daily pipeline wrapper or Python data-collection script was not found.",
+      generatedAt: new Date().toISOString(),
+      pipelineState: "missing",
+      runId,
+      targetDate,
+      targetPlan,
+    };
+    await writeStatus(missing);
+    return missing;
+  }
+
+  const activation = await resolveDailySyncIbkrActivation(input.ibkrActivationProbe ?? defaultDailySyncIbkrActivationProbe);
+  if (!activation.active) {
+    const blocked = buildIbkrInactiveDailySyncStatus({ activation, runId, targetDate, targetPlan });
+    await writeStatus(blocked);
+    await notifyDailySyncUser(blocked, input.notifyUser);
+    return blocked;
+  }
 
   const command = buildDailySyncCommand({
     date: input.date,

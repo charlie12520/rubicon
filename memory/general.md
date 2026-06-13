@@ -129,6 +129,7 @@ Changelog rows are newest-first: add each new row directly below the table heade
 
 | Date | Merge | Notes |
 |---|---|---|
+| 2026-06-13 | MERGE-005 | Latest now checks git-backed update availability automatically every five minutes and when the app window becomes visible, instead of waiting for a manual click. |
 | 2026-06-13 | MERGE-003 | Added commit-by-default task behavior, safe post-push live-board sync rules, and the no-edit Rubicon server recovery runbook. |
 | 2026-06-13 | MERGE-002 | Clarified that visible-checkout `TASKS.md` and `tasks/rollup.md` are live coordination truth; worktree copies are snapshots. |
 | 2026-06-13 | MERGE-001 | Established section memory baseline and newest-first changelog rule during TASK-007 docs/runtime merge. |

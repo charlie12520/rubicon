@@ -40,7 +40,7 @@ git fetch origin main
 git worktree add $worktree -b $branch origin/main
 Set-Location $worktree
 ```
-6. Work only inside that task's branch/worktree, not directly on `main`.
+6. Work only inside that task's branch/worktree, not directly on `main`. If your work is not suitable for this, explicitly state that before editing.
 7. Maintain the task's own row in `tasks/rollup.md`. The rollup is a compact spreadsheet-like detail ledger, not a prose log.
 8. Edit only your own `TASK-###` row in `tasks/rollup.md`. Do not edit another task's rollup row. If work is related to another task, write `Related: TASK-###` in your own row.
 9. If any file outside the assigned section changes, immediately write the file path and reason in your task's `Out-of-section changes` cell in `tasks/rollup.md`.

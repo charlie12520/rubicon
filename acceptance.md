@@ -23,8 +23,21 @@ Deferred:
 
 | Merge | Date | Tasks | Status | Proof |
 |---|---|---|---|---|
-| MERGE-001 | YYYY-MM-DD | TASK-001, TASK-002 | accepted | Compact validation proof and any remaining risk. |
+| MERGE-001 | YYYY-MM-DD | TASK-001, TASK-002 | accepted | Command/API/browser/data proof; link to `proof.md#merge-###`; any remaining risk. |
 
 ## Evidence Standard
 
-Use the narrowest proof that can catch the likely failure. Follow `validation.md`; keep compact proof in `proof.md`.
+An accepted merge must cite concrete evidence, not vague "validated" wording.
+
+The `Proof` column must include or link to at least one relevant proof type:
+
+- passed command, such as focused tests, `npm run typecheck`, `npm run build`, or `npm run validate:mvp`
+- passed test result, including the test file or suite when focused
+- API or browser smoke result for runtime/UI behavior
+- data/file evidence for importer, sync, replay, or local-state changes
+- artifact path, screenshot path, or log path when visual/runtime proof matters
+- explicit documented deferral or accepted non-blocking risk
+
+Use the narrowest proof that can catch the likely failure. Follow `validation.md`; keep compact merge receipts in `proof.md`.
+
+Do not accept a merge when proof only says "validated", "tested", "looks good", or "works" without naming the evidence.

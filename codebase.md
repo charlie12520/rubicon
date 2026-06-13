@@ -21,8 +21,8 @@ Doc map:
 - `codebase.md` - file anchors and server/run basics
 - `merge_push.md` - merge or push workflow only
 - `proof.md` - compact proof ledger for accepted merges
-- `TASKS.md` - active multi-agent board
-- `tasks/rollup.md` - compact task-owned detail ledger
+- `TASKS.md` - authoritative live multi-agent board only in the visible local Rubicon checkout; branch/worktree copies are snapshots or proposed state
+- `tasks/rollup.md` - visible-checkout compact live task detail companion to `TASKS.md`; branch/worktree copies may be stale snapshots
 - `memory/general.md` - shared project memory
 - `memory/<section>.md` - section-specific project memory
 - `DECISIONS.md` - original unsorted decision log

@@ -1,15 +1,18 @@
 # Task Rollup
 
-Compact task-owned ledger. `TASKS.md` is the live board; this file keeps the short detail row that lets another agent review or merge the work.
+Compact task-owned live detail ledger. The copy at `C:\Users\charl\Desktop\Rubicon\spx-spread-replay-tracker\tasks\rollup.md` in the visible local Rubicon checkout is live beside `TASKS.md`; branch/worktree copies are proposed branch state or stale snapshots for coordination.
 
 Rules:
-- A section agent may edit only its own task row.
+- A section agent may edit only its own task row in the visible checkout copy.
 - Other section agents must not edit another task's row.
+- Before editing live rows, run `git -C C:\Users\charl\Desktop\Rubicon\spx-spread-replay-tracker status --porcelain=v1 --branch`; stop if unrelated dirty files exist.
+- If only `TASKS.md` / `tasks/rollup.md` are dirty, inspect `git -C C:\Users\charl\Desktop\Rubicon\spx-spread-replay-tracker diff -- TASKS.md tasks/rollup.md` and edit only the current task row.
 - Keep cells short; link to a plan or commit when detail would make the table hard to scan.
 - Task rows are newest-first: add new rows directly below the table header, above older rows.
-- Merge agents may mark rows `merged` and add the final `MERGE-###`, but should not rewrite owner notes unless reconciling a conflict.
+- Merge agents use live rows from the visible checkout as selection inputs, then write the accepted final ledger state into the final merge branch without letting stale worktree copies overwrite live coordination rows.
 
 | Task | Dates | Section | Owner / branch / worktree | Status | Files | Validation | Out-of-section changes | Blockers / risks | Merge notes | Review notes |
 |---|---|---|---|---|---|---|---|---|---|---|
+| TASK-010 | 2026-06-13 -> 2026-06-13 | Docs / Governance | Branch `agent/TASK-010-live-rollup-coordination`; worktree `C:\Users\charl\Desktop\Rubicon\rubicon-worktrees\agent-TASK-010-live-rollup-coordination` | ready_for_merge | `AGENTS.md`; `TASKS.md`; `tasks/rollup.md`; `merge_push.md`; `codebase.md` | Passed: `git diff --check AGENTS.md TASKS.md tasks/rollup.md merge_push.md codebase.md`; requested coordination-text `rg` checks | None | Coordination edits intentionally touch tracked docs only; visible checkout rows may be dirty only in `TASKS.md` / `tasks/rollup.md`. | Related: plan mentioned TASK-009; using TASK-010 per latest prompt. | Docs-only governance update; no runtime files. |
 | TASK-007 | 2026-06-13 -> 2026-06-13 | General / Docs and Runtime | Branch `agent/TASK-007-docs-runtime`; merged by `agent/MERGE-001-task-007-docs-runtime` | merged | `AGENTS.md`; `TASKS.md`; `tasks/rollup.md`; `acceptance.md`; `validation.md`; `proof.md`; `memory/*.md`; live doc set; mirror launch scripts | `git diff --check origin/main..HEAD`; `node --check` for mirror/startup scripts; `npm run validate:mvp` with Desktop AI STUFF mirror evidence paths; local `npm run land -- --branch agent/MERGE-001-task-007-docs-runtime` | `scripts/mirror-env.mjs`: kept Google evidence paths working after old AI STUFF checkout rename; `NOTEPAD.md`: moved stale scratch note to Desktop `depreciated_rubicon` | Running processes may keep old env values until relaunched. Fresh worktree validation needs the preserved Google evidence env paths. | Accepted in `MERGE-001`. | Kept data in AI STUFF; mutable Markdown tables stay newest-first; compact board/rollup is easier to scan. |
 | TASK-002 | 2026-06-12 -> 2026-06-12 | Brief / Godel live news | Landed before compact rollup; no active owner | merged | `scripts/godel-news-scraper.mjs`; scraper tests; `server/godelLiveNews.test.ts`; plan doc | `node --check`; focused tests 13/13; `npm run validate:mvp` passed | None | Watcher and server must use the same repo copy; `godel-news/` remains in AI STUFF. | Already landed before `MERGE-###`; do not re-merge. | Banner text shape beat CSS/color heuristics; watchdog should key on app shell, not banner presence. |

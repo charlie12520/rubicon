@@ -254,6 +254,18 @@ export function triggerLiveUpdateDesktopAlert(payload: {
   });
 }
 
+export function triggerJournalReviewDesktopAlert(payload: {
+  body: string;
+  detail?: string;
+  title?: string;
+}): Promise<DesktopAlertResult> {
+  return readJson<DesktopAlertResult>("/api/desktop-alert/journal-review", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
 export function saveWallet(netLiquidation: number): Promise<WalletSnapshot> {
   return readJson<WalletSnapshot>("/api/wallet", {
     method: "PUT",

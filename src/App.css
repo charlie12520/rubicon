@@ -3732,6 +3732,47 @@ h2 {
   color: #dce7f5;
 }
 
+.review-action-button.active {
+  border-color: rgba(45, 212, 191, 0.5);
+  background: rgba(20, 184, 166, 0.16);
+  color: #ccfbf1;
+}
+
+.journal-review-prompt {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border: 1px solid rgba(45, 212, 191, 0.32);
+  border-radius: 8px;
+  background: rgba(8, 18, 22, 0.92);
+  color: #dce7f5;
+}
+
+.journal-review-prompt > svg {
+  color: #2dd4bf;
+  flex: 0 0 auto;
+}
+
+.journal-review-prompt > div {
+  min-width: 180px;
+  display: grid;
+  gap: 2px;
+  flex: 1 1 220px;
+}
+
+.journal-review-prompt b {
+  color: #f8fafc;
+  font-size: 13px;
+}
+
+.journal-review-prompt span {
+  color: #8f9bad;
+  font-size: 12px;
+}
+
 .journal-hero {
   min-width: 0;
   border-radius: 8px;
@@ -4037,6 +4078,101 @@ h2 {
   resize: vertical;
   padding: 9px 10px;
   line-height: 1.35;
+}
+
+.journal-qa-panel {
+  display: grid;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid rgba(45, 212, 191, 0.18);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(45, 212, 191, 0.12), transparent 62%),
+    rgba(7, 11, 16, 0.74);
+}
+
+.journal-qa-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.journal-qa-topline span {
+  color: #8f9bad;
+  font-size: 10px;
+  font-weight: 820;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.journal-qa-topline b {
+  color: #8ff7d2;
+  font-size: 11px;
+}
+
+.journal-qa-question {
+  display: grid;
+  gap: 7px;
+}
+
+.journal-qa-question > span {
+  color: #f8fafc;
+  font-size: 13px;
+  font-weight: 780;
+  line-height: 1.35;
+}
+
+.journal-qa-question input,
+.journal-qa-question textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid rgba(143, 155, 173, 0.16);
+  border-radius: 7px;
+  background: rgba(5, 8, 12, 0.86);
+  color: #dce7f5;
+  font: inherit;
+  font-size: 12px;
+}
+
+.journal-qa-question input {
+  height: 36px;
+  padding: 0 10px;
+}
+
+.journal-qa-question textarea {
+  min-height: 84px;
+  resize: vertical;
+  padding: 9px 10px;
+  line-height: 1.35;
+}
+
+.journal-qa-options,
+.journal-qa-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.journal-qa-options button {
+  min-width: 42px;
+  min-height: 31px;
+  padding: 0 10px;
+  border: 1px solid rgba(143, 155, 173, 0.16);
+  border-radius: 7px;
+  background: rgba(18, 25, 34, 0.9);
+  color: #dce7f5;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 760;
+  cursor: pointer;
+}
+
+.journal-qa-options button[aria-pressed="true"] {
+  border-color: #2dd4bf;
+  background: #2dd4bf;
+  color: #081016;
 }
 
 .journal-aspect-panel {

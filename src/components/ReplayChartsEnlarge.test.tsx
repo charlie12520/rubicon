@@ -35,6 +35,36 @@ const REPLAY = {
   quickTrades: [],
 } as unknown as ReplayPayload;
 
+const REPLAY_WITH_CONTEXT = {
+  ...REPLAY,
+  openInterest: [
+    { strike: 7420, right: "P", label: "7420P", openInterest: 120 },
+    { strike: 7430, right: "C", label: "7430C", openInterest: 80 },
+  ],
+  volume: [
+    {
+      time: 100,
+      timestampEt: "2026-06-09T09:30:00-04:00",
+      label: "09:30",
+      strike: 7420,
+      right: "P",
+      optionLabel: "7420P",
+      minuteVolume: 5,
+      cumulativeVolume: 15,
+    },
+    {
+      time: 100,
+      timestampEt: "2026-06-09T09:30:00-04:00",
+      label: "09:30",
+      strike: 7430,
+      right: "C",
+      optionLabel: "7430C",
+      minuteVolume: 3,
+      cumulativeVolume: 9,
+    },
+  ],
+} as unknown as ReplayPayload;
+
 afterEach(() => {
   cleanup();
 });
@@ -69,6 +99,16 @@ describe("ReplayCharts enlarge mode", () => {
     renderCharts();
     expect(screen.getByTestId(/chart:SPX Intraday/)).toHaveAttribute("data-marker-mode", "compact");
     expect(screen.getByTestId("chart:Selected Spread")).toHaveAttribute("data-marker-mode", "compact");
+  });
+
+  it("draws 0DTE context profiles even when no spread is selected", () => {
+    const { container } = render(
+      <ReplayCharts replay={REPLAY_WITH_CONTEXT} replayIndex={0} replayMode={false} selectedTrade={null} selectedTrades={[]} />,
+    );
+
+    expect(screen.getByTestId("chart:Selected Spread")).toHaveAttribute("data-marker-mode", "compact");
+    expect(container.querySelectorAll('svg[aria-label="0DTE open interest by strike"] rect.profile-bar')).toHaveLength(2);
+    expect(container.querySelectorAll('svg[aria-label="0DTE volume profile by strike"] rect.profile-bar')).toHaveLength(2);
   });
 
   it("Escape and the backdrop both restore the normal layout", () => {

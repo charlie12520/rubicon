@@ -13,7 +13,7 @@ Use the visible checkout `TASKS.md` for live task status. Use the visible checko
 - A section agent may edit only its own visible checkout task row and its own visible checkout `tasks/rollup.md` row.
 - Before editing live rows, run `git -C C:\Users\charl\Desktop\Rubicon\spx-spread-replay-tracker status --porcelain=v1 --branch`; stop if unrelated dirty files exist.
 - If only `TASKS.md` / `tasks/rollup.md` are dirty, inspect `git -C C:\Users\charl\Desktop\Rubicon\spx-spread-replay-tracker diff -- TASKS.md tasks/rollup.md` and edit only the current task row.
-- After push, live board dirt is sync-safe only when `git diff origin/main -- TASKS.md tasks/rollup.md` is empty; otherwise it is unlanded live coordination state.
+- After push, live board dirt is sync-safe only when `TASKS.md` / `tasks/rollup.md` already match `origin/main`, or when `merge_push.md` proves every dirty row is superseded by an `origin/main` `merged` row for the same task ID; otherwise it is unlanded live coordination state.
 - If work is related to another task, mention `Related: TASK-###` in merge notes instead of editing the other task.
 - If any file outside the assigned section changes, note the path and reason in the task's `tasks/rollup.md` row.
 - Active Board rows are newest-first: add new task rows directly below the table header, above older task rows.
@@ -37,6 +37,7 @@ Use the visible checkout `TASKS.md` for live task status. Use the visible checko
 
 | Task | Section | Scope | Owner / branch / worktree | Status | Merge notes |
 |---|---|---|---|---|---|
+| TASK-019 | Docs / Governance | Allow push agents to sync visible checkout live-board rows superseded by `origin/main` merged rows | Branch `agent/TASK-019-superseded-live-board-sync`; worktree `../rubicon-worktrees/agent-TASK-019-superseded-live-board-sync`; commit `cb4eec5` | merged | Accepted in `MERGE-006`; validation and proof recorded in `proof.md`. |
 | TASK-018 | Self-update / Desktop | Automatically check git upstream availability so the Latest button reflects when a new version is available | Branch `agent/TASK-018-latest-git-check`; worktree `../rubicon-worktrees/agent-TASK-018-latest-git-check`; commit `a7f07aa` | merged | Accepted in `MERGE-005`; validation and proof recorded in `proof.md`. |
 | TASK-017 | Daily Pull | Cancel automated and manual daily pulls when IBKR workstation is not activated, and notify the user | Branch `agent/TASK-017-ibkr-activation-gate`; worktree `../rubicon-worktrees/agent-TASK-017-ibkr-activation-gate`; commit `d2cb268` | merged | Accepted in `MERGE-005`; validation and proof recorded in `proof.md`. Related: TASK-015 auto-run inherits the shared `startDailySync` guard. |
 | TASK-016 | Daily Review | Add report-only historical PnL audit for Daily Review against local IBKR archive | Branch `agent/TASK-016-daily-review-pnl-audit`; worktree `../rubicon-worktrees/agent-TASK-016-daily-review-pnl-audit`; commit `4c18f4f` | merged | Accepted in `MERGE-005`; validation and proof recorded in `proof.md`. |

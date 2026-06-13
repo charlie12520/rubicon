@@ -123,12 +123,16 @@ MERGE-002 clarification:
 MERGE-003 clarification:
 After validation passes, section agents stage explicit intended files and commit the task branch/worktree by default unless the user explicitly says not to commit, validation documents a blocking gap, or the work cannot be committed safely. Push agents may reconcile visible-checkout live-board dirt only when `TASKS.md` and `tasks/rollup.md` are the only dirty files and already match `origin/main`; otherwise the live rows are unlanded coordination state and must be reported. Refused-to-connect Rubicon server recovery is documented as a no-edit runbook that protects TWS, Godel, Edge, and live feed processes.
 
+MERGE-006 clarification:
+Push agents may also reconcile dirty visible-checkout live-board files when the dirt is only superseded rows: every dirty task ID must already be present as `merged` on `origin/main`, with no local-only task IDs, no unsuperseded active rows, no staged files, and no non-board dirt. This extends the MERGE-003 clean-equivalent path without allowing active local coordination rows to be hidden.
+
 ## Changelog
 
 Changelog rows are newest-first: add each new row directly below the table header.
 
 | Date | Merge | Notes |
 |---|---|---|
+| 2026-06-13 | MERGE-006 | Push agents may sync verified superseded live-board rows when `origin/main` already marks the same task IDs as `merged`; active/local-only rows still stop the sync. |
 | 2026-06-13 | MERGE-005 | Latest now checks git-backed update availability automatically every five minutes and when the app window becomes visible, instead of waiting for a manual click. |
 | 2026-06-13 | MERGE-003 | Added commit-by-default task behavior, safe post-push live-board sync rules, and the no-edit Rubicon server recovery runbook. |
 | 2026-06-13 | MERGE-002 | Clarified that visible-checkout `TASKS.md` and `tasks/rollup.md` are live coordination truth; worktree copies are snapshots. |

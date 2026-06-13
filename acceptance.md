@@ -9,7 +9,7 @@ Do not add an accepted entry until the task work is merged and validation is suf
 ## Current State
 
 Status:
-Latest accepted merge: MERGE-005
+Latest accepted merge: MERGE-006
 Open risks: None
 Deferred: None
 
@@ -25,6 +25,7 @@ Accepted merge rows are newest-first: add each new `MERGE-###` row directly belo
 
 | Merge | Date | Tasks | Status | Proof |
 |---|---|---|---|---|
+| MERGE-006 | 2026-06-13 | TASK-019 | accepted | Docs-only governance validation: `git diff --check origin/main..HEAD`; targeted `rg` checks for superseded-row wording and strict-only leftovers; see `proof.md#merge-006-2026-06-13-task-019-live-board-sync-governance`. |
 | MERGE-005 | 2026-06-13 | TASK-016, TASK-017, TASK-018 | accepted | `npm run validate:mvp` with connector evidence paths; browser smoke on scratch `127.0.0.1:5189` plus `/api/health`; see `proof.md#merge-005-2026-06-13-task-016-task-017-task-018-shipped-behavior`. |
 | MERGE-004 | 2026-06-13 | TASK-013, TASK-014, TASK-015 | accepted | `npm run validate:mvp` with connector evidence paths; browser smoke on scratch `127.0.0.1:5189` plus `/api/health`; local landing via `npm run land -- --branch agent/MERGE-004-task-013-014-015`; see `proof.md#merge-004-2026-06-13-task-013-task-014-task-015-shipped-behavior`. |
 | MERGE-003 | 2026-06-13 | TASK-011, TASK-012 | accepted | `git diff --check origin/main..HEAD`; targeted `rg` checks for live-board sync, commit-default wording, and server recovery safety/runbook terms; see `proof.md#merge-003-2026-06-13-task-011-task-012-docs`. |

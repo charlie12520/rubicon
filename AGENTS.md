@@ -34,7 +34,7 @@ Live coordination files:
 - Worktree copies of `TASKS.md` and `tasks/rollup.md` are stale snapshots, proposed branch state, or merge artifacts; do not use them as live coordination truth.
 - Before editing live rows, run `git -C C:\Users\charl\Desktop\Rubicon\spx-spread-replay-tracker status --porcelain=v1 --branch`; stop if unrelated dirty files exist.
 - If only `TASKS.md` / `tasks/rollup.md` are dirty, inspect `git -C C:\Users\charl\Desktop\Rubicon\spx-spread-replay-tracker diff -- TASKS.md tasks/rollup.md` and edit only the current task row.
-- After a successful push, merge/push agents may sync a visible checkout that is dirty only in live board files when those files already match `origin/main`; follow `merge_push.md` and do not use reset, stash, or force checkout.
+- After a successful push, merge/push agents may sync a visible checkout that is dirty only in live board files when those files already match `origin/main` or when every dirty live row is verified as superseded by an `origin/main` `merged` row for the same task ID; follow `merge_push.md` and do not use reset, stash, or force checkout.
 
 Multi-agent section workflow:
 1. The user's prompt is the task assignment. If the prompt asks you to merge or push, stop this workflow and read `merge_push.md`.

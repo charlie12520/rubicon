@@ -6,6 +6,14 @@ This is the receipt file: it records the validation evidence that justified each
 
 ## Proof Entries
 
+## MERGE-002 - 2026-06-13 - TASK-010 Live Rollup Coordination
+
+Tasks: TASK-010
+Validation: `git diff --check AGENTS.md TASKS.md tasks/rollup.md merge_push.md codebase.md`; `git diff --check origin/main..HEAD`; `rg -n "visible local Rubicon checkout|live coordination|worktree copies|stale snapshots|TASKS.md|tasks/rollup.md" AGENTS.md TASKS.md tasks/rollup.md merge_push.md codebase.md`; old-ambiguity `rg` check for `Maintain the task's own row...` and `Work only inside.*worktree`.
+Result: Accepted after integration into `agent/MERGE-002-task-010-live-rollup-coordination`.
+Evidence: TASK-010 commit `391f233` merged cleanly into the MERGE-002 integration worktree from `origin/main`. The accepted docs make the visible local Rubicon checkout's `TASKS.md` and `tasks/rollup.md` authoritative live coordination files, identify worktree copies as stale/proposed snapshots, tighten merge handling so stale task-branch ledgers cannot overwrite live coordination rows, and refresh the codebase map.
+Known gaps / failure class: No app tests or `npm run validate:mvp` were run because the merge only changes Markdown governance/docs and does not touch shipped runtime behavior. Failure class: none.
+
 ## MERGE-001 - 2026-06-13 - TASK-007 Docs/Runtime Merge
 
 Tasks: TASK-007

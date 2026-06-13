@@ -19,6 +19,7 @@ Changelog rows are newest-first: add each new row directly below the table heade
 
 | Date | Merge | Notes |
 |---|---|---|
+| 2026-06-13 | MERGE-001 | Established section memory baseline and newest-first changelog rule during TASK-007 docs/runtime merge. |
 
 ---
 

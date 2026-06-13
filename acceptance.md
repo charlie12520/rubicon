@@ -9,9 +9,9 @@ Do not add an accepted entry until the task work is merged and validation is suf
 ## Current State
 
 Status:
-Latest accepted merge:
-Open risks:
-Deferred:
+Latest accepted merge: MERGE-001
+Open risks: None
+Deferred: None
 
 ## Status Values
 
@@ -25,7 +25,7 @@ Accepted merge rows are newest-first: add each new `MERGE-###` row directly belo
 
 | Merge | Date | Tasks | Status | Proof |
 |---|---|---|---|---|
-| MERGE-001 | YYYY-MM-DD | TASK-001, TASK-002 | accepted | Command/API/browser/data proof; link to `proof.md#merge-###`; any remaining risk. |
+| MERGE-001 | 2026-06-13 | TASK-007 | accepted | `git diff --check origin/main..HEAD`; `node --check` for mirror/startup scripts; `npm run validate:mvp` with Desktop AI STUFF mirror evidence paths; local landing validation via `npm run land -- --branch agent/MERGE-001-task-007-docs-runtime`; see `proof.md#merge-001-2026-06-13-task-007-docsruntime-merge`. |
 
 ## Evidence Standard
 

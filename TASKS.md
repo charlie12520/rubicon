@@ -34,7 +34,7 @@ Use `TASKS.md` for live task status. Use `tasks/rollup.md` for compact task-owne
 
 | Task | Section | Scope | Owner / branch / worktree | Status | Merge notes |
 |---|---|---|---|---|---|
-| TASK-007 | General / Docs and Runtime | Deprecate old AI STUFF Rubicon folders and update mirror env defaults; strengthen acceptance/validation proof rules; add newest-first table rules | Branch `agent/TASK-007-docs-runtime`; current Desktop mirror | ready_for_commit | New acceptance evidence-standard, validation failure-classification, and newest-first table doc changes are validated; user approval needed before commit. |
+| TASK-007 | General / Docs and Runtime | Deprecate old AI STUFF Rubicon folders and update mirror env defaults; strengthen acceptance/validation proof rules; add newest-first table rules | Branch `agent/TASK-007-docs-runtime`; merged by `agent/MERGE-001-task-007-docs-runtime` | merged | Accepted in `MERGE-001`; validation and proof recorded in `proof.md`. |
 | TASK-001 | Governance | Multi-agent guardrails: worktree flow, landing scripts/hooks, build lock, Latest off-main behavior | Legacy landed branch; no active worktree | merged | Landed before `MERGE-###`; see `WORKLOG.md`. |
 | TASK-002 | Brief / Godel live news | Breaking-banner-only Godel watcher and reader test coverage | Landed before compact rollup; no active owner | merged | Already landed; do not re-merge. Compact detail is in `tasks/rollup.md`. |
 | TASK-003 | Docs / Archive | Archive deprecated root docs and QA artifacts; refresh active references | Legacy landed branch; no active worktree | merged | Landed before `MERGE-###`; see `WORKLOG.md`. |

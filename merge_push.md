@@ -60,7 +60,7 @@ git pull --ff-only origin main
 ```
 Run this exception only when the visible checkout is already on `main`, `git diff --name-only` lists no files except `TASKS.md` and/or `tasks/rollup.md`, `git diff --cached --name-only` is empty, and `git diff --quiet origin/main -- TASKS.md tasks/rollup.md` exits `0`. The `git restore --source=HEAD` step is allowed only in this verified clean-equivalent case; it temporarily clears the local live-board dirt so the fast-forward can reapply the already-pushed board state from `origin/main`. If `git pull --ff-only origin main` fails after this restore, immediately run `git restore --source=origin/main -- TASKS.md tasks/rollup.md`, then stop and report the failed sync.
 
-2. Superseded live-board rows: the only differences are local pre-merge rows for task IDs that `origin/main` already contains as `merged` rows from the pushed merge. Before using this path, inspect `git diff -- TASKS.md tasks/rollup.md` and the `origin/main` versions of both files. Confirm every dirty task ID is present on `origin/main` with status `merged`, no local-only task ID exists, no local row is `claimed`, `in_progress`, `blocked`, or otherwise active without an `origin/main` `merged` counterpart, and no non-board or staged file exists. Then sync the board files from `origin/main` and fast-forward:
+2. Superseded live-board rows: the only differences are local pre-merge rows for task IDs that `origin/main` already contains as `merged` rows from the pushed merge. Before using this path, inspect `git diff -- TASKS.md tasks/rollup.md` and the `origin/main` versions of both files. Confirm every dirty task ID is present on `origin/main` with status `merged`, no local-only task ID exists, no local row is `claimed`, `in_progress`, `blocked`, or otherwise active without an `origin/main` `merged` counterpart, and no non-board or staged file exists. Then clear the local board dirt and fast-forward:
 ```powershell
 git status --porcelain=v1 --branch
 git fetch origin main
@@ -69,10 +69,10 @@ git diff --cached --name-only
 git diff -- TASKS.md tasks/rollup.md
 git show origin/main:TASKS.md
 git show origin/main:tasks/rollup.md
-git restore --source=origin/main -- TASKS.md tasks/rollup.md
+git restore --source=HEAD -- TASKS.md tasks/rollup.md
 git pull --ff-only origin main
 ```
-Report the task IDs that were superseded before or with the sync result. This path is only for rows already landed on `origin/main`; it must not be used to hide an active local coordination row.
+Report the task IDs that were superseded before or with the sync result. The `git restore --source=HEAD` step is intentional: it clears the old local live-board dirt so the fast-forward can reapply the already-pushed board state from `origin/main`. If `git pull --ff-only origin main` fails after this restore, immediately run `git restore --source=origin/main -- TASKS.md tasks/rollup.md`, then stop and report the failed sync. This path is only for rows already landed on `origin/main`; it must not be used to hide an active local coordination row.
 
 If the visible checkout has any unrelated dirty file, any staged file, or live board files that satisfy neither the clean-equivalent nor the superseded-row case above, stop and report the dirty files instead of switching branches, pulling, or overwriting them. Dirty live board files that are neither already matched to `origin/main` nor superseded by `origin/main` merged rows are unlanded coordination rows and must remain visible.
 5. Clean up only the exact final merge and landing worktrees from this push run, after proving each one is safe. Run cleanup from the visible local Rubicon checkout, not from inside a worktree being removed:

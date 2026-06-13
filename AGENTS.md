@@ -24,6 +24,7 @@ Live app safety:
 - Do not kill or restart the live `5174` server during market hours.
 - Kill only exact PIDs you started.
 - Do not touch TWS, the live server, or the Godel watcher unless the user asks.
+- If the Rubicon desktop app is open to "refused to connect" and the user asks for server recovery, follow `docs/runbooks/rubicon-server-recovery.md`: check `http://127.0.0.1:5174/api/health`, start only `scripts\serve-headless.vbs` via `wscript.exe` when nothing is listening, and do not create a task, edit files, change branches, or touch TWS/Godel/Edge/live feed processes for that runtime recovery.
 
 If the visible conversation resumes from a compacted summary before the latest user message, reread `AGENTS.md` before continuing.
 

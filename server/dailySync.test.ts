@@ -1,8 +1,9 @@
 import { spawn } from "node:child_process";
 import { closeSync, existsSync, openSync } from "node:fs";
 import fsp from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { buildDailySyncCommand, buildDailySyncProcessLaunch, buildDailySyncTargetPlan, dailySyncCompletionAllowsDerivedStateRefresh, dailySyncSourceHealth, mergeDailySyncCompletionStatus, refreshDailySyncDerivedState, resolveDailySyncGoogleUploaded, resolveDailySyncRuntimeState, selectDailySyncPreferredLogPath, spxHeatmapPayloadIsFilled, startDailySync, summaryGoogleUploaded } from "./dailySync.ts";
 
 // Preflight + source-health hit the real wrapper in the sibling IBKR project,
@@ -149,6 +150,62 @@ describe("daily SPX/IBKR sync launcher", () => {
       "option-open-interest",
       "option-rubicon-refresh",
     ]);
+  });
+
+  it("cancels the launch and notifies when IBKR workstation is not activated", async () => {
+    const previousCwd = process.cwd();
+    const previousAiStuffRoot = process.env.AI_STUFF_ROOT;
+    const tempRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "rubicon-daily-sync-"));
+    const appRoot = path.join(tempRoot, "rubicon");
+    const aiStuffRoot = path.join(tempRoot, "ai-stuff");
+    const ibkrRoot = path.join(aiStuffRoot, "IBKR Equity History Pull");
+    const statusPath = path.join(appRoot, "data", "daily-sync-status.json");
+    const notifications: string[] = [];
+
+    try {
+      await fsp.mkdir(path.join(appRoot, "data"), { recursive: true });
+      await fsp.mkdir(ibkrRoot, { recursive: true });
+      await fsp.writeFile(path.join(ibkrRoot, "run_daily_spx_ibkr_sync_with_sheet_payload.ps1"), "", "utf8");
+      await fsp.writeFile(path.join(ibkrRoot, "daily_spx_ibkr_sync.py"), "", "utf8");
+      process.chdir(appRoot);
+      process.env.AI_STUFF_ROOT = aiStuffRoot;
+      vi.resetModules();
+      const freshDailySync = await import("./dailySync.ts");
+
+      const result = await freshDailySync.startDailySync({
+        date: "auto",
+        dryRun: true,
+        ibkrActivationProbe: async () => ({
+          active: false,
+          checkedAt: "2026-06-13T21:30:00.000Z",
+          host: "127.0.0.1",
+          ports: [7496, 4001],
+        }),
+        notifyUser: async (status) => {
+          notifications.push(status.message);
+        },
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.state).toBe("failed");
+      expect(result.pipelineState).toBe("failed");
+      expect(result.command).toBeUndefined();
+      expect(result.message).toContain("IBKR workstation is not activated");
+      expect(result.stages?.dataCollection.status).toBe("failed");
+      expect(result.stages?.rubiconIngest.status).toBe("skipped");
+      expect(result.stages?.googleUpload.status).toBe("skipped");
+      expect(notifications).toEqual([result.message]);
+      await expect(fsp.readFile(statusPath, "utf8")).resolves.toContain("IBKR workstation is not activated");
+    } finally {
+      vi.resetModules();
+      process.chdir(previousCwd);
+      if (previousAiStuffRoot === undefined) {
+        delete process.env.AI_STUFF_ROOT;
+      } else {
+        process.env.AI_STUFF_ROOT = previousAiStuffRoot;
+      }
+      await fsp.rm(tempRoot, { recursive: true, force: true });
+    }
   });
 
   itWrapper("reports the local daily sync launcher in source health", async () => {

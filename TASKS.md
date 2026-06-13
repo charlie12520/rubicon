@@ -1,16 +1,18 @@
 # TASKS.md
 
-Active Rubicon multi-agent board. Keep this file spreadsheet-like and short.
+Active Rubicon multi-agent board. Keep this file spreadsheet-like and short. The copy at `C:\Users\charl\Desktop\Rubicon\spx-spread-replay-tracker\TASKS.md` in the visible local Rubicon checkout is the live board; branch/worktree copies are proposed branch state or stale snapshots for coordination.
 
-Use `TASKS.md` for live task status. Use `tasks/rollup.md` for compact task-owned details. Do not use `WORKLOG.md`, `acceptance.md`, or `proof.md` as scratchpads.
+Use the visible checkout `TASKS.md` for live task status. Use the visible checkout `tasks/rollup.md` for compact task-owned details. Do not use `WORKLOG.md`, `acceptance.md`, or `proof.md` as scratchpads.
 
 ## Rules
 
-- Refresh this file from disk immediately before creating or editing a task row.
+- Refresh the visible checkout copy of this file from disk immediately before creating or editing a task row.
 - Use the `TASK-###` ID from the user's prompt. If the prompt has no task ID, ask instead of inventing one.
 - One section agent owns one active task row at a time.
 - Keep rows short: task, section, scope, owner/branch/worktree, status, merge notes.
-- A section agent may edit only its own task row and its own `tasks/rollup.md` row.
+- A section agent may edit only its own visible checkout task row and its own visible checkout `tasks/rollup.md` row.
+- Before editing live rows, run `git -C C:\Users\charl\Desktop\Rubicon\spx-spread-replay-tracker status --porcelain=v1 --branch`; stop if unrelated dirty files exist.
+- If only `TASKS.md` / `tasks/rollup.md` are dirty, inspect `git -C C:\Users\charl\Desktop\Rubicon\spx-spread-replay-tracker diff -- TASKS.md tasks/rollup.md` and edit only the current task row.
 - If work is related to another task, mention `Related: TASK-###` in merge notes instead of editing the other task.
 - If any file outside the assigned section changes, note the path and reason in the task's `tasks/rollup.md` row.
 - Active Board rows are newest-first: add new task rows directly below the table header, above older task rows.
@@ -34,6 +36,7 @@ Use `TASKS.md` for live task status. Use `tasks/rollup.md` for compact task-owne
 
 | Task | Section | Scope | Owner / branch / worktree | Status | Merge notes |
 |---|---|---|---|---|---|
+| TASK-010 | Docs / Governance | Make visible-checkout `TASKS.md` and `tasks/rollup.md` the live coordination source; clarify stale worktree snapshot handling | Branch `agent/TASK-010-live-rollup-coordination`; commit `391f233`; merged by `agent/MERGE-002-task-010-live-rollup-coordination` | merged | Accepted in `MERGE-002`; validation and proof recorded in `proof.md`. |
 | TASK-007 | General / Docs and Runtime | Deprecate old AI STUFF Rubicon folders and update mirror env defaults; strengthen acceptance/validation proof rules; add newest-first table rules | Branch `agent/TASK-007-docs-runtime`; merged by `agent/MERGE-001-task-007-docs-runtime` | merged | Accepted in `MERGE-001`; validation and proof recorded in `proof.md`. |
 | TASK-001 | Governance | Multi-agent guardrails: worktree flow, landing scripts/hooks, build lock, Latest off-main behavior | Legacy landed branch; no active worktree | merged | Landed before `MERGE-###`; see `WORKLOG.md`. |
 | TASK-002 | Brief / Godel live news | Breaking-banner-only Godel watcher and reader test coverage | Landed before compact rollup; no active owner | merged | Already landed; do not re-merge. Compact detail is in `tasks/rollup.md`. |

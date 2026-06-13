@@ -7,22 +7,25 @@ Use this only when the user asks to merge or push. Read only the relevant sectio
 Do not merge by checking out `main` in the live folder. The landing script uses a temporary integration worktree.
 Do not sweep unrelated dirty files.
 Do not hide duplicate task wording, stale task IDs, or colliding final acceptance rows.
+Live `TASKS.md` and `tasks/rollup.md` rows are selection inputs from the visible local Rubicon checkout at `C:\Users\charl\Desktop\Rubicon\spx-spread-replay-tracker`, not from task branch/worktree copies.
 Do not add to, summarize, rewrite, or delete rollup entries. If rollup conflicts appear during integration, preserve every section-agent entry.
+Do not let stale task-branch copies of `TASKS.md` or `tasks/rollup.md` overwrite live coordination rows.
 Do not use `memory/*.md` for raw task notes, validation proof, or low-level change logs.
 Only the merge agent writes `WORKLOG.md` summaries. It may use subagents if useful.
 `WORKLOG.md` remains a polished summary, not a raw ledger.
 The merge agent may edit and reorganize `memory/*.md` only for high-level decisions or durable project memory, after verifying every change.
 The merge agent may update `validation.md` only when the validation policy itself needs to change.
+During integration, preserve live rows and reconcile only the accepted final ledger state into the final merge branch.
 
-1. Read fresh: `AGENTS.md`, `codebase.md`, `validation.md`, `acceptance.md`, `proof.md`, `TASKS.md`, `tasks/rollup.md`, the top of `WORKLOG.md`, and the relevant `memory/*.md`.
-2. Select `TASKS.md` rows with status `ready_for_merge`, unless the user names specific task IDs.
-3. For each selected task, inspect the `TASKS.md` row and matching `tasks/rollup.md` row for branch/worktree, commit hash or merge note, files changed, validation, blockers/risks, merge notes, and `Out-of-section changes`. Skip tasks with blockers, missing commits, or missing validation unless the user explicitly approves.
+1. Read fresh from the visible local Rubicon checkout: `AGENTS.md`, `codebase.md`, `validation.md`, `acceptance.md`, `proof.md`, live `TASKS.md`, live `tasks/rollup.md`, the top of `WORKLOG.md`, and the relevant `memory/*.md`.
+2. Select live `TASKS.md` rows with status `ready_for_merge`, unless the user names specific task IDs.
+3. For each selected task, inspect the live `TASKS.md` row and matching live `tasks/rollup.md` row for branch/worktree, commit hash or merge note, files changed, validation, blockers/risks, merge notes, and `Out-of-section changes`. Skip tasks with blockers, missing commits, or missing validation unless the user explicitly approves.
 4. Create or use one final merge branch/worktree from `origin/main`; this is the only branch that receives selected task work.
-5. For each selected task, run `git status` in its task worktree, then integrate it into the final merge branch/worktree one at a time. Resolve conflicts intentionally.
+5. For each selected task, run `git status` in its task worktree, then integrate it into the final merge branch/worktree one at a time. If the task branch includes `TASKS.md` or `tasks/rollup.md`, compare those snapshot rows against the live rows and keep the live coordination state. Resolve conflicts intentionally.
 6. Run validation from `validation.md`. Use `npm run validate:mvp` when integrated changes touch shipped behavior and no other build is active.
 7. After validation is sufficient, update final ledgers in this order: assign the next `MERGE-###` and update `acceptance.md` with every included `TASK-###`, prepend `WORKLOG.md` with the `MERGE-###`, then add compact proof to `proof.md`.
 8. Update `memory/*.md` only for high-level decisions or durable project memory. Double-check every memory change against code/docs/git/runtime evidence before making it, and add a date + `MERGE-###` note to that memory file's changelog.
-9. Mark integrated rows `merged` in `TASKS.md` and add the final `MERGE-###` to the matching `tasks/rollup.md` rows without rewriting owner notes.
+9. Mark integrated rows `merged` in the final merge branch's `TASKS.md` and add the final `MERGE-###` to the matching `tasks/rollup.md` rows without rewriting owner notes or reintroducing stale task-worktree snapshots.
 10. Commit only integrated files on the final merge branch.
 11. For a local merge without push, use `npm run land -- --branch <final-merge-branch>`.
 
@@ -41,7 +44,7 @@ git fetch origin main
 git switch main
 git pull --ff-only origin main
 ```
-Do not use reset, force checkout, or stash. If the visible checkout is dirty, stop and report the dirty files instead of switching branches.
+Do not use reset, force checkout, or stash. If the visible checkout is dirty, including live coordination edits in `TASKS.md` or `tasks/rollup.md`, stop and report the dirty files instead of switching branches or overwriting them.
 5. Clean up only the exact final merge and landing worktrees from this push run, after proving each one is safe. Run cleanup from the visible local Rubicon checkout, not from inside a worktree being removed:
 ```powershell
 git worktree list --porcelain

@@ -7,6 +7,8 @@ import {
   AlertTriangle,
   ArrowRight,
   BarChart3,
+  Bell,
+  BellRing,
   BookOpen,
   CalendarDays,
   CheckCircle2,
@@ -29,7 +31,7 @@ import {
   Trash2,
 } from "lucide-react";
 import type { DailySummary, DailySyncStatusResult, DailySyncStepStatus, ReplayPayload, SourceHealth, SpreadMark, SpreadSpeedPayload, SpxBar, SpxLiveBarsLiveStatus, TrackerSnapshot, TradeRecord, WalletSnapshot } from "../shared/types";
-import { fetchDailySyncStatus, fetchLiveSpreadSpeed, fetchLiveSpreadSpeedStatus, fetchReplay, fetchSpreadSpeed, fetchTracker, refreshGoogleSnapshot, runDailyOptionPull, runDailySync, saveTradeJournalSnapshot, startLiveSpreadSpeed, stopLiveSpreadSpeed } from "./api";
+import { fetchDailySyncStatus, fetchLiveSpreadSpeed, fetchLiveSpreadSpeedStatus, fetchReplay, fetchSpreadSpeed, fetchTracker, refreshGoogleSnapshot, runDailyOptionPull, runDailySync, saveTradeJournalSnapshot, startLiveSpreadSpeed, stopLiveSpreadSpeed, triggerJournalReviewDesktopAlert } from "./api";
 import { previousTradingSessionDate, rangePresets, tradesInRange, type RangeId } from "./dateRanges";
 import { formatCurrency, formatNumber, formatPercent, formatSignedCurrency } from "./format";
 import { buildDailyReview, REPLAY_SPEEDS, summarizeTrades } from "./stats";
@@ -73,6 +75,8 @@ import {
   type JournalStatus,
   type TradeJournalEntry,
 } from "./tradeJournal";
+import { journalQaAnswerValue, journalQaPatchForAnswer, journalQaStepsForTrade, type JournalQaStep } from "./journalQa";
+import { journalReviewReminderDecision } from "./journalReviewReminder";
 import { ReplayCharts } from "./components/ReplayCharts";
 import { ReviewEntryExitChart } from "./components/ReviewEntryExitChart";
 import { useSpxMaContext } from "./useSpxMaContext";
@@ -90,8 +94,13 @@ const AUTO_IMPORT_REFRESH_MS = 60_000;
 const DAILY_SYNC_STATUS_REFRESH_MS = 60_000;
 const DAILY_SYNC_RUNNING_STATUS_REFRESH_MS = 5_000;
 const ACCEPTED_PULL_ISSUE_DATES_KEY = "rubicon.acceptedPullIssueDates.v1";
+const JOURNAL_QA_ENABLED_KEY = "rubicon.journalQuestionsEnabled.v1";
+const JOURNAL_REVIEW_ALERTS_ARMED_KEY = "rubicon.journalReviewAlertsArmed.v1";
+const JOURNAL_REVIEW_LAST_NOTIFIED_DATE_KEY = "rubicon.journalReviewLastNotifiedDate.v1";
 const REVIEW_CHART_INTERVALS = [1, 2, 5, 15, 30] as const;
 type ReviewChartInterval = (typeof REVIEW_CHART_INTERVALS)[number];
+type JournalQaStartRequest = { token: number; tradeId: string };
+type JournalReviewPrompt = { date: string; firstTradeId: string; unreviewedCount: number };
 const JOURNAL_EMOTIONS: JournalEmotion[] = ["Focused", "Calm", "FOMO", "Hesitant", "Impulsive"];
 const JOURNAL_GRADES: JournalGrade[] = ["A", "B", "C", "D", "F"];
 const JOURNAL_SETUP_OPTIONS = [
@@ -141,6 +150,15 @@ function App() {
   const [morningLiveStatus, setMorningLiveStatus] = useState<SpxLiveBarsLiveStatus | null>(null);
   const [morningLiveBusy, setMorningLiveBusy] = useState(false);
   const [journalEntries, setJournalEntries] = useState<Record<string, TradeJournalEntry>>(readJournalEntriesFromStorage);
+  const [journalQuestionsEnabled, setJournalQuestionsEnabled] = useState(() => readBooleanFromStorage(JOURNAL_QA_ENABLED_KEY, true));
+  const [journalReviewAlertsArmed, setJournalReviewAlertsArmed] = useState(() =>
+    readBooleanFromStorage(JOURNAL_REVIEW_ALERTS_ARMED_KEY, true),
+  );
+  const [journalReviewLastNotifiedDate, setJournalReviewLastNotifiedDate] = useState(() =>
+    readStringFromStorage(JOURNAL_REVIEW_LAST_NOTIFIED_DATE_KEY),
+  );
+  const [journalReviewPrompt, setJournalReviewPrompt] = useState<JournalReviewPrompt | null>(null);
+  const [journalQaStartRequest, setJournalQaStartRequest] = useState<JournalQaStartRequest | null>(null);
   const [acceptedPullIssueDates, setAcceptedPullIssueDates] = useState<Set<string>>(readAcceptedPullIssueDatesFromStorage);
   const [journalSelectedTradeId, setJournalSelectedTradeId] = useState<string | undefined>();
   const replayIntentRef = useRef({ playing: false, replayIndex: 0, replayMode: false });
@@ -151,6 +169,42 @@ function App() {
       console.warn("Could not save journal snapshot for Codex automation.", nextError);
     });
   }, [journalEntries]);
+
+  useEffect(() => {
+    if (!snapshot) {
+      return;
+    }
+
+    const maybePromptForJournalReview = () => {
+      const decision = journalReviewReminderDecision({
+        armed: journalReviewAlertsArmed,
+        entries: journalEntries,
+        lastNotifiedDate: journalReviewLastNotifiedDate,
+        latestTradeDate: snapshot.latestTradeDate,
+        trades: snapshot.trades,
+      });
+      if (!decision.shouldNotify || !decision.firstTradeId) {
+        return;
+      }
+
+      setJournalReviewLastNotifiedDate(decision.date);
+      writeStringToStorage(JOURNAL_REVIEW_LAST_NOTIFIED_DATE_KEY, decision.date);
+      setJournalReviewPrompt({
+        date: decision.date,
+        firstTradeId: decision.firstTradeId,
+        unreviewedCount: decision.unreviewedCount,
+      });
+      void triggerJournalReviewDesktopAlert({
+        body: `${decision.unreviewedCount} trade${decision.unreviewedCount === 1 ? "" : "s"} need journal review`,
+        detail: `${decision.date} after-close review`,
+        title: "Journal review ready",
+      }).catch(() => undefined);
+    };
+
+    maybePromptForJournalReview();
+    const interval = window.setInterval(maybePromptForJournalReview, 30_000);
+    return () => window.clearInterval(interval);
+  }, [journalEntries, journalReviewAlertsArmed, journalReviewLastNotifiedDate, snapshot]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -598,6 +652,41 @@ function App() {
     });
   }
 
+  function setJournalQuestionsEnabledFromApp(next: boolean) {
+    setJournalQuestionsEnabled(next);
+    writeBooleanToStorage(JOURNAL_QA_ENABLED_KEY, next);
+    if (next && journalSelectedTradeId) {
+      setJournalQaStartRequest({ token: Date.now(), tradeId: journalSelectedTradeId });
+    }
+  }
+
+  function toggleJournalReviewAlerts() {
+    setJournalReviewAlertsArmed((current) => {
+      const next = !current;
+      writeBooleanToStorage(JOURNAL_REVIEW_ALERTS_ARMED_KEY, next);
+      if (!next) {
+        setJournalReviewPrompt(null);
+      }
+      return next;
+    });
+  }
+
+  function openJournalFromReminder(prompt: JournalReviewPrompt, startQuestions: boolean) {
+    setSelectedDate(prompt.date);
+    setCustomDate(prompt.date);
+    setRange("custom");
+    setSelectedTradeId(prompt.firstTradeId);
+    setSelectedSpreadKey(undefined);
+    setJournalSelectedTradeId(prompt.firstTradeId);
+    setPortion("replay");
+    setView("journal");
+    setJournalReviewPrompt(null);
+    if (startQuestions) {
+      setJournalQuestionsEnabledFromApp(true);
+      setJournalQaStartRequest({ token: Date.now(), tradeId: prompt.firstTradeId });
+    }
+  }
+
   async function refreshGoogleSnapshotFromApp() {
     if (googleSnapshotRefreshing) {
       return;
@@ -818,6 +907,15 @@ function App() {
         </div>
       </header>
 
+      {journalReviewPrompt && (
+        <JournalReviewPromptBanner
+          prompt={journalReviewPrompt}
+          onDismiss={() => setJournalReviewPrompt(null)}
+          onOpenJournal={() => openJournalFromReminder(journalReviewPrompt, false)}
+          onStartQuestions={() => openJournalFromReminder(journalReviewPrompt, true)}
+        />
+      )}
+
       {portion === "replay" && (
         <section className="replay-subheader" aria-label="Replay workspace">
           <div className="morning-screen-tabs replay-screen-tabs" role="tablist" aria-label="Replay workspace view">
@@ -931,6 +1029,9 @@ function App() {
           dateIssueBadges={dateIssueBadges}
           acceptedIssueDates={acceptedIssueDates}
           entries={journalEntries}
+          journalQaStartRequest={journalQaStartRequest}
+          journalQuestionsEnabled={journalQuestionsEnabled}
+          journalReviewAlertsArmed={journalReviewAlertsArmed}
           onDeleteEntry={deleteJournalEntry}
           onOpenDailyReview={() => setView("review")}
           onReplayTrade={(trade) => {
@@ -943,6 +1044,7 @@ function App() {
             setView("replay");
           }}
           onSaveEntry={persistJournalEntry}
+          onSetJournalQuestionsEnabled={setJournalQuestionsEnabledFromApp}
           onSelectDate={(date) => {
             setSelectedDate(date);
             setCustomDate(date);
@@ -955,6 +1057,7 @@ function App() {
             setSelectedSpreadKey(undefined);
             setJournalSelectedTradeId(trade.id);
           }}
+          onToggleJournalReviewAlerts={toggleJournalReviewAlerts}
           selectedDate={selectedDate}
           selectedTradeId={journalSelectedTradeId ?? selectedTrade?.id}
           trades={tradesForSelectedDate}
@@ -1181,18 +1284,57 @@ function App() {
   );
 }
 
+function JournalReviewPromptBanner({
+  onDismiss,
+  onOpenJournal,
+  onStartQuestions,
+  prompt,
+}: {
+  onDismiss: () => void;
+  onOpenJournal: () => void;
+  onStartQuestions: () => void;
+  prompt: JournalReviewPrompt;
+}) {
+  const tradeLabel = `${prompt.unreviewedCount} trade${prompt.unreviewedCount === 1 ? "" : "s"}`;
+  return (
+    <section className="journal-review-prompt" role="alert">
+      <BellRing size={18} />
+      <div>
+        <b>Journal review ready</b>
+        <span>{prompt.date} - {tradeLabel} to review</span>
+      </div>
+      <button className="review-action-button" onClick={onStartQuestions} type="button">
+        <ClipboardList size={15} />
+        Start Questions
+      </button>
+      <button className="review-action-button secondary" onClick={onOpenJournal} type="button">
+        <BookOpen size={15} />
+        Open Journal
+      </button>
+      <button aria-label="Dismiss journal review reminder" className="icon-button" onClick={onDismiss} type="button">
+        <CircleX size={16} />
+      </button>
+    </section>
+  );
+}
+
 function JournalScreen({
   acceptedIssueDates,
   allTrades,
   availableDates,
   dateIssueBadges,
   entries,
+  journalQaStartRequest,
+  journalQuestionsEnabled,
+  journalReviewAlertsArmed,
   onDeleteEntry,
   onOpenDailyReview,
   onReplayTrade,
   onSaveEntry,
+  onSetJournalQuestionsEnabled,
   onSelectDate,
   onSelectTrade,
+  onToggleJournalReviewAlerts,
   selectedDate,
   selectedTradeId,
   trades,
@@ -1202,18 +1344,28 @@ function JournalScreen({
   availableDates: string[];
   dateIssueBadges: Map<string, DateIssueBadge>;
   entries: Record<string, TradeJournalEntry>;
+  journalQaStartRequest: JournalQaStartRequest | null;
+  journalQuestionsEnabled: boolean;
+  journalReviewAlertsArmed: boolean;
   onDeleteEntry: (tradeId: string) => void;
   onOpenDailyReview: () => void;
   onReplayTrade: (trade: TradeRecord) => void;
   onSaveEntry: (entry: TradeJournalEntry) => void;
+  onSetJournalQuestionsEnabled: (enabled: boolean) => void;
   onSelectDate: (date: string) => void;
   onSelectTrade: (trade: TradeRecord) => void;
+  onToggleJournalReviewAlerts: () => void;
   selectedDate: string;
   selectedTradeId?: string;
   trades: TradeRecord[];
 }) {
   const [draft, setDraft] = useState<TradeJournalEntry | null>(null);
   const [saveStatus, setSaveStatus] = useState<"idle" | "draft" | "reviewed">("idle");
+  const [qaActive, setQaActive] = useState(true);
+  const [qaAnswer, setQaAnswer] = useState("");
+  const [qaHandledStartToken, setQaHandledStartToken] = useState<number | null>(null);
+  const [qaStepIndex, setQaStepIndex] = useState(0);
+  const [prevQaAnswerKey, setPrevQaAnswerKey] = useState("");
   const sortedTrades = useMemo(() => sortTradesByEntryTime(trades), [trades]);
   const selectedTrade = useMemo(() => selectTradeByIdOrFirst(sortedTrades, selectedTradeId), [selectedTradeId, sortedTrades]);
   const currentEntry = selectedTrade ? entries[selectedTrade.id] : undefined;
@@ -1231,14 +1383,36 @@ function JournalScreen({
   const [prevSelectedTrade, setPrevSelectedTrade] = useState<TradeRecord | null>(null);
   const [prevCurrentEntry, setPrevCurrentEntry] = useState<TradeJournalEntry | undefined>(undefined);
   if (prevSelectedTrade !== selectedTrade || prevCurrentEntry !== currentEntry) {
+    const selectedTradeChanged = prevSelectedTrade !== selectedTrade;
     setPrevSelectedTrade(selectedTrade);
     setPrevCurrentEntry(currentEntry);
     if (selectedTrade) {
       setDraft(currentEntry ?? defaultJournalEntry(selectedTrade));
       setSaveStatus("idle");
+      if (selectedTradeChanged) {
+        setQaActive(journalQuestionsEnabled);
+        setQaStepIndex(0);
+      }
     } else {
       setDraft(null);
+      setQaActive(false);
     }
+  }
+
+  const qaSteps = useMemo(() => selectedTrade ? journalQaStepsForTrade(selectedTrade) : [], [selectedTrade]);
+  const currentQaStep = qaSteps[Math.min(qaStepIndex, Math.max(0, qaSteps.length - 1))] ?? null;
+  const qaAnswerKey = selectedTrade && currentQaStep ? `${selectedTrade.id}:${currentQaStep.id}:${currentQaStep.aspectKey ?? ""}` : "";
+  if (prevQaAnswerKey !== qaAnswerKey) {
+    setPrevQaAnswerKey(qaAnswerKey);
+    setQaAnswer(selectedTrade && draft && currentQaStep ? journalQaAnswerValue(draft, currentQaStep) : "");
+  }
+  if (!journalQuestionsEnabled && qaActive) {
+    setQaActive(false);
+  }
+  if (journalQaStartRequest && qaHandledStartToken !== journalQaStartRequest.token && selectedTrade?.id === journalQaStartRequest.tradeId) {
+    setQaActive(true);
+    setQaStepIndex(0);
+    setQaHandledStartToken(journalQaStartRequest.token);
   }
 
   function updateDraft(patch: Partial<TradeJournalEntry>) {
@@ -1283,6 +1457,36 @@ function JournalScreen({
         onSelectTrade(nextTrade);
       }
     }
+  }
+
+  function saveGuidedAnswer(step: JournalQaStep, answer: string | boolean | number) {
+    if (!selectedTrade || !draft) {
+      return;
+    }
+    const patch = journalQaPatchForAnswer(draft, step, answer);
+    const status: JournalStatus = draft.status === "reviewed" ? "reviewed" : "draft";
+    const saved = mergeJournalEntry(selectedTrade, currentEntry, { ...draft, ...patch, status }, new Date().toISOString());
+    onSaveEntry(saved);
+    setDraft(saved);
+    setSaveStatus(status === "reviewed" ? "reviewed" : "draft");
+    advanceGuidedQuestions();
+  }
+
+  function advanceGuidedQuestions() {
+    if (qaStepIndex >= qaSteps.length - 1) {
+      setQaActive(false);
+      return;
+    }
+    setQaStepIndex((current) => current + 1);
+  }
+
+  function cancelGuidedQuestions() {
+    setQaActive(false);
+  }
+
+  function restartGuidedQuestions() {
+    setQaActive(true);
+    setQaStepIndex(0);
   }
 
   function clearJournalEntry() {
@@ -1334,6 +1538,28 @@ function JournalScreen({
             <h2>{selectedDate} review queue</h2>
           </div>
           <div className="journal-hero-actions">
+            <button
+              className={`review-action-button secondary ${journalQuestionsEnabled ? "active" : ""}`}
+              onClick={() => {
+                const nextEnabled = !journalQuestionsEnabled;
+                onSetJournalQuestionsEnabled(nextEnabled);
+                if (nextEnabled) {
+                  restartGuidedQuestions();
+                }
+              }}
+              type="button"
+            >
+              <ClipboardList size={16} />
+              {journalQuestionsEnabled ? "Questions On" : "Questions Off"}
+            </button>
+            <button
+              className={`review-action-button secondary ${journalReviewAlertsArmed ? "active" : ""}`}
+              onClick={onToggleJournalReviewAlerts}
+              type="button"
+            >
+              {journalReviewAlertsArmed ? <BellRing size={16} /> : <Bell size={16} />}
+              {journalReviewAlertsArmed ? "Review Alerts On" : "Review Alerts Off"}
+            </button>
             <button className="review-action-button" disabled={!selectedTrade} onClick={() => selectedTrade && onReplayTrade(selectedTrade)} type="button">
               <Play size={16} />
               Replay Trade
@@ -1413,6 +1639,21 @@ function JournalScreen({
                   </div>
                   <span className={`journal-status-pill ${journalStatus}`}>{journalStatusLabel(journalStatus)}</span>
                 </div>
+
+                {journalQuestionsEnabled && (
+                  <JournalQaPanel
+                    active={qaActive}
+                    answer={qaAnswer}
+                    onAnswerChange={setQaAnswer}
+                    onCancel={cancelGuidedQuestions}
+                    onRestart={restartGuidedQuestions}
+                    onSkip={advanceGuidedQuestions}
+                    onSubmit={(answer) => currentQaStep && saveGuidedAnswer(currentQaStep, answer)}
+                    step={currentQaStep}
+                    stepIndex={qaStepIndex}
+                    total={qaSteps.length}
+                  />
+                )}
 
                 <div className="journal-editor-grid">
                   <label className="journal-field">
@@ -1635,6 +1876,120 @@ function JournalScreen({
           </aside>
         </div>
       </section>
+    </section>
+  );
+}
+
+function JournalQaPanel({
+  active,
+  answer,
+  onAnswerChange,
+  onCancel,
+  onRestart,
+  onSkip,
+  onSubmit,
+  step,
+  stepIndex,
+  total,
+}: {
+  active: boolean;
+  answer: string;
+  onAnswerChange: (answer: string) => void;
+  onCancel: () => void;
+  onRestart: () => void;
+  onSkip: () => void;
+  onSubmit: (answer: string | boolean | number) => void;
+  step: JournalQaStep | null;
+  stepIndex: number;
+  total: number;
+}) {
+  if (!step || total <= 0) {
+    return null;
+  }
+
+  const displayIndex = Math.min(stepIndex, total - 1) + 1;
+  if (!active) {
+    return (
+      <section className="journal-qa-panel">
+        <div className="journal-qa-topline">
+          <span>Journal Questions</span>
+          <b>Paused</b>
+        </div>
+        <div className="journal-qa-actions">
+          <button className="review-action-button" onClick={onRestart} type="button">
+            <RefreshCcw size={15} />
+            Restart Questions
+          </button>
+        </div>
+      </section>
+    );
+  }
+
+  const typedAnswer = step.kind === "text" || step.kind === "textarea" || step.kind === "tags";
+  return (
+    <section className="journal-qa-panel">
+      <div className="journal-qa-topline">
+        <span>Journal Questions</span>
+        <b>Question {displayIndex} of {total}</b>
+      </div>
+      <label className="journal-qa-question" htmlFor={`journal-qa-${step.id}`}>
+        <span>{step.prompt}</span>
+        {step.kind === "textarea" ? (
+          <textarea
+            id={`journal-qa-${step.id}`}
+            maxLength={1200}
+            onChange={(event) => onAnswerChange(event.target.value)}
+            value={answer}
+          />
+        ) : step.kind === "text" || step.kind === "tags" ? (
+          <input
+            id={`journal-qa-${step.id}`}
+            maxLength={step.kind === "tags" ? 180 : 120}
+            onChange={(event) => onAnswerChange(event.target.value)}
+            placeholder={step.kind === "tags" ? "opening, chase, rule break" : undefined}
+            value={answer}
+          />
+        ) : null}
+      </label>
+      {step.kind === "boolean" && (
+        <div className="journal-qa-options" role="group" aria-label={step.prompt}>
+          <button aria-pressed={answer === "yes"} onClick={() => onSubmit(true)} type="button">Yes</button>
+          <button aria-pressed={answer === "no"} onClick={() => onSubmit(false)} type="button">No</button>
+        </div>
+      )}
+      {(step.kind === "choice" || step.kind === "score") && (
+        <div className="journal-qa-options" role="group" aria-label={step.prompt}>
+          {(step.options ?? []).map((option) => (
+            <button
+              aria-pressed={answer === option}
+              key={option}
+              onClick={() => onSubmit(option)}
+              type="button"
+            >
+              {option}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="journal-qa-actions">
+        {typedAnswer && (
+          <button className="review-action-button" onClick={() => onSubmit(answer)} type="button">
+            <ArrowRight size={15} />
+            Save & Next
+          </button>
+        )}
+        <button className="review-action-button secondary" onClick={onSkip} type="button">
+          Skip
+        </button>
+        <button className="review-action-button secondary" onClick={onRestart} type="button">
+          <RefreshCcw size={15} />
+          Restart
+        </button>
+        <button className="review-action-button secondary" onClick={onCancel} type="button">
+          <CircleX size={15} />
+          Cancel
+        </button>
+      </div>
     </section>
   );
 }
@@ -3101,6 +3456,41 @@ function writeJournalEntriesToStorage(entries: Record<string, TradeJournalEntry>
     return;
   }
   window.localStorage.setItem(JOURNAL_STORAGE_KEY, serializeJournalEntries(entries));
+}
+
+function readBooleanFromStorage(key: string, fallback: boolean): boolean {
+  if (typeof window === "undefined") {
+    return fallback;
+  }
+  const raw = window.localStorage.getItem(key);
+  if (raw === "true") {
+    return true;
+  }
+  if (raw === "false") {
+    return false;
+  }
+  return fallback;
+}
+
+function writeBooleanToStorage(key: string, value: boolean) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.setItem(key, String(value));
+}
+
+function readStringFromStorage(key: string): string | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  return window.localStorage.getItem(key);
+}
+
+function writeStringToStorage(key: string, value: string) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.setItem(key, value);
 }
 
 function readAcceptedPullIssueDatesFromStorage(): Set<string> {

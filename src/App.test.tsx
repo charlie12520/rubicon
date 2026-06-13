@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DailySyncStatusResult, DailySyncStep, ReplayPayload, SpreadSpeedPayload, TrackerSnapshot, TradeRecord } from "../shared/types";
 import App from "./App";
-import { fetchDailySyncStatus, fetchReplay, fetchSpreadSpeed, fetchTracker, runDailyOptionPull, saveTradeJournalSnapshot } from "./api";
+import { fetchDailySyncStatus, fetchReplay, fetchSpreadSpeed, fetchTracker, runDailyOptionPull, saveTradeJournalSnapshot, triggerJournalReviewDesktopAlert } from "./api";
 
 vi.mock("./api", () => ({
   fetchDailySyncStatus: vi.fn(),
@@ -15,6 +15,7 @@ vi.mock("./api", () => ({
   runDailyOptionPull: vi.fn(),
   runDailySync: vi.fn(),
   saveTradeJournalSnapshot: vi.fn(),
+  triggerJournalReviewDesktopAlert: vi.fn(),
   // The Morning live Signal-Stack feed polls these on mount; resolve to inert
   // values so the (mocked) MorningDashboard render isn't affected.
   fetchLiveSpreadSpeed: vi.fn(async () => ({
@@ -90,6 +91,7 @@ const fetchSpreadSpeedMock = vi.mocked(fetchSpreadSpeed);
 const fetchDailySyncStatusMock = vi.mocked(fetchDailySyncStatus);
 const runDailyOptionPullMock = vi.mocked(runDailyOptionPull);
 const saveTradeJournalSnapshotMock = vi.mocked(saveTradeJournalSnapshot);
+const triggerJournalReviewDesktopAlertMock = vi.mocked(triggerJournalReviewDesktopAlert);
 
 describe("App Replay state routing", () => {
   beforeEach(() => {
@@ -106,6 +108,11 @@ describe("App Replay state routing", () => {
       count: 0,
       generatedAt: "2026-06-02T12:00:00.000Z",
       message: "saved",
+      ok: true,
+    });
+    triggerJournalReviewDesktopAlertMock.mockResolvedValue({
+      generatedAt: "2026-06-02T12:00:00.000Z",
+      message: "sent",
       ok: true,
     });
     runDailyOptionPullMock.mockResolvedValue({
@@ -727,6 +734,47 @@ describe("App Replay state routing", () => {
     expect(screen.queryByRole("button", { name: /^Losers/i })).toBeNull();
     expect(screen.queryByText(/Mistake \/ leak/i)).toBeNull();
     expect(screen.queryByText(/Lesson \/ rule update/i)).toBeNull();
+  });
+
+  it("runs guided Journal questions by default and keeps answered fields when canceled", async () => {
+    fetchReplayMock.mockResolvedValue(replayPayloadFixture("2026-06-02"));
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("tab", { name: "Replay" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Journal" }));
+
+    await screen.findByRole("heading", { name: "Trades to Journal" });
+    const activePanel = screen.getByText("Journal Questions").closest("section");
+    if (!activePanel) {
+      throw new Error("Journal question panel not found");
+    }
+
+    expect(within(activePanel).getByText("Question 1 of 12")).toBeTruthy();
+    fireEvent.change(within(activePanel).getByLabelText("What setup or playbook was this?"), {
+      target: { value: "Opening drive fade" },
+    });
+    fireEvent.click(within(activePanel).getByRole("button", { name: "Save & Next" }));
+
+    await waitFor(() => {
+      const stored = JSON.parse(window.localStorage.getItem("spx-trade-journal-v1") ?? "{}") as Record<string, { setup?: string; thesis?: string }>;
+      expect(stored["trade-new-a"].setup).toBe("Opening drive fade");
+      expect(stored["trade-new-a"].thesis).toBe("");
+    });
+    expect(screen.getByText("Question 2 of 12")).toBeTruthy();
+
+    const nextPanel = screen.getByText("Journal Questions").closest("section");
+    if (!nextPanel) {
+      throw new Error("Journal question panel not found after save");
+    }
+    fireEvent.click(within(nextPanel).getByRole("button", { name: "Cancel" }));
+    expect(screen.getByText("Paused")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Restart Questions" }));
+    expect(screen.getByText("Question 1 of 12")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Questions On" }));
+    expect(screen.queryByText("Journal Questions")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Questions Off" }));
+    expect(screen.getByText("Question 1 of 12")).toBeTruthy();
   });
 });
 

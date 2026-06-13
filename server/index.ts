@@ -31,7 +31,7 @@ import { armIndexReconcileAutoRun } from "./indexReconcile.ts";
 import { loadMorningBrief, loadMorningLiveUpdates, resolveTc2000Artifact } from "./morningBrief.ts";
 import { loadMorningAiNotes } from "./morningAiNotes.ts";
 import { mergeTradeJournalSnapshot } from "./tradeJournalSnapshot.ts";
-import { showCalendarDesktopAlert, showLiveUpdateDesktopToast } from "./desktopAlert.ts";
+import { showCalendarDesktopAlert, showJournalReviewDesktopAlert, showLiveUpdateDesktopToast } from "./desktopAlert.ts";
 
 export const app = express();
 const port = Number(process.env.PORT ?? 5174);
@@ -509,6 +509,27 @@ app.post("/api/desktop-alert/live-update", (request, response) => {
   try {
     response.json(
       showLiveUpdateDesktopToast(
+        {
+          body: request.body?.body,
+          detail: request.body?.detail,
+          title: request.body?.title,
+        },
+        appRoot,
+      ),
+    );
+  } catch (error) {
+    response.status(400).json({
+      generatedAt: new Date().toISOString(),
+      message: error instanceof Error ? error.message : String(error),
+      ok: false,
+    });
+  }
+});
+
+app.post("/api/desktop-alert/journal-review", (request, response) => {
+  try {
+    response.json(
+      showJournalReviewDesktopAlert(
         {
           body: request.body?.body,
           detail: request.body?.detail,

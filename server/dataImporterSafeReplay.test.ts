@@ -202,6 +202,25 @@ describe("Replay safe default", () => {
       "utf8",
     );
     await fs.writeFile(
+      path.join(tabsDir, "IBKR_0DTE_SPX_Open_Interest.csv"),
+      [
+        "target_trade_date_et,expiration,right,strike,option_label,open_interest",
+        `${date},20260612,C,7430,SPXW 260612C07430000,125`,
+        `${date},20260612,P,7420,SPXW 260612P07420000,220`,
+      ].join("\n"),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(tabsDir, "IBKR_0DTE_SPX_Cumulative_Volume_Profile_5s.csv"),
+      [
+        "target_trade_date_et,timestamp_et,expiration,right,strike,option_label,bar_volume,cumulative_volume",
+        `${date},2026-06-12T09:30:00-04:00,20260612,C,7430,SPXW 260612C07430000,3,3`,
+        `${date},2026-06-12T09:30:00-04:00,20260612,P,7420,SPXW 260612P07420000,5,5`,
+        `${date},2026-06-12T09:30:05-04:00,20260612,C,7430,SPXW 260612C07430000,7,10`,
+      ].join("\n"),
+      "utf8",
+    );
+    await fs.writeFile(
       path.join(dayDir, "daily_sync_summary.json"),
       JSON.stringify({
         target_trade_date_et: date,
@@ -235,6 +254,32 @@ describe("Replay safe default", () => {
       expect(replay.spxBars).toHaveLength(2);
       expect(replay.spxBars[0]?.timestampEt).toBe("2026-06-12T09:30:00-04:00");
       expect(replay.spxBars[1]?.timestampEt).toBe("2026-06-12T15:59:55-04:00");
+      expect(replay.openInterest).toEqual([
+        { strike: 7420, right: "P", label: "SPXW 260612P07420000", openInterest: 220 },
+        { strike: 7430, right: "C", label: "SPXW 260612C07430000", openInterest: 125 },
+      ]);
+      expect(replay.volume).toEqual([
+        {
+          timestampEt: "2026-06-12T09:30:00-04:00",
+          label: "09:30",
+          time: Math.floor(Date.parse("2026-06-12T09:30:00-04:00") / 1000),
+          strike: 7420,
+          right: "P",
+          optionLabel: "SPXW 260612P07420000",
+          minuteVolume: 5,
+          cumulativeVolume: 5,
+        },
+        {
+          timestampEt: "2026-06-12T09:30:00-04:00",
+          label: "09:30",
+          time: Math.floor(Date.parse("2026-06-12T09:30:00-04:00") / 1000),
+          strike: 7430,
+          right: "C",
+          optionLabel: "SPXW 260612C07430000",
+          minuteVolume: 3,
+          cumulativeVolume: 3,
+        },
+      ]);
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }

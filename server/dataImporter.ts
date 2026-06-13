@@ -1725,10 +1725,44 @@ function yyyymmdd(date: string): string {
   return date.replaceAll("-", "");
 }
 
+function dateDigits(value: unknown): string {
+  const digits = String(value ?? "").replace(/\D/g, "");
+  return digits.length >= 8 ? digits.slice(0, 8) : "";
+}
+
+function rowExpiryOrTradeDate(row: CsvRow): string {
+  return dateDigits(firstString(
+    row.last_trade_date_or_contract_month,
+    row.expiration,
+    row.expiration_date,
+    row.target_trade_date_et,
+  ));
+}
+
+function rowHasSpxRoot(row: CsvRow): boolean {
+  const roots = [
+    row.symbol,
+    row.trading_class,
+    row.underlying,
+    row.underlying_symbol,
+  ].map((value) => String(value ?? "").trim().toUpperCase()).filter(Boolean);
+  return roots.length === 0 || roots.some((root) => root === "SPX" || root === "SPXW");
+}
+
+function rowHasOptionSideAndStrike(row: CsvRow): boolean {
+  const right = String(row.right ?? "").trim().toUpperCase();
+  return (right === "C" || right === "P") && toNumber(row.strike) > 0;
+}
+
 function isSpxOptionRow(row: CsvRow, date: string): boolean {
   const localSymbol = normalizeSymbol(row.local_symbol ?? "");
-  const expiry = String(row.last_trade_date_or_contract_month ?? "");
-  return localSymbol.startsWith("SPXW ") && (!expiry || expiry === yyyymmdd(date));
+  const expectedExpiry = yyyymmdd(date);
+  const rowExpiry = rowExpiryOrTradeDate(row);
+  if (localSymbol.startsWith("SPXW ")) {
+    return !rowExpiry || rowExpiry === expectedExpiry;
+  }
+
+  return rowExpiry === expectedExpiry && rowHasSpxRoot(row) && rowHasOptionSideAndStrike(row);
 }
 
 function isSpxSpreadTrade(trade: TradeRecord): boolean {

@@ -120,11 +120,15 @@ Drafted by user workflow request; final merge ID is assigned by the merge agent.
 MERGE-002 clarification:
 `TASKS.md` and `tasks/rollup.md` in `C:\Users\charl\Desktop\Rubicon\spx-spread-replay-tracker` are the authoritative live coordination files. Task worktree copies of those files are stale snapshots, proposed branch state, or merge artifacts; section agents update only their own visible-checkout rows, while implementation changes remain in task worktrees.
 
+MERGE-003 clarification:
+After validation passes, section agents stage explicit intended files and commit the task branch/worktree by default unless the user explicitly says not to commit, validation documents a blocking gap, or the work cannot be committed safely. Push agents may reconcile visible-checkout live-board dirt only when `TASKS.md` and `tasks/rollup.md` are the only dirty files and already match `origin/main`; otherwise the live rows are unlanded coordination state and must be reported. Refused-to-connect Rubicon server recovery is documented as a no-edit runbook that protects TWS, Godel, Edge, and live feed processes.
+
 ## Changelog
 
 Changelog rows are newest-first: add each new row directly below the table header.
 
 | Date | Merge | Notes |
 |---|---|---|
+| 2026-06-13 | MERGE-003 | Added commit-by-default task behavior, safe post-push live-board sync rules, and the no-edit Rubicon server recovery runbook. |
 | 2026-06-13 | MERGE-002 | Clarified that visible-checkout `TASKS.md` and `tasks/rollup.md` are live coordination truth; worktree copies are snapshots. |
 | 2026-06-13 | MERGE-001 | Established section memory baseline and newest-first changelog rule during TASK-007 docs/runtime merge. |

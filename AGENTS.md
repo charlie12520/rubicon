@@ -24,6 +24,7 @@ Live app safety:
 - Do not kill or restart the live `5174` server during market hours.
 - Kill only exact PIDs you started.
 - Do not touch TWS, the live server, or the Godel watcher unless the user asks.
+- If the Rubicon desktop app is open to "refused to connect" and the user asks for server recovery, follow `docs/runbooks/rubicon-server-recovery.md`: check `http://127.0.0.1:5174/api/health`, start only `scripts\serve-headless.vbs` via `wscript.exe` when nothing is listening, and do not create a task, edit files, change branches, or touch TWS/Godel/Edge/live feed processes for that runtime recovery.
 
 If the visible conversation resumes from a compacted summary before the latest user message, reread `AGENTS.md` before continuing.
 
@@ -33,6 +34,7 @@ Live coordination files:
 - Worktree copies of `TASKS.md` and `tasks/rollup.md` are stale snapshots, proposed branch state, or merge artifacts; do not use them as live coordination truth.
 - Before editing live rows, run `git -C C:\Users\charl\Desktop\Rubicon\spx-spread-replay-tracker status --porcelain=v1 --branch`; stop if unrelated dirty files exist.
 - If only `TASKS.md` / `tasks/rollup.md` are dirty, inspect `git -C C:\Users\charl\Desktop\Rubicon\spx-spread-replay-tracker diff -- TASKS.md tasks/rollup.md` and edit only the current task row.
+- After a successful push, merge/push agents may sync a visible checkout that is dirty only in live board files when those files already match `origin/main`; follow `merge_push.md` and do not use reset, stash, or force checkout.
 
 Multi-agent section workflow:
 1. The user's prompt is the task assignment. If the prompt asks you to merge or push, stop this workflow and read `merge_push.md`.
@@ -55,9 +57,9 @@ Set-Location $worktree
 9. If any file outside the assigned section changes, immediately write the file path and reason in your task's `Out-of-section changes` cell in the visible checkout's `tasks/rollup.md`.
 10. Before committing, choose validation from `validation.md` or the task row, run the narrowest meaningful check, then run `git status`.
 11. Stage explicit files only. Do not use `git add -A`.
-12. A task is not complete until it is ready to commit: validation has run or the gap is documented, `git status` has been checked, intended files are staged or explicitly listed as unstaged, and unrelated files are excluded.
-13. Use `ready_for_commit` in `TASKS.md` when the work is validated but still needs user-approved commit. Use `ready_for_merge` only after a committed task branch/worktree is ready for the merge agent.
+12. A task is not complete until validation has run or the gap is documented, `git status` has been checked, intended files are committed or explicitly blocked from commit by the user's instructions, and unrelated files are excluded.
+13. Use `ready_for_commit` in `TASKS.md` only when validation is complete but the user explicitly said not to commit yet, a commit is blocked, or the work cannot be committed safely. Use `ready_for_merge` after the committed task branch/worktree is ready for the merge agent.
 14. In the final message for a completed task, explicitly state that the task is ready to commit or ready to merge, or explain exactly what blocks readiness.
-15. Commit only if the user asks. Before committing, prompt the user for confirmation.
+15. After validation passes, stage explicit intended files and commit the task branch/worktree without asking for confirmation, unless the user explicitly says not to commit or validation documents a blocking gap. Never use `git add -A`.
 16. After creating and entering the assigned worktree, do not push, merge, rebase, reset, or switch branches unless the user asks.
 17. In your final message, explicitly confirm that the visible checkout's `TASKS.md` and your own visible checkout `tasks/rollup.md` row are current.

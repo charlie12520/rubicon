@@ -6,7 +6,7 @@ import { asArray, asRecord, firstNumber, firstString, type JsonRecord } from "./
 export const RUBICON_TRACKER_SUMMARY_FILE = "rubicon_tracker_summary.json";
 
 const RUBICON_TRACKER_SUMMARY_SCHEMA = "rubicon-tracker-summary";
-const RUBICON_TRACKER_SUMMARY_VERSION = 4;
+const RUBICON_TRACKER_SUMMARY_VERSION = 5;
 const REQUIRED_PAYLOAD_TAB_COUNT = 1;
 
 type SummaryBuildContext = {
@@ -82,6 +82,7 @@ export function buildRubiconDailySummaryFromSyncSummary(local: JsonRecord, conte
   const spxPartition = asRecord(spx.target_partition);
   const optionIntraday = asRecord(local.ibkr_option_trades);
   const availability = asRecord(local.availability);
+  const localReviewStatus = asRecord(local.localReviewStatus);
   const availabilitySpx = asRecord(availability.spx_intraday);
   const availabilityTrades = asRecord(availability.trades_and_spreads);
   const availabilityTradeCounts = asRecord(availabilityTrades.counts);
@@ -230,6 +231,9 @@ export function buildRubiconDailySummaryFromSyncSummary(local: JsonRecord, conte
     spxIntradayBarSize: normalizeBarSize(firstString(spxPartition.bar_size, availabilitySpx.bar_size)),
     spxIntradayExpectedRows: spxExpectedRows,
     spxIntradayRowCount: spxRows,
+    reviewMode: firstString(availability.review_mode),
+    reviewReady: local.reviewReady === true || local.review_ready === true,
+    localReviewStatus: firstString(localReviewStatus.status, local.local_review_status),
     tradeStatus: firstString(trades.status, availabilityTrades.status) ?? "missing",
     ibkrEndpointExpectedCount: tradeConnections.length,
     ibkrEndpointConnectedCount: tradeConnections.filter((connection) => connection.connected === true).length,
@@ -344,6 +348,9 @@ export async function loadMissingRubiconDailySummary(dayDir: string): Promise<Da
     entryCount: 0,
     optionContractCount: 0,
     spxStatus: "missing",
+    reviewMode: "trade_review",
+    reviewReady: false,
+    localReviewStatus: "blocked",
     tradeStatus: "missing",
     optionIntradayStatus: "missing",
     availabilityStatus: "missing",

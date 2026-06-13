@@ -184,6 +184,111 @@ describe("Replay safe default", () => {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }
   });
+
+  it("serves SPX-only safe replay for market-data-only review days", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "rubicon-safe-replay-market-data-only-"));
+    const date = "2026-06-12";
+    const dayDir = path.join(tempRoot, "IBKR Equity History Pull", "data", "ibkr_trades", date);
+    const tabsDir = path.join(dayDir, "google_sheet_tab_csvs");
+    await fs.mkdir(tabsDir, { recursive: true });
+    await fs.writeFile(path.join(dayDir, "entries.csv"), "target_trade_date_et,account,perm_id,entry_sequence\n", "utf8");
+    await fs.writeFile(
+      path.join(tabsDir, "IBKR_Underlying_1m.csv"),
+      [
+        "target_trade_date_et,timestamp_utc,timestamp_et,symbol,open,high,low,close",
+        `${date},2026-06-12T13:30:00+00:00,2026-06-12T09:30:00-04:00,SPX,7410,7418,7409,7412`,
+        `${date},2026-06-12T19:59:55+00:00,2026-06-12T15:59:55-04:00,SPX,7430,7432,7428,7431`,
+      ].join("\n"),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(dayDir, "daily_sync_summary.json"),
+      JSON.stringify({
+        target_trade_date_et: date,
+        reviewReady: true,
+        localReviewStatus: { status: "market_data_only" },
+        availability: {
+          status: "ok",
+          review_mode: "market_data_only",
+          spx_intraday: { status: "ok", rows: 4680, bar_size: "5s" },
+          trades_and_spreads: {
+            status: "empty",
+            counts: { trade_count: 0, spread_count: 0, entry_count: 0, option_contract_count: 0 },
+          },
+        },
+        trades: { status: "empty", trade_count: 0, spread_count: 0, entry_count: 0, option_contract_count: 0 },
+      }),
+      "utf8",
+    );
+
+    process.env.AI_STUFF_ROOT = tempRoot;
+    vi.resetModules();
+
+    try {
+      const { loadReplayPayload } = await import("./dataImporter.ts");
+      const replay = await loadReplayPayload(date);
+
+      expect(replay.date).toBe(date);
+      expect(replay.selectedTradeId).toBeNull();
+      expect(replay.quickTrades).toEqual([]);
+      expect(replay.spreadMarks).toEqual([]);
+      expect(replay.spxBars).toHaveLength(2);
+      expect(replay.spxBars[0]?.timestampEt).toBe("2026-06-12T09:30:00-04:00");
+      expect(replay.spxBars[1]?.timestampEt).toBe("2026-06-12T15:59:55-04:00");
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps trade-review days with missing entries out of safe replay", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "rubicon-safe-replay-missing-entries-"));
+    const date = "2026-06-12";
+    const dayDir = path.join(tempRoot, "IBKR Equity History Pull", "data", "ibkr_trades", date);
+    const tabsDir = path.join(dayDir, "google_sheet_tab_csvs");
+    await fs.mkdir(tabsDir, { recursive: true });
+    await fs.writeFile(path.join(dayDir, "entries.csv"), "target_trade_date_et,account,perm_id,entry_sequence\n", "utf8");
+    await fs.writeFile(
+      path.join(tabsDir, "IBKR_Underlying_1m.csv"),
+      [
+        "target_trade_date_et,timestamp_utc,timestamp_et,symbol,open,high,low,close",
+        `${date},2026-06-12T13:30:00+00:00,2026-06-12T09:30:00-04:00,SPX,7410,7418,7409,7412`,
+      ].join("\n"),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(dayDir, "daily_sync_summary.json"),
+      JSON.stringify({
+        target_trade_date_et: date,
+        reviewReady: false,
+        localReviewStatus: { status: "blocked" },
+        availability: {
+          status: "incomplete",
+          review_mode: "trade_review",
+          spx_intraday: { status: "ok", rows: 4680, bar_size: "5s" },
+          trades_and_spreads: {
+            status: "ok",
+            counts: { trade_count: 2, spread_count: 0, entry_count: 0, option_contract_count: 0 },
+          },
+        },
+        trades: { status: "ok", trade_count: 2, spread_count: 0, entry_count: 0, option_contract_count: 0 },
+      }),
+      "utf8",
+    );
+
+    process.env.AI_STUFF_ROOT = tempRoot;
+    vi.resetModules();
+
+    try {
+      const { loadReplayPayload } = await import("./dataImporter.ts");
+      const replay = await loadReplayPayload(date);
+
+      expect(replay.date).toBe(date);
+      expect(replay.spxBars).toEqual([]);
+      expect(replay.quickTrades).toEqual([]);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
 });
 
 function csvCell(value: string): string {

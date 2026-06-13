@@ -1991,6 +1991,11 @@ async function buildReplaySafePayload(date: string): Promise<ReplayPayload> {
   };
 }
 
+async function allowsMarketDataOnlyReplay(date: string): Promise<boolean> {
+  const summary = await loadDailySummary(date);
+  return summary.reviewMode === "market_data_only" || summary.localReviewStatus === "market_data_only";
+}
+
 async function loadOrBuildReplaySafeState(date: string, options: { refresh?: boolean } = {}): Promise<ReplayPayload | null> {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     return null;
@@ -2006,7 +2011,8 @@ async function loadOrBuildReplaySafeState(date: string, options: { refresh?: boo
   }
 
   const payload = await buildReplaySafePayload(date);
-  if (!payload.spxBars.length || !payload.quickTrades.length) {
+  const allowSpxOnlyReplay = payload.quickTrades.length === 0 && (await allowsMarketDataOnlyReplay(date));
+  if (!payload.spxBars.length || (!payload.quickTrades.length && !allowSpxOnlyReplay)) {
     return null;
   }
 

@@ -337,6 +337,9 @@ export type DailySummary = {
   spxIntradayBarSize?: string;
   spxIntradayExpectedRows?: number;
   spxIntradayRowCount?: number;
+  reviewMode?: string;
+  reviewReady?: boolean;
+  localReviewStatus?: string;
   tradeStatus: string;
   ibkrEndpointExpectedCount?: number;
   ibkrEndpointConnectedCount?: number;
